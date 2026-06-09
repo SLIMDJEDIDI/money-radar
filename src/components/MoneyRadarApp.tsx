@@ -18,9 +18,14 @@ import {
   User,
   AlertTriangle,
   Coins,
-  Package
+  Package,
+  Settings,
+  Edit,
+  ArrowUpRight,
+  CheckCircle,
+  HelpCircle
 } from 'lucide-react';
-import { createMovement, reconcileHolder, createHolder, deleteHolder } from '../app/actions';
+import { createMovement, reconcileHolder, createHolder, deleteHolder, updateHolder, resetDatabaseToZero } from '../app/actions';
 
 interface Holder {
   id: string;
@@ -90,8 +95,18 @@ export default function MoneyRadarApp({
   const [activeTab, setActiveCategoryTab] = useState<'all' | 'wallets' | 'partners' | 'upcoming'>('all');
 
   // Modal Controllers
-  const [activeModal, setActiveModal] = useState<'movement' | 'transfer' | 'proof' | 'account' | null>(null);
+  const [activeModal, setActiveModal] = useState<'movement' | 'transfer' | 'proof' | 'account' | 'settings' | null>(null);
   
+  // Inline edit state inside settings directory
+  const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    emoji: '',
+    color: 'blue',
+    category: 'holder',
+    partnerType: 'person'
+  });
+
   // Movement & Transfer Form State
   const [formData, setFormData] = useState({
     amount: '',
@@ -164,7 +179,6 @@ export default function MoneyRadarApp({
           const timeline = data.movements.filter((m: any) => m.fromHolderId === updatedSelected.id || m.toHolderId === updatedSelected.id);
           setHolderMovements(timeline.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })));
         } else {
-          // If the holder was deleted
           setSelectedHolder(null);
         }
       }
@@ -241,18 +255,13 @@ export default function MoneyRadarApp({
     let toId = '';
 
     if (selectedHolder) {
-      // If we are looking at Ahmed (partner), we gave him money -> to Ahmed, from External/Wise
       if (selectedHolder.category === 'partner') {
         toId = selectedHolder.id;
         fromId = 'external';
-      } 
-      // If we are looking at Slim Cash (holder), we paid out of Slim Cash -> from Slim Cash, to External
-      else if (selectedHolder.category === 'holder') {
+      } else if (selectedHolder.category === 'holder') {
         fromId = selectedHolder.id;
         toId = 'external';
-      }
-      // If we are looking at Rent (upcoming), we paid Rent -> from External/Slim Cash, to Rent
-      else if (selectedHolder.category === 'upcoming' || selectedHolder.isUpcoming) {
+      } else if (selectedHolder.category === 'upcoming' || selectedHolder.isUpcoming) {
         toId = selectedHolder.id;
         fromId = 'external';
       }
@@ -275,7 +284,6 @@ export default function MoneyRadarApp({
     let toId = '';
 
     if (selectedHolder) {
-      // If we are looking at Slim Cash (holder), we move out of Slim Cash -> from Slim Cash
       if (selectedHolder.category === 'holder') {
         fromId = selectedHolder.id;
       } else {
@@ -295,19 +303,19 @@ export default function MoneyRadarApp({
   };
 
   // Erase/Delete Account Function
-  const handleEraseAccount = async () => {
-    if (!selectedHolder) return;
-    
+  const handleEraseAccount = async (id: string, name: string) => {
     const confirmDelete = window.confirm(
-      `⚠️ CRITICAL ERASE REQUEST:\n\nAre you sure you want to permanently erase "${selectedHolder.name}" and delete all its associated sub-wallets and transaction history from the cloud database?\n\nThis action is irreversible.`
+      `⚠️ ERASE ACCOUNT:\n\nAre you sure you want to permanently erase "${name}" and delete all its balances and transaction history?\n\nThis cannot be undone.`
     );
     
     if (!confirmDelete) return;
 
     startTransition(async () => {
-      const res = await deleteHolder(selectedHolder.id);
+      const res = await deleteHolder(id);
       if (res.success) {
-        setSelectedHolder(null);
+        if (selectedHolder?.id === id) {
+          setSelectedHolder(null);
+        }
         await refreshAppState();
       } else {
         alert(res.error || 'Failed to erase account.');
@@ -315,97 +323,59 @@ export default function MoneyRadarApp({
     });
   };
 
-  // Change reconciliation input value when currency changes
-  const handleReconcileCurrencyChange = (curr: string) => {
-    setReconcileCurrency(curr);
-    const currBalance = selectedHolder?.balances.find(b => b.currency === curr);
-    setReconcileVal((currBalance?.actualBalance ?? 0).toString());
+  // Trigger inline edit mode for an account inside Settings Directory
+  const handleStartInlineEdit = (holder: Holder) => {
+    setEditingHolderId(holder.id);
+    setEditFormData({
+      name: holder.name,
+      emoji: holder.emoji,
+      color: holder.color,
+      category: holder.category,
+      partnerType: holder.partnerType || 'person'
+    });
   };
 
-  // Submit Movement Form
-  const handleFormSubmit = async (e: React.FormEvent) => {
+  // Submit Inline Edit / Rename Form
+  const handleSaveInlineEdit = async (e: React.FormEvent, holderId: string) => {
     e.preventDefault();
-    if (!formData.amount) return;
+    if (!editFormData.name) return;
 
     const data = new FormData();
-    data.append('amount', formData.amount);
-    data.append('currency', formData.currency);
-    data.append('fromHolderId', formData.fromHolderId);
-    data.append('toHolderId', formData.toHolderId);
-    data.append('note', formData.note);
-    if (formData.photo) {
-      data.append('photo', formData.photo);
-    }
+    data.append('holderId', holderId);
+    data.append('name', editFormData.name);
+    data.append('emoji', editFormData.emoji);
+    data.append('color', editFormData.color);
+    data.append('category', editFormData.category);
+    data.append('partnerType', editFormData.partnerType);
 
     startTransition(async () => {
-      const res = await createMovement(data);
+      const res = await updateHolder(data);
       if (res.success) {
-        setFormData({
-          amount: '',
-          currency: 'USD',
-          fromHolderId: '',
-          toHolderId: '',
-          note: '',
-          photo: null
-        });
-        setActiveModal(null);
+        setEditingHolderId(null);
         await refreshAppState();
       } else {
-        alert(res.error || 'Operation failed');
+        alert(res.error || 'Failed to rename/edit account.');
       }
     });
   };
 
-  // Submit Reconciliation count per specific currency
-  const handleReconcileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedHolder) return;
-    
-    const actualVal = parseFloat(reconcileVal);
-    if (isNaN(actualVal)) return;
+  // Master Database Reset to Zero
+  const handleMasterWipeToZero = async () => {
+    const confirmWipe = window.confirm(
+      `⚠️ SYSTEM WIPE OUT:\n\nAre you sure you want to run a complete system reset?\n\nThis will permanently delete all transaction history, erase any custom-added partners, and set all balances of standard accounts back to exactly $0.\n\nType OK to proceed.`
+    );
+
+    if (!confirmWipe) return;
 
     startTransition(async () => {
-      const res = await reconcileHolder(selectedHolder.id, reconcileCurrency, actualVal);
+      const res = await resetDatabaseToZero();
       if (res.success) {
-        await refreshAppState();
-      } else {
-        alert('Reconciliation failed');
-      }
-    });
-  };
-
-  // Submit Dynamic Account Creator Form
-  const handleCreateAccountSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!accountFormData.name) return;
-
-    const data = new FormData();
-    data.append('name', accountFormData.name);
-    data.append('emoji', accountFormData.emoji);
-    data.append('color', accountFormData.color);
-    data.append('category', accountFormData.category);
-    data.append('partnerType', accountFormData.partnerType);
-    data.append('initialCurrency', accountFormData.initialCurrency);
-    data.append('initialExpected', accountFormData.initialExpected || '0');
-    data.append('initialActual', accountFormData.initialActual || '0');
-
-    startTransition(async () => {
-      const res = await createHolder(data);
-      if (res.success) {
-        setAccountFormData({
-          name: '',
-          emoji: '💵',
-          color: 'blue',
-          category: 'holder',
-          partnerType: 'person',
-          initialCurrency: 'USD',
-          initialExpected: '',
-          initialActual: ''
-        });
+        setSelectedHolder(null);
         setActiveModal(null);
         await refreshAppState();
+        alert('Platform successfully reset to absolute zero! Clean test environment active.');
       } else {
-        alert(res.error || 'Failed to create account');
+        alert(res.error || 'Reset failed.');
       }
     });
   };
@@ -416,7 +386,6 @@ export default function MoneyRadarApp({
     }
   };
 
-  // Perfect color map matching specified requirements
   const getColorClasses = (color: string) => {
     switch (color) {
       case 'green':
@@ -457,7 +426,7 @@ export default function MoneyRadarApp({
 
   return (
     <div className="safe-bottom pb-24 md:pb-6">
-      {/* 1. Header & Dynamic Search Engine */}
+      {/* 1. Header & Quick Controls */}
       <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-md border-b border-neutral-900 px-4 py-4 md:py-6">
         <div className="max-w-4xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between">
@@ -472,14 +441,14 @@ export default function MoneyRadarApp({
             </div>
             
             <div className="flex items-center gap-2">
-              {/* Add Account Button */}
+              {/* Settings Page (Gear Button) */}
               <button
-                onClick={() => setActiveModal('account')}
-                className="p-2.5 rounded-full bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-emerald-400 hover:text-emerald-300 transition active:scale-95 flex items-center gap-1.5 text-xs font-bold px-4"
-                title="Create Account/Partner"
+                onClick={() => setActiveModal('settings')}
+                className="p-2.5 rounded-full bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-neutral-300 hover:text-white transition active:scale-95 flex items-center gap-1.5 text-xs font-bold px-4"
+                title="Open Settings Page"
               >
-                <Plus className="h-4 w-4" />
-                <span>Account</span>
+                <Settings className="h-4.5 w-4.5" />
+                <span>Settings</span>
               </button>
               
               <button 
@@ -525,7 +494,7 @@ export default function MoneyRadarApp({
               <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
                 TOTAL WEALTH (USD)
               </p>
-              <h2 className="text-4xl md:text-5xl font-black mt-2 tracking-tight text-white animate-pulse">
+              <h2 className="text-4xl md:text-5xl font-black mt-2 tracking-tight text-white">
                 {formatUSD(metrics.totalWealth)}
               </h2>
             </div>
@@ -607,7 +576,7 @@ export default function MoneyRadarApp({
           </div>
         </section>
 
-        {/* 3. Three-way Segmented Navigation Tab bar */}
+        {/* 3. Segmented Navigation Tab bar */}
         <section className="flex flex-col gap-4">
           <div className="bg-neutral-950 p-1 rounded-2xl border border-neutral-900 flex">
             {[
@@ -632,6 +601,22 @@ export default function MoneyRadarApp({
 
           {/* Holders grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            
+            {/* GIANT UNMISTAKABLE + ACCOUNT CARD (Primary Trigger) */}
+            <div
+              onClick={() => setActiveModal('account')}
+              className="border border-dashed border-emerald-500/45 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.05] rounded-3xl p-5 cursor-pointer flex flex-col justify-center items-center text-center gap-3 transition hover:border-emerald-400 active:scale-[0.99] min-h-[125px] glow-green"
+            >
+              <span className="p-3 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
+                <Plus className="h-6 w-6 stroke-[3]" />
+              </span>
+              <div>
+                <h4 className="font-extrabold text-white text-base tracking-wide">+ CREATE NEW ACCOUNT / PARTNER</h4>
+                <p className="text-xs text-neutral-500 mt-1">Tap to add custom person, company, wallet, or payment area</p>
+              </div>
+            </div>
+
+            {/* Loop through filtered holders */}
             {filteredHolders.map((holder) => {
               const styles = getColorClasses(holder.color);
               const drift = holder.actualBalance - holder.expectedBalance;
@@ -704,11 +689,6 @@ export default function MoneyRadarApp({
               );
             })}
           </div>
-          {filteredHolders.length === 0 && (
-            <div className="text-center py-12 border border-dashed border-neutral-900 rounded-3xl text-neutral-600 text-xs">
-              No money holders match your search criteria.
-            </div>
-          )}
         </section>
 
         {/* 4. Global Movements History */}
@@ -790,7 +770,7 @@ export default function MoneyRadarApp({
         </section>
       </div>
 
-      {/* 5. PERSISTENT DOCK (Only 3 Main Buttons) */}
+      {/* 5. PERSISTENT FLOATING BOTTOM DOCK */}
       <div className="fixed bottom-6 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
         <div className="glass-panel border border-neutral-800 rounded-full px-5 py-3.5 shadow-2xl flex items-center gap-6 pointer-events-auto">
           {/* Movement Button */}
@@ -847,9 +827,9 @@ export default function MoneyRadarApp({
               </div>
               
               <div className="flex items-center gap-2">
-                {/* Erase Account / Delete Button */}
+                {/* Delete Button directly from detail panel */}
                 <button
-                  onClick={handleEraseAccount}
+                  onClick={() => handleEraseAccount(selectedHolder.id, selectedHolder.name)}
                   disabled={isPending}
                   className="p-2.5 bg-rose-950/50 border border-rose-900/65 text-rose-400 hover:text-rose-300 rounded-full hover:bg-rose-900/60 transition active:scale-95"
                   title="Erase Account permanently"
@@ -934,7 +914,6 @@ export default function MoneyRadarApp({
                   Verify actual physical count
                 </h4>
                 <form onSubmit={handleReconcileSubmit} className="flex flex-col gap-3">
-                  {/* Select which currency is physically counted */}
                   <div className="flex gap-2">
                     <select
                       value={reconcileCurrency}
@@ -1048,7 +1027,7 @@ export default function MoneyRadarApp({
       )}
 
       {/* 7. +MOVEMENT & ↔ TRANSFER MODAL */}
-      {activeModal && activeModal !== 'account' && (
+      {activeModal && activeModal !== 'account' && activeModal !== 'settings' && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-3xl p-6 relative flex flex-col gap-6">
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4">
@@ -1122,7 +1101,7 @@ export default function MoneyRadarApp({
                   required={activeModal === 'transfer' || activeModal === 'proof'}
                   value={formData.toHolderId}
                   onChange={(e) => setFormData(prev => ({ ...prev, toHolderId: e.target.value }))}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-sm text-white outline-none focus:border-neutral-600 cursor-pointer"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-sm text-white outline-none focus:border-neutral-600 cursor-pointer"
                 >
                   <option value="">-- Select Destination --</option>
                   {activeModal === 'movement' && <option value="external">📤 External Expense (Outside payment)</option>}
@@ -1351,7 +1330,182 @@ export default function MoneyRadarApp({
         </div>
       )}
 
-      {/* 9. Lightbox visual proof attachment viewer */}
+      {/* 9. CENTRAL SYSTEM SETTINGS PANEL (GEAR MODAL) */}
+      {activeModal === 'settings' && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-neutral-950 border border-neutral-800 rounded-3xl p-6 relative flex flex-col gap-6 max-h-[90vh] overflow-y-auto">
+            
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4">
+              <div className="flex items-center gap-2">
+                <Settings className="h-5 w-5 text-blue-400 animate-spin" />
+                <h3 className="text-lg font-black tracking-wide uppercase text-white">
+                  SYSTEM SETTINGS & COMMAND DIRECTORY
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingHolderId(null);
+                  setActiveModal(null);
+                }}
+                className="p-1.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white rounded-full transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Quick Actions (Reset Database) */}
+            <div className="p-4 rounded-2xl border border-rose-950/40 bg-rose-950/[0.04] flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-black text-rose-400 flex items-center gap-1.5 uppercase">
+                  <AlertTriangle className="h-4 w-4 text-rose-400" />
+                  Wipe Database / Clean Test
+                </h4>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Wipes out all movements, deletes custom entries, and resets all standard accounts back to exactly $0.
+                </p>
+              </div>
+              <button
+                onClick={handleMasterWipeToZero}
+                disabled={isPending}
+                className="py-2.5 px-5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl tracking-wider uppercase transition active:scale-95 disabled:opacity-50"
+              >
+                {isPending ? 'RESETTING SYSTEM...' : '⚠️ WIPE DB TO ZERO'}
+              </button>
+            </div>
+
+            {/* Account settings directory */}
+            <div className="flex flex-col gap-4">
+              <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">
+                Account & Partner Directory Settings
+              </h4>
+
+              <div className="flex flex-col gap-3">
+                {holders.map((h) => {
+                  const isEditing = editingHolderId === h.id;
+                  const styles = getColorClasses(h.color);
+                  
+                  return (
+                    <div key={h.id} className="p-4 rounded-2xl border border-neutral-900 bg-neutral-900/40 flex flex-col gap-4">
+                      
+                      {/* Standard View of Directory Row */}
+                      {!isEditing ? (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl bg-neutral-900 border border-neutral-800 p-1.5 rounded-lg">
+                              {h.emoji}
+                            </span>
+                            <div>
+                              <p className="font-extrabold text-sm text-white">{h.name}</p>
+                              <p className="text-[10px] text-neutral-500 uppercase mt-0.5">{h.category}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* Rename/Edit Button */}
+                            <button
+                              onClick={() => handleStartInlineEdit(h)}
+                              className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-blue-400 hover:text-blue-300 transition"
+                              title="Rename / Edit Account"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </button>
+                            
+                            {/* Delete/Erase button */}
+                            <button
+                              onClick={() => handleEraseAccount(h.id, h.name)}
+                              className="p-2 rounded-lg bg-rose-950/40 border border-rose-900/50 hover:border-rose-800 text-rose-400 hover:text-rose-300 transition"
+                              title="Delete Account permanently"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        // INLINE EDITING / RENAME FORM
+                        <form onSubmit={(e) => handleSaveInlineEdit(e, h.id)} className="flex flex-col gap-3">
+                          <div className="flex gap-2">
+                            <div className="w-16">
+                              <label className="text-[9px] font-bold text-neutral-500 uppercase block mb-1">Emoji</label>
+                              <input
+                                type="text"
+                                required
+                                value={editFormData.emoji}
+                                onChange={(e) => setEditFormData(prev => ({ ...prev, emoji: e.target.value }))}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-1.5 px-2 text-center text-sm outline-none"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="text-[9px] font-bold text-neutral-500 uppercase block mb-1">Account Name</label>
+                              <input
+                                type="text"
+                                required
+                                value={editFormData.name}
+                                onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-1.5 px-3 text-sm text-white outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[9px] font-bold text-neutral-500 uppercase block mb-1">Category</label>
+                              <select
+                                value={editFormData.category}
+                                onChange={(e) => setEditFormData(prev => ({ ...prev, category: e.target.value }))}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-1.5 px-2 text-xs text-white outline-none"
+                              >
+                                <option value="holder">My Wallet</option>
+                                <option value="partner">3rd Party Partner</option>
+                                <option value="upcoming">Upcoming Payment</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] font-bold text-neutral-500 uppercase block mb-1">Indicator Color</label>
+                              <select
+                                value={editFormData.color}
+                                onChange={(e) => setEditFormData(prev => ({ ...prev, color: e.target.value }))}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-1.5 px-2 text-xs text-white outline-none"
+                              >
+                                <option value="blue">🔵 Blue</option>
+                                <option value="green">🟢 Green</option>
+                                <option value="orange">🟠 Orange</option>
+                                <option value="red">🔴 Red</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2 mt-1 border-t border-neutral-900 pt-3">
+                            <button
+                              type="button"
+                              onClick={() => setEditingHolderId(null)}
+                              className="py-1 px-3 bg-neutral-900 border border-neutral-800 rounded-lg text-xs font-semibold text-neutral-400 hover:text-neutral-200 transition"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={isPending}
+                              className="py-1 px-4 bg-white text-black font-extrabold rounded-lg text-xs hover:bg-neutral-200 transition disabled:opacity-50"
+                            >
+                              {isPending ? 'Saving...' : '💾 Save Changes'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 10. Lightbox visual proof attachment viewer */}
       {lightboxImage && (
         <div 
           className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-pointer"

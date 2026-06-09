@@ -261,3 +261,99 @@ export async function deleteHolder(holderId: string) {
     return { success: false, error: error.message || 'Failed to delete account' };
   }
 }
+
+// 5. Update / Edit / Rename a Money Holder
+export async function updateHolder(formData: FormData) {
+  try {
+    const holderId = formData.get('holderId') as string;
+    const name = formData.get('name') as string;
+    const emoji = formData.get('emoji') as string || '💵';
+    const color = formData.get('color') as string || 'blue';
+    const category = formData.get('category') as string || 'holder';
+    const partnerType = formData.get('partnerType') as string | null;
+
+    if (!holderId || !name) {
+      return { success: false, error: 'Holder ID and Name are required' };
+    }
+
+    await prisma.moneyHolder.update({
+      where: { id: holderId },
+      data: {
+        name,
+        emoji,
+        color,
+        category,
+        partnerType: category === 'partner' ? partnerType : null,
+        isUpcoming: category === 'upcoming',
+      },
+    });
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to update holder:', error);
+    if (error.code === 'P2002') {
+      return { success: false, error: 'An account with this name already exists.' };
+    }
+    return { success: false, error: error.message || 'Failed to update account' };
+  }
+}
+
+// 6. Master Reset Database to Zero
+export async function resetDatabaseToZero() {
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Clear all transaction data
+      await tx.moneyMovement.deleteMany({});
+      await tx.holderBalance.deleteMany({});
+      await tx.moneyHolder.deleteMany({});
+
+      const defaultHolders = [
+        { id: 'h1', name: 'Slim Cash', emoji: '💵', color: 'blue', category: 'holder', currencies: ['USD'] },
+        { id: 'h2', name: 'Slim Bank', emoji: '🏦', color: 'blue', category: 'holder', currencies: ['USD'] },
+        { id: 'h3', name: 'Wise', emoji: '💳', color: 'blue', category: 'holder', currencies: ['USD'] },
+        { id: 'h4', name: 'Guangzhou Office', emoji: '🇨🇳', color: 'blue', category: 'holder', currencies: ['USD'] },
+        { id: 'h5', name: 'Goods In Transit', emoji: '🚢', color: 'orange', category: 'holder', currencies: ['USD'], isSpecialTransit: true },
+        { id: 'h6', name: 'Ahmed', emoji: '🤝', color: 'green', category: 'partner', partnerType: 'person', currencies: ['USD', 'EUR'] },
+        { id: 'h7', name: 'Brother', emoji: '🤝', color: 'green', category: 'partner', partnerType: 'person', currencies: ['USD'] },
+        { id: 'h8', name: 'ZARBITI Factory', emoji: '🏭', color: 'red', category: 'partner', partnerType: 'company', currencies: ['EUR'] },
+        { id: 'h9', name: 'Upcoming Rent (Tunisia)', emoji: '🏢', color: 'red', category: 'upcoming', currencies: ['TND'] },
+        { id: 'h10', name: 'Container #4 Logistics', emoji: '📋', color: 'red', category: 'upcoming', currencies: ['USD'] }
+      ];
+
+      for (const h of defaultHolders) {
+        const holder = await tx.moneyHolder.create({
+          data: {
+            id: h.id,
+            name: h.name,
+            emoji: h.emoji,
+            color: h.color,
+            category: h.category,
+            partnerType: h.partnerType || null,
+            isUpcoming: h.category === 'upcoming',
+            expectedBalance: 0,
+            actualBalance: 0,
+            isSpecialTransit: !!h.isSpecialTransit
+          }
+        });
+
+        for (const curr of h.currencies) {
+          await tx.holderBalance.create({
+            data: {
+              holderId: holder.id,
+              currency: curr,
+              expectedBalance: 0,
+              actualBalance: 0
+            }
+          });
+        }
+      }
+    });
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to reset database:', error);
+    return { success: false, error: error.message || 'Wipe failed' };
+  }
+}
