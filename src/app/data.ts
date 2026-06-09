@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db';
 
-// Core currency conversion rates to USD (base currency)
-const CURRENCY_RATES: Record<string, number> = {
+// Stable currency conversion rates to USD (base currency)
+export const CURRENCY_RATES: Record<string, number> = {
   USD: 1.0,
   EUR: 1.08,
   TND: 0.32,
@@ -11,11 +11,19 @@ export interface HolderSummary {
   id: string;
   name: string;
   emoji: string;
-  color: string; // "green" | "blue" | "orange" | "red"
-  expectedBalance: number;
-  actualBalance: number;
-  difference: number;
+  color: string;      // "green" (owed to you), "blue" (your own), "orange" (inventory), "red" (you owe)
+  category: string;   // "holder" (your own), "partner" (3rd parties), "upcoming" (debit areas)
+  partnerType: string | null; // "person" | "company"
+  isUpcoming: boolean;
+  expectedBalance: number; // Aggregated USD
+  actualBalance: number;   // Aggregated USD
+  difference: number;      // Aggregated USD
   isSpecialTransit: boolean;
+  balances: {
+    currency: string;
+    expectedBalance: number;
+    actualBalance: number;
+  }[];
 }
 
 export interface DashboardMetrics {
@@ -23,13 +31,18 @@ export interface DashboardMetrics {
   availableCash: number;
   inventoryValue: number;
   receivables: number;
+  payables: number;
+  upcomingPayments: number; // Upcoming future debit payments total
   expectedTotalWealth: number;
 }
 
-// 1. Fetch all money holders and calculate metrics (No 'use server' - safe for direct RSC render!)
+// 1. Fetch all money holders with multi-currency wallets and calculate metrics
 export async function getDashboardData(searchQuery: string = '') {
   try {
     const holders = await prisma.moneyHolder.findMany({
+      include: {
+        balances: true,
+      },
       orderBy: { name: 'asc' },
     });
 
@@ -40,29 +53,43 @@ export async function getDashboardData(searchQuery: string = '') {
         name: h.name,
         emoji: h.emoji || '💵',
         color: h.color || 'blue',
+        category: h.category || 'holder',
+        partnerType: h.partnerType,
+        isUpcoming: h.isUpcoming,
         expectedBalance: h.expectedBalance,
         actualBalance: h.actualBalance,
         difference: diff,
         isSpecialTransit: h.isSpecialTransit,
+        balances: h.balances.map((b) => ({
+          currency: b.currency,
+          expectedBalance: b.expectedBalance,
+          actualBalance: b.actualBalance,
+        })),
       };
     });
 
-    // Filtering logic (if searched)
+    // Filtering logic
     const filteredHolders = formattedHolders.filter((h) => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
+      
+      // Match name, category, color, or specific currencies held
+      const matchesCurrency = h.balances.some(b => b.currency.toLowerCase().includes(q));
+      
       return (
         h.name.toLowerCase().includes(q) ||
-        h.emoji.includes(q) ||
-        h.color.toLowerCase().includes(q)
+        h.category.toLowerCase().includes(q) ||
+        h.color.toLowerCase().includes(q) ||
+        matchesCurrency
       );
     });
 
-    // Calculate Dashboard Metrics
+    // Initialize metrics
     let availableCash = 0;
     let receivables = 0;
     let inventoryValue = 0;
     let payables = 0;
+    let upcomingPayments = 0;
 
     let expectedAvailableCash = 0;
     let expectedReceivables = 0;
@@ -70,7 +97,15 @@ export async function getDashboardData(searchQuery: string = '') {
     let expectedPayables = 0;
 
     holders.forEach((h) => {
+      // 1. Skip future upcoming payments from active capital totals
+      if (h.category === 'upcoming' || h.isUpcoming) {
+        upcomingPayments += h.expectedBalance; // Track sum of expected upcoming debit payments
+        return;
+      }
+
+      // 2. Map standard active categories based on colors and names
       if (h.color === 'blue') {
+        // Exclude Guangzhou/China Office from available cash, include in receivables
         if (h.name.toLowerCase().includes('china') || h.name.toLowerCase().includes('guangzhou')) {
           receivables += h.actualBalance;
           expectedReceivables += h.expectedBalance;
@@ -90,6 +125,7 @@ export async function getDashboardData(searchQuery: string = '') {
       }
     });
 
+    // Total Wealth = Available Cash + Receivables + Inventory Value - Payables (Current debts)
     const totalWealth = availableCash + receivables + inventoryValue - payables;
     const expectedTotalWealth = expectedAvailableCash + expectedReceivables + expectedInventoryValue - expectedPayables;
 
@@ -98,6 +134,8 @@ export async function getDashboardData(searchQuery: string = '') {
       availableCash,
       inventoryValue,
       receivables,
+      payables,
+      upcomingPayments,
       expectedTotalWealth,
     };
 
@@ -116,6 +154,9 @@ export async function getHolderDetails(holderId: string) {
   try {
     const holder = await prisma.moneyHolder.findUnique({
       where: { id: holderId },
+      include: {
+        balances: true,
+      },
     });
 
     if (!holder) {
@@ -139,7 +180,23 @@ export async function getHolderDetails(holderId: string) {
     });
 
     return {
-      holder,
+      holder: {
+        id: holder.id,
+        name: holder.name,
+        emoji: holder.emoji,
+        color: holder.color,
+        category: holder.category,
+        partnerType: holder.partnerType,
+        isUpcoming: holder.isUpcoming,
+        expectedBalance: holder.expectedBalance,
+        actualBalance: holder.actualBalance,
+        isSpecialTransit: holder.isSpecialTransit,
+        balances: holder.balances.map((b) => ({
+          currency: b.currency,
+          expectedBalance: b.expectedBalance,
+          actualBalance: b.actualBalance,
+        })),
+      },
       movements,
     };
   } catch (error) {

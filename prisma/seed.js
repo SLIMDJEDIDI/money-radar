@@ -1,119 +1,211 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Stable currency rates to USD
+const CURRENCY_RATES = {
+  USD: 1.0,
+  EUR: 1.08,
+  TND: 0.32,
+};
+
 async function main() {
-  console.log('Seeding Money Radar data...');
+  console.log('Seeding Multi-Currency Money Radar data...');
 
   // Clean existing database
   await prisma.moneyMovement.deleteMany({});
+  await prisma.holderBalance.deleteMany({});
   await prisma.moneyHolder.deleteMany({});
 
-  // 1. Create Money Holders
-  const cashTunisia = await prisma.moneyHolder.create({
+  // 1. Create Your Own Wallets (category: "holder", color: "blue" or "orange" for transit)
+  
+  // Slim Cash Tunisia
+  await prisma.moneyHolder.create({
     data: {
-      name: 'Cash Tunisia',
+      name: 'Slim Cash',
       emoji: '💵',
       color: 'blue',
+      category: 'holder',
       expectedBalance: 15200,
       actualBalance: 15200,
-    },
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 15200, actualBalance: 15200 }
+        ]
+      }
+    }
   });
 
-  const bankTunisia = await prisma.moneyHolder.create({
+  // Slim Bank Tunisia
+  await prisma.moneyHolder.create({
     data: {
-      name: 'Bank Tunisia',
+      name: 'Slim Bank',
       emoji: '🏦',
       color: 'blue',
+      category: 'holder',
       expectedBalance: 42000,
       actualBalance: 42000,
-    },
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 42000, actualBalance: 42000 }
+        ]
+      }
+    }
   });
 
-  const chinaOffice = await prisma.moneyHolder.create({
-    data: {
-      name: 'China Office',
-      emoji: '🇨🇳',
-      color: 'blue',
-      expectedBalance: 85000,
-      actualBalance: 85000,
-    },
-  });
-
-  const wise = await prisma.moneyHolder.create({
+  // Wise
+  await prisma.moneyHolder.create({
     data: {
       name: 'Wise',
       emoji: '💳',
       color: 'blue',
+      category: 'holder',
       expectedBalance: 12500,
       actualBalance: 12500,
-    },
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 12500, actualBalance: 12500 }
+        ]
+      }
+    }
   });
 
+  // Guangzhou Office
+  await prisma.moneyHolder.create({
+    data: {
+      name: 'Guangzhou Office',
+      emoji: '🇨🇳',
+      color: 'blue',
+      category: 'holder',
+      expectedBalance: 85000,
+      actualBalance: 85000,
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 85000, actualBalance: 85000 }
+        ]
+      }
+    }
+  });
+
+  // Goods In Transit
+  await prisma.moneyHolder.create({
+    data: {
+      name: 'Goods In Transit',
+      emoji: '🚢',
+      color: 'orange',
+      category: 'holder',
+      expectedBalance: 252820,
+      actualBalance: 252820,
+      isSpecialTransit: true,
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 252820, actualBalance: 252820 }
+        ]
+      }
+    }
+  });
+
+  // 2. Create Third-Party Partner Accounts (category: "partner", color: "green" or "red")
+  
+  // Ahmed (Multi-currency: Holds both USD and EUR!)
+  // Expected total USD = 25000 + (5000 * 1.08) = 30400
+  // Actual total USD = 23000 + (5000 * 1.08) = 28400
   const ahmed = await prisma.moneyHolder.create({
     data: {
       name: 'Ahmed',
       emoji: '🤝',
       color: 'green', // money owed to you
-      expectedBalance: 25000,
-      actualBalance: 23000, // actual count
-    },
+      category: 'partner',
+      partnerType: 'person',
+      expectedBalance: 30400,
+      actualBalance: 28400,
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 25000, actualBalance: 23000 },
+          { currency: 'EUR', expectedBalance: 5000, actualBalance: 5000 }
+        ]
+      }
+    }
   });
 
-  const brother = await prisma.moneyHolder.create({
+  // Brother (Holds USD)
+  await prisma.moneyHolder.create({
     data: {
       name: 'Brother',
       emoji: '🤝',
       color: 'green', // money owed to you
+      category: 'partner',
+      partnerType: 'person',
       expectedBalance: 55000,
       actualBalance: 55000,
-    },
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 55000, actualBalance: 55000 }
+        ]
+      }
+    }
   });
 
-  const goodsInTransit = await prisma.moneyHolder.create({
+  // ZARBITI Factory (Partner Company - You owe them €10,000 EUR advance, color: "red")
+  // Expected/Actual total USD = 10000 * 1.08 = 10800
+  await prisma.moneyHolder.create({
     data: {
-      name: 'Goods In Transit',
-      emoji: '🚢',
-      color: 'orange', // inventory
-      expectedBalance: 252820,
-      actualBalance: 252820,
-      isSpecialTransit: true,
-    },
-  });
-
-  const factory = await prisma.moneyHolder.create({
-    data: {
-      name: 'Factory Advances',
+      name: 'ZARBITI Factory',
       emoji: '🏭',
-      color: 'orange', // inventory/goods
-      expectedBalance: 0,
-      actualBalance: 0,
-    },
-  });
-
-  const customerDeposits = await prisma.moneyHolder.create({
-    data: {
-      name: 'Customer Deposits',
-      emoji: '👥',
       color: 'red', // money you owe
-      expectedBalance: 0,
-      actualBalance: 0,
-    },
+      category: 'partner',
+      partnerType: 'company',
+      expectedBalance: 10800,
+      actualBalance: 10800,
+      balances: {
+        create: [
+          { currency: 'EUR', expectedBalance: 10000, actualBalance: 10000 }
+        ]
+      }
+    }
   });
 
-  const supplierAdvances = await prisma.moneyHolder.create({
+  // 3. Create Upcoming Payments / Debit Accounts (category: "upcoming", color: "red" or "green")
+  
+  // Upcoming Rent Tunisia (Holds TND - expected 3,000 TND, actual 0 DT)
+  // Expected total USD = 3000 * 0.32 = 960 USD
+  await prisma.moneyHolder.create({
     data: {
-      name: 'Supplier Advances',
-      emoji: '💸',
-      color: 'red', // money you owe / advanced from suppliers
-      expectedBalance: 0,
+      name: 'Upcoming Rent (Tunisia)',
+      emoji: '🏢',
+      color: 'red', // Money you owe/will pay
+      category: 'upcoming',
+      isUpcoming: true,
+      expectedBalance: 960,
       actualBalance: 0,
-    },
+      balances: {
+        create: [
+          { currency: 'TND', expectedBalance: 3000, actualBalance: 0 }
+        ]
+      }
+    }
   });
 
-  console.log('Money Holders seeded successfully.');
+  // Upcoming Container #4 Logistics (Holds USD - expected $4,500, actual 0)
+  await prisma.moneyHolder.create({
+    data: {
+      name: 'Container #4 Logistics',
+      emoji: '📋',
+      color: 'red', // Money you will pay
+      category: 'upcoming',
+      isUpcoming: true,
+      expectedBalance: 4500,
+      actualBalance: 0,
+      balances: {
+        create: [
+          { currency: 'USD', expectedBalance: 4500, actualBalance: 0 }
+        ]
+      }
+    }
+  });
 
-  // 2. Create Sample Movements for Timeline (e.g. on Ahmed's account)
-  // Let's create some movements for Ahmed
+  console.log('Money Holders with Multi-currency balances seeded successfully.');
+
+  // Create Sample Movements for Ahmed's Timeline (Today and 3 days ago)
   const threeDaysAgo = new Date();
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
@@ -122,9 +214,9 @@ async function main() {
       amount: 2000,
       currency: 'USD',
       amountInUsd: 2000,
-      fromHolderId: ahmed.id, // from Ahmed (Ahmed returned money)
-      toHolderId: cashTunisia.id, // to Cash Tunisia
-      note: 'Returned',
+      fromHolderId: ahmed.id, // From Ahmed (Ahmed returned $2,000 USD)
+      toHolderId: null, // External output
+      note: 'Returned $2,000 cash',
       createdAt: threeDaysAgo,
     },
   });
@@ -135,14 +227,14 @@ async function main() {
       amount: 5000,
       currency: 'USD',
       amountInUsd: 5000,
-      fromHolderId: cashTunisia.id, // from Cash Tunisia (Gave Ahmed money)
-      toHolderId: ahmed.id, // to Ahmed
-      note: 'Cash given',
+      fromHolderId: null, // External input
+      toHolderId: ahmed.id, // To Ahmed (Gave Ahmed $5,000 USD)
+      note: 'Cash given as loan',
       createdAt: today,
     },
   });
 
-  console.log('Sample movements seeded successfully.');
+  console.log('Sample movement records seeded successfully.');
 }
 
 main()
