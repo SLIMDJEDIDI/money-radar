@@ -1,4 +1,4 @@
-import { getDashboardData, getRecentMovements } from './actions';
+import { getDashboardData, getRecentMovements } from './data';
 import MoneyRadarApp from '@/components/MoneyRadarApp';
 
 export const revalidate = 0; // Dynamic server rendering to fetch live SQLite database data on every load

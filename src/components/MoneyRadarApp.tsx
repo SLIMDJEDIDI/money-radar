@@ -22,7 +22,8 @@ import {
   Clock,
   ExternalLink
 } from 'lucide-react';
-import { createMovement, reconcileHolder, getHolderDetails } from '../app/actions';
+import { createMovement, reconcileHolder } from '../app/actions';
+import { getHolderDetails } from '../app/data';
 
 interface Holder {
   id: string;
