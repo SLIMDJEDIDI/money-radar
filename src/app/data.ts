@@ -11,7 +11,7 @@ export interface HolderSummary {
   id: string;
   name: string;
   emoji: string;
-  color: string;      // "green" (owed to you), "blue" (your own), "orange" (inventory), "red" (you owe)
+  color: string;      // "green" (owed to you), "blue" (your own), "orange" (inventory/transit), "red" (you owe)
   category: string;   // "holder" (your own), "partner" (3rd parties), "upcoming" (debit areas)
   partnerType: string | null; // "person" | "company"
   isUpcoming: boolean;
@@ -29,14 +29,12 @@ export interface HolderSummary {
 export interface DashboardMetrics {
   totalWealth: number;
   availableCash: number;
-  inventoryValue: number;
-  receivables: number;
-  payables: number;
-  upcomingPayments: number; // Upcoming future debit payments total
+  partnersBalance: number; // Net position of 3rd party partners (owed to you - owed by you)
+  upcomingPayments: number; // Upcoming future debit payments total (expected)
   expectedTotalWealth: number;
 }
 
-// 1. Fetch all money holders with multi-currency wallets and calculate metrics
+// 1. Fetch all money holders with multi-currency wallets and calculate simplified metrics
 export async function getDashboardData(searchQuery: string = '') {
   try {
     const holders = await prisma.moneyHolder.findMany({
@@ -73,7 +71,6 @@ export async function getDashboardData(searchQuery: string = '') {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       
-      // Match name, category, color, or specific currencies held
       const matchesCurrency = h.balances.some(b => b.currency.toLowerCase().includes(q));
       
       return (
@@ -86,55 +83,43 @@ export async function getDashboardData(searchQuery: string = '') {
 
     // Initialize metrics
     let availableCash = 0;
-    let receivables = 0;
-    let inventoryValue = 0;
-    let payables = 0;
-    let upcomingPayments = 0;
+    let partnersBalance = 0; // Net position: Money owed to you (green) - Money you owe (red)
+    let upcomingPayments = 0; // expected future debit payments
 
     let expectedAvailableCash = 0;
-    let expectedReceivables = 0;
-    let expectedInventoryValue = 0;
-    let expectedPayables = 0;
+    let expectedPartnersBalance = 0;
 
     holders.forEach((h) => {
-      // 1. Skip future upcoming payments from active capital totals
+      // 1. Future upcoming payments (debits) - skip active asset pools
       if (h.category === 'upcoming' || h.isUpcoming) {
-        upcomingPayments += h.expectedBalance; // Track sum of expected upcoming debit payments
+        upcomingPayments += h.expectedBalance; // Track sum of expected upcoming payments
         return;
       }
 
-      // 2. Map standard active categories based on colors and names
-      if (h.color === 'blue') {
-        // Exclude Guangzhou/China Office from available cash, include in receivables
-        if (h.name.toLowerCase().includes('china') || h.name.toLowerCase().includes('guangzhou')) {
-          receivables += h.actualBalance;
-          expectedReceivables += h.expectedBalance;
-        } else {
-          availableCash += h.actualBalance;
-          expectedAvailableCash += h.expectedBalance;
+      // 2. Active holders/wallets vs partners
+      if (h.category === 'holder') {
+        availableCash += h.actualBalance;
+        expectedAvailableCash += h.expectedBalance;
+      } else if (h.category === 'partner') {
+        // Green means they owe you (asset, positive), Red means you owe them (liability, negative)
+        if (h.color === 'green') {
+          partnersBalance += h.actualBalance;
+          expectedPartnersBalance += h.expectedBalance;
+        } else if (h.color === 'red') {
+          partnersBalance -= h.actualBalance;
+          expectedPartnersBalance -= h.expectedBalance;
         }
-      } else if (h.color === 'green') {
-        receivables += h.actualBalance;
-        expectedReceivables += h.expectedBalance;
-      } else if (h.color === 'orange') {
-        inventoryValue += h.actualBalance;
-        expectedInventoryValue += h.expectedBalance;
-      } else if (h.color === 'red') {
-        payables += h.actualBalance;
-        expectedPayables += h.expectedBalance;
       }
     });
 
-    // Total Wealth = Available Cash + Receivables + Inventory Value - Payables (Current debts)
-    const totalWealth = availableCash + receivables + inventoryValue - payables;
-    const expectedTotalWealth = expectedAvailableCash + expectedReceivables + expectedInventoryValue - expectedPayables;
+    // Total Wealth = Available Cash + Net Partners Position
+    const totalWealth = availableCash + partnersBalance;
+    const expectedTotalWealth = expectedAvailableCash + expectedPartnersBalance;
 
     const metrics: DashboardMetrics = {
       totalWealth,
       availableCash,
-      inventoryValue,
-      receivables,
-      payables,
+      partnersBalance,
       upcomingPayments,
       expectedTotalWealth,
     };

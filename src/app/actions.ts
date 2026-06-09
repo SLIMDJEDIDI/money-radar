@@ -247,3 +247,17 @@ export async function createHolder(formData: FormData) {
     return { success: false, error: error.message || 'Failed to create account' };
   }
 }
+
+// 4. Erase/Delete a Money Holder / Partner / Account
+export async function deleteHolder(holderId: string) {
+  try {
+    await prisma.moneyHolder.delete({
+      where: { id: holderId },
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to delete holder:', error);
+    return { success: false, error: error.message || 'Failed to delete account' };
+  }
+}

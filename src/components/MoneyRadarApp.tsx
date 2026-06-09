@@ -6,26 +6,21 @@ import {
   ArrowLeftRight,
   Camera,
   Search,
-  AlertTriangle,
-  Coins,
-  Package,
-  Users,
-  CheckCircle,
   X,
-  ArrowUpRight,
-  ArrowDownLeft,
   ChevronRight,
   RefreshCw,
   Clock,
   ExternalLink,
-  ShieldAlert,
   UserPlus,
-  ArrowRight,
+  Trash2,
+  Users,
   Building,
   User,
-  DollarSign
+  AlertTriangle,
+  Coins,
+  Package
 } from 'lucide-react';
-import { createMovement, reconcileHolder, createHolder } from '../app/actions';
+import { createMovement, reconcileHolder, createHolder, deleteHolder } from '../app/actions';
 
 interface Holder {
   id: string;
@@ -49,9 +44,7 @@ interface Holder {
 interface Metrics {
   totalWealth: number;
   availableCash: number;
-  inventoryValue: number;
-  receivables: number;
-  payables: number;
+  partnersBalance: number;
   upcomingPayments: number;
   expectedTotalWealth: number;
 }
@@ -136,20 +129,25 @@ export default function MoneyRadarApp({
   };
 
   const formatUSD = (val: number) => {
-    return new Intl.NumberFormat('en-US', {
+    const isNegative = val < 0;
+    const formatted = new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       maximumFractionDigits: 0
-    }).format(val);
+    }).format(Math.abs(val));
+    return isNegative ? `-${formatted}` : formatted;
   };
 
   const formatRawCurrency = (val: number, curr: string) => {
-    return `${CURRENCY_SYMBOLS[curr] || curr} ${new Intl.NumberFormat('en-US', {
+    const isNegative = val < 0;
+    const formatted = new Intl.NumberFormat('en-US', {
       maximumFractionDigits: 2
-    }).format(val)}`;
+    }).format(Math.abs(val));
+    const symbol = CURRENCY_SYMBOLS[curr] || curr;
+    return isNegative ? `-${symbol} ${formatted}` : `${symbol} ${formatted}`;
   };
 
-  // Live client-side state sync
+  // Sync state from cloud DB
   const refreshAppState = async () => {
     const response = await fetch('/api/dashboard-data');
     if (response.ok) {
@@ -158,16 +156,16 @@ export default function MoneyRadarApp({
       setMetrics(data.metrics);
       setMovements(data.movements.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })));
       
-      // Keep selected details Panel updated
+      // Update details panel if open
       if (selectedHolder) {
         const updatedSelected = data.holders.find((h: any) => h.id === selectedHolder.id);
         if (updatedSelected) {
           setSelectedHolder(updatedSelected);
-          
-          // Re-fetch individual timeline
-          const timelineRes = await fetch(`/api/dashboard-data`); // fallback timeline refresh
-          const details = data.movements.filter((m: any) => m.fromHolderId === updatedSelected.id || m.toHolderId === updatedSelected.id);
-          setHolderMovements(details.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })));
+          const timeline = data.movements.filter((m: any) => m.fromHolderId === updatedSelected.id || m.toHolderId === updatedSelected.id);
+          setHolderMovements(timeline.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })));
+        } else {
+          // If the holder was deleted
+          setSelectedHolder(null);
         }
       }
     }
@@ -177,7 +175,6 @@ export default function MoneyRadarApp({
   const filteredHolders = useMemo(() => {
     let result = holders;
 
-    // Filter by Top Segmented Tab
     if (activeTab === 'wallets') {
       result = result.filter(h => h.category === 'holder');
     } else if (activeTab === 'partners') {
@@ -186,7 +183,6 @@ export default function MoneyRadarApp({
       result = result.filter(h => h.category === 'upcoming' || h.isUpcoming);
     }
 
-    // Filter by Search Query
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -220,18 +216,16 @@ export default function MoneyRadarApp({
     });
   }, [movements, searchQuery]);
 
-  // Click handler to load Holder details and setup initial reconciliation currency
+  // Click handler for Holders
   const handleSelectHolder = async (holder: Holder) => {
     setIsLoadingHolder(true);
     setSelectedHolder(holder);
     
-    // Default to the first available currency in their wallet for physical reconciliation
     const defaultCurrency = holder.balances[0]?.currency || 'USD';
     setReconcileCurrency(defaultCurrency);
     setReconcileVal((holder.balances[0]?.actualBalance ?? 0).toString());
 
     try {
-      const response = await fetch(`/api/dashboard-data`); // Sync state
       const timeline = movements.filter(m => m.fromHolderId === holder.id || m.toHolderId === holder.id);
       setHolderMovements(timeline);
     } catch (err) {
@@ -239,6 +233,86 @@ export default function MoneyRadarApp({
     } finally {
       setIsLoadingHolder(false);
     }
+  };
+
+  // Open Movement Form with SMART Auto-selection
+  const handleOpenMovementModal = () => {
+    let fromId = '';
+    let toId = '';
+
+    if (selectedHolder) {
+      // If we are looking at Ahmed (partner), we gave him money -> to Ahmed, from External/Wise
+      if (selectedHolder.category === 'partner') {
+        toId = selectedHolder.id;
+        fromId = 'external';
+      } 
+      // If we are looking at Slim Cash (holder), we paid out of Slim Cash -> from Slim Cash, to External
+      else if (selectedHolder.category === 'holder') {
+        fromId = selectedHolder.id;
+        toId = 'external';
+      }
+      // If we are looking at Rent (upcoming), we paid Rent -> from External/Slim Cash, to Rent
+      else if (selectedHolder.category === 'upcoming' || selectedHolder.isUpcoming) {
+        toId = selectedHolder.id;
+        fromId = 'external';
+      }
+    }
+
+    setFormData({
+      amount: '',
+      currency: selectedHolder?.balances[0]?.currency || 'USD',
+      fromHolderId: fromId,
+      toHolderId: toId,
+      note: '',
+      photo: null
+    });
+    setActiveModal('movement');
+  };
+
+  // Open Transfer Form with SMART Auto-selection
+  const handleOpenTransferModal = () => {
+    let fromId = '';
+    let toId = '';
+
+    if (selectedHolder) {
+      // If we are looking at Slim Cash (holder), we move out of Slim Cash -> from Slim Cash
+      if (selectedHolder.category === 'holder') {
+        fromId = selectedHolder.id;
+      } else {
+        toId = selectedHolder.id;
+      }
+    }
+
+    setFormData({
+      amount: '',
+      currency: selectedHolder?.balances[0]?.currency || 'USD',
+      fromHolderId: fromId,
+      toHolderId: toId,
+      note: '',
+      photo: null
+    });
+    setActiveModal('transfer');
+  };
+
+  // Erase/Delete Account Function
+  const handleEraseAccount = async () => {
+    if (!selectedHolder) return;
+    
+    const confirmDelete = window.confirm(
+      `⚠️ CRITICAL ERASE REQUEST:\n\nAre you sure you want to permanently erase "${selectedHolder.name}" and delete all its associated sub-wallets and transaction history from the cloud database?\n\nThis action is irreversible.`
+    );
+    
+    if (!confirmDelete) return;
+
+    startTransition(async () => {
+      const res = await deleteHolder(selectedHolder.id);
+      if (res.success) {
+        setSelectedHolder(null);
+        await refreshAppState();
+      } else {
+        alert(res.error || 'Failed to erase account.');
+      }
+    });
   };
 
   // Change reconciliation input value when currency changes
@@ -294,11 +368,6 @@ export default function MoneyRadarApp({
       const res = await reconcileHolder(selectedHolder.id, reconcileCurrency, actualVal);
       if (res.success) {
         await refreshAppState();
-        // Update selected holder local state reference
-        const updatedSelected = holders.find(h => h.id === selectedHolder.id);
-        if (updatedSelected) {
-          setSelectedHolder(updatedSelected);
-        }
       } else {
         alert('Reconciliation failed');
       }
@@ -323,7 +392,6 @@ export default function MoneyRadarApp({
     startTransition(async () => {
       const res = await createHolder(data);
       if (res.success) {
-        // Reset form
         setAccountFormData({
           name: '',
           emoji: '💵',
@@ -448,22 +516,22 @@ export default function MoneyRadarApp({
 
       <div className="max-w-4xl mx-auto px-4 mt-6 flex flex-col gap-8">
         
-        {/* 2. Apple Wallet Style Giant Metric cards */}
+        {/* 2. Simplified 100% Interactive Metrics Grid */}
         <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
           
           {/* Main Total Net Wealth Card */}
           <div className="md:col-span-2 glass-panel rounded-3xl p-6 relative overflow-hidden border border-neutral-800 glow-blue flex flex-col justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                TOTAL MONEY (USD)
+                TOTAL WEALTH (USD)
               </p>
-              <h2 className="text-4xl md:text-5xl font-black mt-2 tracking-tight text-white">
+              <h2 className="text-4xl md:text-5xl font-black mt-2 tracking-tight text-white animate-pulse">
                 {formatUSD(metrics.totalWealth)}
               </h2>
             </div>
             
             <div className="mt-4 pt-4 border-t border-neutral-900 flex justify-between items-center text-xs text-neutral-500">
-              <span>Expected: {formatUSD(metrics.expectedTotalWealth)}</span>
+              <span>Expected total: {formatUSD(metrics.expectedTotalWealth)}</span>
               {metrics.totalWealth !== metrics.expectedTotalWealth ? (
                 <span className={`font-semibold px-2 py-0.5 rounded-lg ${
                   metrics.totalWealth >= metrics.expectedTotalWealth ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
@@ -476,8 +544,13 @@ export default function MoneyRadarApp({
             </div>
           </div>
 
-          {/* Available Cash */}
-          <div className="glass-panel rounded-3xl p-6 border border-neutral-800 relative glow-blue flex flex-col justify-between">
+          {/* Interactive Available Cash Card (Clickable - filters My Wallets) */}
+          <div 
+            onClick={() => setActiveCategoryTab('wallets')}
+            className={`glass-panel rounded-3xl p-6 border cursor-pointer transition active:scale-95 flex flex-col justify-between ${
+              activeTab === 'wallets' ? 'border-blue-500/60 bg-blue-500/5 glow-blue' : 'border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
                 AVAILABLE CASH
@@ -489,44 +562,40 @@ export default function MoneyRadarApp({
             <p className="text-[10px] text-neutral-500 mt-4">Cash wallets, Tunisia banks, Wise</p>
           </div>
 
-          {/* Inventory Value */}
-          <div className="glass-panel rounded-3xl p-6 border border-neutral-800 relative glow-orange flex flex-col justify-between">
+          {/* Interactive Partners Balance Card (Clickable - filters Partners net position) */}
+          <div 
+            onClick={() => setActiveCategoryTab('partners')}
+            className={`glass-panel rounded-3xl p-6 border cursor-pointer transition active:scale-95 flex flex-col justify-between ${
+              activeTab === 'partners' ? 'border-emerald-500/60 bg-emerald-500/5 glow-green' : 'border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                  INVENTORY VALUE
+                  PARTNERS BALANCE
                 </p>
-                <h3 className="text-2xl md:text-3xl font-black mt-2 text-orange-400">
-                  {formatUSD(metrics.inventoryValue)}
+                <h3 className={`text-2xl md:text-3xl font-black mt-2 ${metrics.partnersBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatUSD(metrics.partnersBalance)}
                 </h3>
               </div>
-              <Package className="h-5 w-5 text-orange-400 opacity-50" />
+              <Users className="h-5 w-5 text-neutral-500 opacity-50" />
             </div>
-            <p className="text-[10px] text-neutral-500 mt-4">Goods in Transit / Factory advances</p>
+            <p className="text-[10px] text-neutral-500 mt-4">
+              {metrics.partnersBalance >= 0 ? 'Net money owed to you' : 'Net money you owe'}
+            </p>
           </div>
 
-          {/* Receivables (Owed to you) */}
-          <div className="glass-panel rounded-3xl p-6 border border-neutral-800 relative glow-green flex flex-col justify-between md:col-span-2">
+          {/* Interactive Upcoming Payments Card (Clickable - filters Upcoming debits) */}
+          <div 
+            onClick={() => setActiveCategoryTab('upcoming')}
+            className={`glass-panel rounded-3xl p-6 border cursor-pointer transition active:scale-95 flex flex-col justify-between md:col-span-2 ${
+              activeTab === 'upcoming' ? 'border-red-500/60 bg-red-500/5 glow-red' : 'border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                  RECEIVABLES (OWED TO YOU)
-                </p>
-                <h3 className="text-2xl md:text-3xl font-black mt-2 text-emerald-400">
-                  {formatUSD(metrics.receivables)}
-                </h3>
-              </div>
-              <Users className="h-5 w-5 text-emerald-400 opacity-50" />
-            </div>
-            <p className="text-[10px] text-neutral-500 mt-4">Ahmed, Brother, China Office</p>
-          </div>
-
-          {/* Smart Feature widget: Upcoming Debit/Payments Card */}
-          <div className="glass-panel rounded-3xl p-6 border border-neutral-800 relative glow-red flex flex-col justify-between md:col-span-2">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                  UPCOMING PAYMENTS
+                  UPCOMING FUTURE DEBITS
                 </p>
                 <h3 className="text-2xl md:text-3xl font-black mt-2 text-red-400">
                   {formatUSD(metrics.upcomingPayments)}
@@ -534,7 +603,7 @@ export default function MoneyRadarApp({
               </div>
               <Clock className="h-5 w-5 text-red-400 opacity-50" />
             </div>
-            <p className="text-[10px] text-neutral-500 mt-4">Future debit areas (Rent, Logistics, etc.)</p>
+            <p className="text-[10px] text-neutral-500 mt-4">Upcoming expected payments across areas</p>
           </div>
         </section>
 
@@ -542,9 +611,9 @@ export default function MoneyRadarApp({
         <section className="flex flex-col gap-4">
           <div className="bg-neutral-950 p-1 rounded-2xl border border-neutral-900 flex">
             {[
-              { id: 'all', label: 'All Holders' },
+              { id: 'all', label: 'All' },
               { id: 'wallets', label: 'My Wallets' },
-              { id: 'partners', label: 'Partners / 3rd Party' },
+              { id: 'partners', label: 'Partners' },
               { id: 'upcoming', label: 'Upcoming' }
             ].map((tab) => (
               <button
@@ -726,10 +795,7 @@ export default function MoneyRadarApp({
         <div className="glass-panel border border-neutral-800 rounded-full px-5 py-3.5 shadow-2xl flex items-center gap-6 pointer-events-auto">
           {/* Movement Button */}
           <button
-            onClick={() => {
-              setFormData(p => ({ ...p, fromHolderId: '', toHolderId: '' }));
-              setActiveModal('movement');
-            }}
+            onClick={handleOpenMovementModal}
             className="flex items-center gap-2 bg-emerald-500 text-black font-extrabold text-sm px-6 py-3 rounded-full hover:bg-emerald-400 transition active:scale-95 glow-green"
           >
             <Plus className="h-4.5 w-4.5 stroke-[3]" />
@@ -738,10 +804,7 @@ export default function MoneyRadarApp({
 
           {/* Transfer Button */}
           <button
-            onClick={() => {
-              setFormData(p => ({ ...p, fromHolderId: '', toHolderId: '' }));
-              setActiveModal('transfer');
-            }}
+            onClick={handleOpenTransferModal}
             className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-white font-bold text-sm px-5 py-3 rounded-full transition active:scale-95"
           >
             <ArrowLeftRight className="h-4 w-4" />
@@ -782,15 +845,46 @@ export default function MoneyRadarApp({
                   </span>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedHolder(null)}
-                className="p-2 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              
+              <div className="flex items-center gap-2">
+                {/* Erase Account / Delete Button */}
+                <button
+                  onClick={handleEraseAccount}
+                  disabled={isPending}
+                  className="p-2.5 bg-rose-950/50 border border-rose-900/65 text-rose-400 hover:text-rose-300 rounded-full hover:bg-rose-900/60 transition active:scale-95"
+                  title="Erase Account permanently"
+                >
+                  <Trash2 className="h-4.5 w-4.5" />
+                </button>
+                
+                <button
+                  onClick={() => setSelectedHolder(null)}
+                  className="p-2 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="p-6 flex flex-col gap-8 flex-1">
+              {/* Actions Quick Header (Gave him more / Returned back) */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleOpenMovementModal}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 font-extrabold text-xs tracking-wider uppercase text-neutral-200 flex items-center justify-center gap-1.5"
+                >
+                  <ArrowUpRight className="h-4 w-4 text-emerald-400" />
+                  <span>{selectedHolder.category === 'partner' ? 'Give more / Pay' : 'New Inflow'}</span>
+                </button>
+                <button
+                  onClick={handleOpenTransferModal}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 font-extrabold text-xs tracking-wider uppercase text-neutral-200 flex items-center justify-center gap-1.5"
+                >
+                  <ArrowLeftRight className="h-4 w-4 text-blue-400" />
+                  <span>Transfer</span>
+                </button>
+              </div>
+
               {/* Aggregated USD display */}
               <div className={`border rounded-3xl p-6 ${getColorClasses(selectedHolder.color).bg} ${getColorClasses(selectedHolder.color).border}`}>
                 <p className="text-xs text-neutral-400 uppercase tracking-wider font-bold">
@@ -809,7 +903,7 @@ export default function MoneyRadarApp({
               {/* Individual currency wallets list */}
               <div className="flex flex-col gap-3">
                 <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
-                  Currency Breakdown
+                  Currency Wallets
                 </h4>
                 <div className="flex flex-col gap-2">
                   {selectedHolder.balances.map((b) => {
@@ -879,7 +973,7 @@ export default function MoneyRadarApp({
               {/* Timeline */}
               <div className="flex flex-col gap-3">
                 <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
-                  Timeline
+                  Movement History
                 </h4>
 
                 {isLoadingHolder ? (
@@ -912,8 +1006,8 @@ export default function MoneyRadarApp({
                               {relatedEmoji}
                             </span>
                             <div>
-                              <p className="text-sm font-bold text-white">
-                                {isOutgoing ? 'Sent to' : 'Received from'} {relatedName}
+                              <p className="text-sm font-bold text-white flex items-center gap-1">
+                                {isOutgoing ? 'Gave / Paid to' : 'Received back from'} {relatedName}
                               </p>
                               <p className="text-xs text-neutral-400 mt-0.5">
                                 {mov.note || <span className="italic text-neutral-700">No note</span>}
