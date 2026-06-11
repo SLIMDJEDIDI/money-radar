@@ -311,6 +311,42 @@ export default function MoneyHubApp({
     });
   };
 
+  const handleToggleReminder = async (id: string, isDone: boolean) => {
+    startTransition(async () => {
+      const res = await toggleReminderCompleted(id, isDone);
+      if (res.success) await refreshHubState();
+      else alert('Échec');
+    });
+  };
+
+  const handleDeleteReminder = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '🗑️ SUPPRIMER LE RAPPEL',
+      description: 'Êtes-vous sûr de vouloir supprimer ce rappel ?',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      isDanger: true,
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res = await deleteReminder(id);
+          if (res.success) await refreshHubState();
+          else alert('Échec');
+        });
+      }
+    });
+  };
+
+  const handleCreateReminderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!reminderForm.contactId || !reminderForm.amount || !reminderForm.dueDate) return;
+    const data = new FormData(); data.append('contactId', reminderForm.contactId); data.append('amount', reminderForm.amount); data.append('currencyCode', reminderForm.currencyCode); data.append('dueDate', reminderForm.dueDate); data.append('note', reminderForm.note);
+    startTransition(async () => {
+      const res = await createReminder(data);
+      if (res.success) { setReminderForm({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' }); setActiveModal(null); await refreshHubState(); }
+      else alert(res.error);
+    });
+  };
+
   const handleMasterWipeToZero = () => {
     setConfirmModal({ isOpen: true, title: '⚠️ RÉINITIALISATION GLOBALE', description: 'Action irréversible. Saisissez votre mot de passe administrateur :', confirmText: 'Wipe', cancelText: 'Annuler', isDanger: true, requirePassword: true, onConfirm: async (p: any) => {
       startTransition(async () => {
@@ -458,7 +494,7 @@ export default function MoneyHubApp({
               <div className="flex justify-between items-center"><h3 className="text-sm font-black uppercase flex items-center gap-2"><Settings className="h-4 w-4" /> Répertoire & Édition</h3> <button onClick={() => { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal('add_contact'); }} className="py-1.5 px-4 rounded-xl bg-emerald-500 text-black font-black text-[10px] uppercase transition">+ Ajouter un Partenaire</button></div>
               <div className="flex flex-col gap-2">
                 {allContacts.map(c => (
-                  <div key={c.id} className="p-4 rounded-2xl bg-neutral-950 border border-neutral-900 flex justify-between items-center">
+                  <div key={c.id} className="p-4 rounded-2xl bg-neutral-950 border border-neutral-800 flex justify-between items-center">
                     {editingHolderId === c.id ? (
                       <form onSubmit={(e) => handleSaveInlineEdit(e, c.id)} className="flex flex-1 gap-2"><input type="text" className="w-12 bg-black border border-neutral-800 rounded p-1 text-center text-white" value={editFormData.emoji} onChange={(e) => setEditFormData(p => ({...p, emoji: e.target.value}))} /><input type="text" className="flex-1 bg-black border border-neutral-800 rounded p-1 text-white" value={editFormData.name} onChange={(e) => setEditFormData(p => ({...p, name: e.target.value}))} /><button type="submit" className="bg-white text-black px-3 rounded text-[10px] font-black uppercase">SAVE</button><button type="button" onClick={() => setEditingHolderId(null)} className="text-neutral-500 px-2 text-[10px] font-black">X</button></form>
                     ) : (
