@@ -92,7 +92,7 @@ export default function MoneyHubApp({
       setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
       setAuditTrails(data.auditTrails.map((a: any) => ({ ...a, createdAt: new Date(a.createdAt) })));
       if (selectedContact) {
-        const updated = data.allContacts.find((c: any) => c.id === selectedContact.id);
+        const updated = data.contacts.find((c: any) => c.id === selectedContact.id);
         if (updated) setSelectedContact(updated);
       }
     }
@@ -131,7 +131,8 @@ export default function MoneyHubApp({
     e.preventDefault();
     startTransition(async () => {
       addOptimisticContact({ id: 'temp', name: contactForm.name, emoji: contactForm.emoji, netPositionUsd: 0, heldBalanceUsd:0, receivableBalanceUsd:0, payableBalanceUsd:0 });
-      const data = new FormData(); Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
+      const data = new FormData();
+      Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
       const res = await createContact(data, currentUser.username);
       if (res.success) { setActiveModal(null); await refreshHubState(); }
     });
@@ -145,6 +146,13 @@ export default function MoneyHubApp({
       if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
       else alert(res.error);
     });
+  };
+
+  const handleOpenEditContact = (e: React.MouseEvent, c: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContactForm({ id: c.id, name: c.name, emoji: c.emoji, country: c.country || '', isArchived: !!c.isArchived });
+    setActiveModal('edit_contact');
   };
 
   const handleCreateReminderSubmit = async (e: React.FormEvent) => {
@@ -170,7 +178,7 @@ export default function MoneyHubApp({
     }});
   };
 
-  const handleStartInlineEdit = (contact: Contact) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
+  const handleStartInlineEdit = (contact: any) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
   const handleSaveInlineEdit = async (e: React.FormEvent, id: string) => {
     e.preventDefault(); const data = new FormData(); data.append('contactId', id); data.append('name', editFormData.name); data.append('emoji', editFormData.emoji); data.append('country', ''); data.append('isArchived', 'false');
     startTransition(async () => { const res = await updateContact(data, currentUser.username); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
@@ -182,18 +190,9 @@ export default function MoneyHubApp({
     }});
   };
 
-  const getTransactionTypeStyle = (type: string) => {
-    switch (type) {
-      case 'HELD': return { text: 'text-blue-400', label: 'Avoirs', bg: 'bg-blue-500/10 border-blue-500/20' };
-      case 'RECEIVABLE': return { text: 'text-emerald-400', label: 'Créance', bg: 'bg-emerald-500/10 border-emerald-500/20' };
-      case 'PAYABLE': return { text: 'text-rose-400', label: 'Dette', bg: 'bg-rose-500/10 border-rose-500/20' };
-      default: return { text: 'text-neutral-400', label: '?', bg: 'bg-neutral-500/10 border-neutral-500/20' };
-    }
-  };
-
   if (!currentUser) return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm glass-panel border border-neutral-800 rounded-3xl p-8 flex flex-col gap-6 text-center shadow-2xl relative animate-scale-in">
+      <div className="w-full max-sm glass-panel border border-neutral-800 rounded-3xl p-8 flex flex-col gap-6 text-center shadow-2xl relative animate-scale-in">
         <div className="flex flex-col gap-1 items-center"><span className="p-3 bg-neutral-900 border border-neutral-800 text-emerald-400 rounded-2xl mb-2"><Lock className="h-6 w-6" /></span><h1 className="text-2xl font-black uppercase">MONEY HUB</h1></div>
         <form onSubmit={handleLogin} className="flex flex-col gap-4 mt-2">
           <input type="text" required placeholder="Identifiant" value={loginForm.username} onChange={(e) => setLoginForm(p => ({ ...p, username: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl py-3 px-4 text-sm focus:border-emerald-500/50 outline-none text-white" />
@@ -224,7 +223,7 @@ export default function MoneyHubApp({
           </div>
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
-            <input type="text" placeholder="Rechercher..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-3 pl-10 pr-9 text-sm focus:border-emerald-500/40 transition outline-none" />
+            <input type="text" placeholder="Rechercher..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-3 pl-10 pr-9 text-sm focus:border-emerald-500/40 transition outline-none text-white" />
           </div>
         </div>
       </header>
@@ -233,8 +232,8 @@ export default function MoneyHubApp({
         {activeSection === 'dashboard' && (
           <div className="flex flex-col gap-5">
             <div className="bg-gradient-to-br from-neutral-900 to-black border border-neutral-800 p-7 rounded-[32px] shadow-2xl relative overflow-hidden">
-              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Position Nette</p>
-              <h2 className="text-5xl font-black mt-2 tracking-tighter">{formatUSD(metrics.netPosition)}</h2>
+              <p className="text-[11px] font-black text-neutral-500 uppercase tracking-widest">Position Nette</p>
+              <h2 className={`text-5xl font-black mt-2 tracking-tighter ${metrics.netPosition >= 0 ? 'text-white' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
               <p className="text-[10px] text-emerald-500/80 mt-2 font-bold uppercase tracking-widest">Global USD</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -256,11 +255,14 @@ export default function MoneyHubApp({
 
         {activeSection === 'contacts' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 p-6 rounded-3xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-neutral-900/20 active:scale-95 transition">
+              <Plus className="h-6 w-6 text-emerald-500" /><p className="text-xs font-black uppercase text-neutral-400">Nouveau Partenaire</p>
+            </div>
             {optimisticContacts.map((c: any) => (
               <div key={c.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex flex-col gap-4">
                 <div className="flex justify-between items-start">
                   <div onClick={() => setSelectedContact(c)} className="flex items-center gap-3 cursor-pointer"><span className="text-3xl">{c.emoji}</span><div><p className="font-black text-white">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase font-bold">{c.country}</p></div></div>
-                  <button onClick={() => { setContactForm(c); setActiveModal('edit_contact'); }} className="p-2 text-blue-400"><Edit className="h-4 w-4" /></button>
+                  <button onClick={(e) => handleOpenEditContact(e, c)} className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-blue-400 active:scale-90 transition shadow-lg"><Edit className="h-4 w-4" /></button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 border-t border-neutral-800 pt-3 text-[10px] text-center font-black uppercase">
                   <div><p className="text-neutral-500 mb-1">Avoirs</p><p className="text-blue-400">{formatUSD(c.heldBalanceUsd)}</p></div>
@@ -296,42 +298,18 @@ export default function MoneyHubApp({
           </div>
         )}
 
-        {activeSection === 'reminders' && (
-          <div className="flex flex-col gap-6">
-            <button onClick={() => setActiveModal('add_reminder')} className="w-full py-4 bg-amber-600 text-white font-black uppercase rounded-2xl active:scale-95 transition">+ Créer un Rappel</button>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-3"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest">Retards</h3>
-                {reminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).map(r => (
-                  <div key={r.id} className="p-4 rounded-2xl border border-rose-950 bg-rose-950/10 flex justify-between items-center">
-                    <div><p className="text-xs font-extrabold text-rose-400">{r.contact?.name}</p><p className="text-xs font-bold mt-1">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-1 font-black">LE {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-2 rounded-full bg-emerald-500 text-black"><CheckCircle className="h-4 w-4" /></button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-3"><h3 className="text-xs font-black text-neutral-400 uppercase tracking-widest">Échéances</h3>
-                {reminders.filter(r => !r.isCompleted && new Date(r.dueDate) >= new Date()).map(r => (
-                  <div key={r.id} className="p-4 rounded-2xl border border-neutral-800 bg-neutral-900/40 flex justify-between items-center">
-                    <div><p className="text-xs font-extrabold">{r.contact?.name}</p><p className="text-xs font-bold mt-1">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-1 font-black">LE {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-2 rounded-full bg-emerald-500 text-black"><CheckCircle className="h-4 w-4" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {activeSection === 'settings' && (
           <div className="flex flex-col gap-6">
             <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex justify-between items-center"><div><p className="text-sm font-black">{currentUser.username}</p><p className="text-xs text-neutral-500">{currentUser.role}</p></div><button onClick={handleLogout} className="p-3 bg-rose-950/20 text-rose-400 rounded-2xl border border-rose-900/40"><LogOut className="h-5 w-5" /></button></div>
             <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex flex-col gap-6">
               <div className="flex justify-between items-center"><h3 className="text-sm font-black uppercase"><Settings className="h-4 w-4" /> Répertoire & Édition</h3> <button onClick={() => setActiveModal('add_contact')} className="py-1.5 px-4 rounded-xl bg-emerald-500 text-black font-black text-[10px] uppercase transition">+ Partenaire</button></div>
               <div className="flex flex-col gap-2">
-                {contacts.map(c => (
-                  <div key={c.id} className="p-4 rounded-2xl bg-neutral-950 border border-neutral-900 flex justify-between items-center">
+                {contacts.map((c:any) => (
+                  <div key={c.id} className="p-4 rounded-2xl bg-neutral-950 border border-neutral-800 flex justify-between items-center">
                     {editingHolderId === c.id ? (
                       <form onSubmit={(e) => handleSaveInlineEdit(e, c.id)} className="flex flex-1 gap-2"><input type="text" className="w-12 bg-black border border-neutral-800 rounded p-1 text-center text-white" value={editFormData.emoji} onChange={(e) => setEditFormData(p => ({...p, emoji: e.target.value}))} /><input type="text" className="flex-1 bg-black border border-neutral-800 rounded p-1 text-white" value={editFormData.name} onChange={(e) => setEditFormData(p => ({...p, name: e.target.value}))} /><button type="submit" className="bg-white text-black px-3 rounded text-[10px] font-black uppercase">SAVE</button><button type="button" onClick={() => setEditingHolderId(null)} className="text-neutral-500 px-2 text-[10px] font-black">X</button></form>
                     ) : (
-                      <><div className="flex items-center gap-3"><span className="text-xl">{c.emoji}</span><p className="text-sm font-extrabold text-white">{c.name}</p></div><div className="flex gap-2"><button onClick={() => handleStartInlineEdit(c)} className="p-2 text-blue-400"><Edit className="h-4 w-4" /></button><button onClick={() => handleEraseAccount(c.id, c.name)} className="p-2 text-rose-400"><Trash2 className="h-4 w-4" /></button></div></>
+                      <><div className="flex items-center gap-3"><span className="text-xl">{c.emoji}</span><p className="text-sm font-extrabold text-white">{c.name}</p></div><div className="flex gap-2"><button onClick={(e) => handleOpenEditContact(e, c)} className="p-2 text-blue-400 active:scale-90 transition"><Edit className="h-4 w-4" /></button><button onClick={() => handleEraseAccount(c.id, c.name)} className="p-2 text-rose-400 active:scale-90 transition"><Trash2 className="h-4 w-4" /></button></div></>
                     )}
                   </div>
                 ))}
@@ -387,7 +365,7 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'edit_contact' && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
           <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-[32px] p-7 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-3"><h3 className="font-black uppercase text-blue-400">Modifier Partenaire</h3><button onClick={() => setActiveModal(null)}><X className="h-4 w-4" /></button></div>
             <form onSubmit={handleUpdateContact} className="flex flex-col gap-4">
@@ -406,7 +384,7 @@ export default function MoneyHubApp({
             <div className="flex justify-between items-center border-b border-neutral-900 pb-3"><h3 className="font-black uppercase text-amber-500">Nouveau Rappel</h3><button onClick={() => setActiveModal(null)}><X className="h-4 w-4" /></button></div>
             <form onSubmit={handleCreateReminderSubmit} className="flex flex-col gap-4">
               <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={reminderForm.contactId} onChange={(e) => setReminderForm(p => ({...p, contactId: e.target.value}))}><option value="">Partenaire</option>{contacts.map((c:any) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
-              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white outline-none font-bold" placeholder="Montant" value={reminderForm.amount} onChange={(e) => setReminderForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-xl px-2 text-white outline-none font-bold" value={reminderForm.currencyCode} onChange={(e) => setReminderForm(p => ({...p, currencyCode: e.target.value}))}>{activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
+              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white outline-none font-bold" placeholder="Montant" value={reminderForm.amount} onChange={(e) => setReminderForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-xl px-2 text-white font-bold" value={reminderForm.currencyCode} onChange={(e) => setReminderForm(p => ({...p, currencyCode: e.target.value}))}>{initialActiveCurrencies.map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
               <input type="date" required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={reminderForm.dueDate} onChange={(e) => setReminderForm(p => ({...p, dueDate: e.target.value}))} />
               <div className="flex gap-2 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Enregistrer</button></div>
             </form>
@@ -425,8 +403,8 @@ export default function MoneyHubApp({
       )}
 
       {confirmModal.isOpen && (
-        <div className="fixed inset-0 z-[110] bg-black/95 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setConfirmModal({isOpen: false})}>
-          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-[32px] p-8 text-center flex flex-col gap-6 shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[130] bg-black/95 flex items-center justify-center p-4 animate-in scale-in duration-200" onClick={() => setConfirmModal({isOpen: false})}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-[32px] p-8 text-center flex flex-col gap-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex flex-col gap-3 items-center"><div className={`p-4 rounded-3xl ${confirmModal.isDanger ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}><AlertTriangle className="h-8 w-8" /></div><h3 className="text-xl font-black uppercase">{confirmModal.title}</h3><p className="text-xs text-neutral-400 font-bold">{confirmModal.description}</p></div>
             {confirmModal.requirePassword && ( <input type="password" placeholder="Mot de passe" className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-center text-sm outline-none text-white" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /> )}
             <div className="flex gap-3"><button onClick={() => setConfirmModal({isOpen:false})} className="flex-1 py-4 bg-neutral-900 text-white font-black rounded-2xl uppercase">Non</button><button onClick={async () => { const p = confirmPassword; setConfirmModal({isOpen:false}); setConfirmPassword(''); await confirmModal.onConfirm(p); }} className={`flex-1 py-4 font-black uppercase rounded-2xl ${confirmModal.isDanger ? 'bg-rose-600 text-white' : 'bg-emerald-500 text-black'}`}>{confirmModal.confirmText}</button></div>
@@ -435,7 +413,7 @@ export default function MoneyHubApp({
       )}
 
       {lightboxImage && (
-        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-pointer" onClick={() => setLightboxImage(null)}>
+        <div className="fixed inset-0 z-[140] bg-black/95 flex items-center justify-center p-4 cursor-pointer" onClick={() => setLightboxImage(null)}>
           <button className="absolute top-6 right-6 p-2 bg-neutral-900 border border-neutral-800 text-white rounded-full"><X className="h-5 w-5" /></button>
           <img src={lightboxImage} alt="Pièce Jointe" className="max-w-full max-h-[85vh] rounded-2xl object-contain border border-neutral-800" />
         </div>
