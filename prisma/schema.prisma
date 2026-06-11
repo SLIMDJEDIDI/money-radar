@@ -8,48 +8,90 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model MoneyHolder {
-  id              String          @id @default(cuid())
-  name            String          @unique
-  emoji           String          @default("💵")
-  color           String          @default("blue")    // "green" (owed to you), "blue" (your own), "orange" (inventory), "red" (you owe)
-  category        String          @default("holder")  // "holder" (your own cash/banks), "partner" (3rd parties), "upcoming" (debit accounts / upcoming payments)
-  partnerType     String?         // "person" | "company" (if category == "partner")
-  isUpcoming      Boolean         @default(false)     // true if category == "upcoming"
-  expectedBalance Float           @default(0)         // Aggregated USD value
-  actualBalance   Float           @default(0)         // Aggregated USD value
-  isSpecialTransit Boolean        @default(false)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  balances        HolderBalance[]
-  movementsFrom   MoneyMovement[] @relation("FromHolder")
-  movementsTo     MoneyMovement[] @relation("ToHolder")
+model HubContact {
+  id                  String           @id @default(cuid())
+  name                String           @unique
+  emoji               String           @default("👤")
+  country             String?          // e.g. "Chine", "Tunisie", "France"
+  isArchived          Boolean          @default(false)
+  heldBalanceUsd      Float            @default(0)    // Avoirs (Aggregated USD)
+  receivableBalanceUsd Float           @default(0)    // Créances (Aggregated USD)
+  payableBalanceUsd    Float            @default(0)    // Dettes (Aggregated USD)
+  netPositionUsd      Float            @default(0)    // held + receivable - payable
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  transactions        HubTransaction[] @relation("ContactTransactions")
+  reminders           HubReminder[]    @relation("ContactReminders")
 }
 
-model HolderBalance {
-  id              String      @id @default(cuid())
-  holderId        String
-  holder          MoneyHolder @relation(fields: [holderId], references: [id], onDelete: Cascade)
-  currency        String      @default("USD")     // "USD" | "EUR" | "TND"
-  expectedBalance Float       @default(0)
-  actualBalance   Float       @default(0)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  @@unique([holderId, currency])
+model HubCurrency {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "USD", "EUR", "CNY", "TND", "HKD"
+  symbol    String   // e.g. "$", "€", "¥", "DT", "HK$"
+  rateToUsd Float    // conversion rate (e.g. 1 EUR = 1.08 USD, 1 TND = 0.32 USD)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-model MoneyMovement {
-  id           String       @id @default(cuid())
-  amount       Float        // Original amount
-  currency     String       @default("USD")     // "USD" | "EUR" | "TND"
-  amountInUsd  Float        // Converted amount in USD
-  fromHolderId String?
-  fromHolder   MoneyHolder? @relation("FromHolder", fields: [fromHolderId], references: [id], onDelete: SetNull)
-  toHolderId   String?
-  toHolder     MoneyHolder? @relation("ToHolder", fields: [toHolderId], references: [id], onDelete: SetNull)
+model HubCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "Virement", "Prêt", "Dépôt", "Investissement"
+  isCustom  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HubTransaction {
+  id             String           @id @default(cuid())
+  amount         Float            // Original amount
+  currencyCode   String           @default("USD")
+  amountInUsd    Float            // Converted amount in USD
+  contactId      String
+  contact        HubContact       @relation("ContactTransactions", fields: [contactId], references: [id], onDelete: Cascade)
+  type           String           // "HELD" (Avoirs), "RECEIVABLE" (Créance), "PAYABLE" (Dette)
+  category       String           // "Virement", "Prêt", etc.
+  note           String?
+  photoPath      String?          // Attachment filepath/URL
+  attachmentName String?          // Name of the uploaded file
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  audits         HubAuditTrail[]  @relation("TransactionAudits")
+}
+
+model HubReminder {
+  id           String     @id @default(cuid())
+  amount       Float
+  currencyCode String     @default("USD")
+  amountInUsd  Float
+  contactId    String
+  contact      HubContact @relation("ContactReminders", fields: [contactId], references: [id], onDelete: Cascade)
+  dueDate      DateTime
   note         String?
-  photoPath    String?      // Local filepath of proof (e.g. "/uploads/proof_xyz.jpg")
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  isCompleted  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model HubAuditTrail {
+  id            String          @id @default(cuid())
+  transactionId String?
+  transaction   HubTransaction? @relation("TransactionAudits", fields: [transactionId], references: [id], onDelete: SetNull)
+  fieldName     String          // "amount", "note", "delete", "create", "edit"
+  oldValue      String?
+  newValue      String?
+  modifiedBy    String          @default("Administrateur")
+  createdAt     DateTime        @default(now())
+}
+
+model HubUser {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String   // MD5 or plain text or SHA-256 (simple string compare for private app)
+  role         String   @default("assistant") // "admin" | "assistant"
+  canWrite     Boolean  @default(true)
+  canEdit      Boolean  @default(false)
+  canDelete    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

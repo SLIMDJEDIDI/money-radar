@@ -1,18 +1,24 @@
-import { getDashboardData, getRecentMovements } from './data';
-import MoneyRadarApp from '@/components/MoneyRadarApp';
+import { getHubDashboardData } from './data';
+import MoneyHubApp from '@/components/MoneyHubApp';
 
-export const revalidate = 0; // Dynamic server rendering to fetch live SQLite database data on every load
+export const revalidate = 0; // Force dynamic rendering on every request to fetch fresh live Supabase data
 
 export default async function Page() {
-  const { holders, metrics } = await getDashboardData();
-  const initialMovements = await getRecentMovements();
+  const data = await getHubDashboardData();
 
   return (
     <main className="min-h-screen bg-black">
-      <MoneyRadarApp
-        initialHolders={holders}
-        initialMetrics={metrics}
-        initialMovements={initialMovements}
+      <MoneyHubApp
+        initialContacts={data.contacts}
+        initialAllContacts={data.allContacts}
+        initialCurrencies={data.currencies}
+        initialActiveCurrencies={data.activeCurrencies}
+        initialCategories={data.categories}
+        initialTransactions={data.transactions}
+        initialReminders={data.reminders}
+        initialAuditTrails={data.auditTrails}
+        initialUsers={data.users}
+        initialMetrics={data.metrics}
       />
     </main>
   );
