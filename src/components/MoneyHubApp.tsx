@@ -913,30 +913,124 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'add_transaction' && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6">
-            <div className="flex justify-between items-center"><h3 className="font-black uppercase text-emerald-400">Enregistrer une opération</h3><button onClick={() => setActiveModal(null)}><X className="h-5 w-5" /></button></div>
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+              <h3 className="font-black uppercase text-emerald-400">Enregistrer une opération</h3>
+              <button onClick={() => setActiveModal(null)} className="p-1 rounded-full bg-neutral-900 text-neutral-500 hover:text-white transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
             <form onSubmit={handleCreateTransaction} className="flex flex-col gap-4">
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm" value={transactionForm.contactId} onChange={(e) => setTransactionForm(p => ({...p, contactId: e.target.value}))}><option value="">-- Partenaire --</option>{allContacts.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
-              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 font-bold" placeholder="Montant" value={transactionForm.amount} onChange={(e) => setTransactionForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-xl px-3" value={transactionForm.currencyCode} onChange={(e) => setTransactionForm(p => ({...p, currencyCode: e.target.value}))}>{activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm" value={transactionForm.type} onChange={(e) => setTransactionForm(p => ({...p, type: e.target.value}))}><option value="HELD">Avoir</option><option value="RECEIVABLE">Créance</option><option value="PAYABLE">Dette</option></select>
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm" value={transactionForm.category} onChange={(e) => setTransactionForm(p => ({...p, category: e.target.value}))}>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm" placeholder="Note..." value={transactionForm.note} onChange={(e) => setTransactionForm(p => ({...p, note: e.target.value}))} />
-              <div className="flex items-center gap-3"><label className="p-3 bg-neutral-900 rounded-xl text-xs font-bold cursor-pointer">Photo/PDF <input type="file" className="hidden" onChange={handleFileChange} /></label><span className="text-[10px] text-neutral-500 truncate">{transactionForm.photo ? transactionForm.photo.name : 'Aucun'}</span></div>
-              <button type="submit" disabled={isPending} className="py-3 bg-white text-black font-black rounded-xl uppercase">{isPending ? 'Sync...' : 'Enregistrer'}</button>
+              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={transactionForm.contactId} onChange={(e) => setTransactionForm(p => ({...p, contactId: e.target.value}))}>
+                <option value="">-- Partenaire --</option>
+                {allContacts.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+              </select>
+              <div className="flex gap-2">
+                <input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 font-bold text-white outline-none" placeholder="Montant" value={transactionForm.amount} onChange={(e) => setTransactionForm(p => ({...p, amount: e.target.value}))} />
+                <select className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 text-white outline-none" value={transactionForm.currencyCode} onChange={(e) => setTransactionForm(p => ({...p, currencyCode: e.target.value}))}>
+                  {activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                </select>
+              </div>
+              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={transactionForm.type} onChange={(e) => setTransactionForm(p => ({...p, type: e.target.value}))}>
+                <option value="HELD">Avoir</option>
+                <option value="RECEIVABLE">Créance</option>
+                <option value="PAYABLE">Dette</option>
+              </select>
+              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={transactionForm.category} onChange={(e) => setTransactionForm(p => ({...p, category: e.target.value}))}>
+                {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" placeholder="Note..." value={transactionForm.note} onChange={(e) => setTransactionForm(p => ({...p, note: e.target.value}))} />
+              <div className="flex items-center gap-3">
+                <label className="p-3 bg-neutral-900 border border-neutral-800 rounded-xl text-xs font-bold cursor-pointer hover:bg-neutral-800 transition">Photo/PDF <input type="file" className="hidden" onChange={handleFileChange} /></label>
+                <span className="text-[10px] text-neutral-500 truncate">{transactionForm.photo ? transactionForm.photo.name : 'Aucun'}</span>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button>
+                <button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">{isPending ? 'Sync...' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'edit_contact' && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+              <h3 className="font-black uppercase text-blue-400">Modifier Partenaire</h3>
+              <button onClick={() => setActiveModal(null)} className="p-1 rounded-full bg-neutral-900 text-neutral-500 hover:text-white transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateContact} className="flex flex-col gap-4">
+              <div className="flex gap-2">
+                <input type="text" className="w-16 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-center text-white outline-none" value={contactForm.emoji} onChange={(e) => setContactForm(p => ({...p, emoji: e.target.value}))} />
+                <input type="text" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white outline-none" value={contactForm.name} onChange={(e) => setContactForm(p => ({...p, name: e.target.value}))} />
+              </div>
+              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={contactForm.country} onChange={(e) => setContactForm(p => ({...p, country: e.target.value}))} />
+              <label className="flex items-center gap-2 text-xs font-bold text-neutral-500 cursor-pointer select-none">
+                <input type="checkbox" checked={contactForm.isArchived} onChange={(e) => setContactForm(p => ({...p, isArchived: e.target.checked}))} className="accent-white" /> Archiver (Masquer)
+              </label>
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button>
+                <button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Sauver</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'add_reminder' && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+              <h3 className="font-black uppercase text-amber-500">Nouveau Rappel</h3>
+              <button onClick={() => setActiveModal(null)} className="p-1 rounded-full bg-neutral-900 text-neutral-500 hover:text-white transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateReminderSubmit} className="flex flex-col gap-4">
+              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={reminderForm.contactId} onChange={(e) => setReminderForm(p => ({...p, contactId: e.target.value}))}>
+                <option value="">-- Partenaire --</option>
+                {allContacts.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+              </select>
+              <div className="flex gap-2">
+                <input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white outline-none font-bold" placeholder="Montant" value={reminderForm.amount} onChange={(e) => setReminderForm(p => ({...p, amount: e.target.value}))} />
+                <select className="bg-neutral-900 border border-neutral-800 rounded-xl px-2 text-white outline-none font-bold" value={reminderForm.currencyCode} onChange={(e) => setReminderForm(p => ({...p, currencyCode: e.target.value}))}>
+                  {activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                </select>
+              </div>
+              <input type="date" required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" value={reminderForm.dueDate} onChange={(e) => setReminderForm(p => ({...p, dueDate: e.target.value}))} />
+              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white outline-none" placeholder="Note..." value={reminderForm.note} onChange={(e) => setReminderForm(p => ({...p, note: e.target.value}))} />
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button>
+                <button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Enregistrer</button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
       {activeModal === 'add_contact' && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6">
-            <h3 className="font-black uppercase text-emerald-400">Nouveau Partenaire</h3>
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-3">
+              <h3 className="font-black uppercase text-emerald-400">Nouveau Partenaire</h3>
+              <button onClick={() => setActiveModal(null)} className="p-1 rounded-full bg-neutral-900 text-neutral-500 hover:text-white transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
             <form onSubmit={handleCreateContact} className="flex flex-col gap-4">
-              <div className="flex gap-2"><input type="text" className="w-16 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-center" value={contactForm.emoji} onChange={(e) => setContactForm(p => ({...p, emoji: e.target.value}))} /><input type="text" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3" placeholder="Nom" value={contactForm.name} onChange={(e) => setContactForm(p => ({...p, name: e.target.value}))} /></div>
+              <div className="flex gap-2">
+                <input type="text" className="w-16 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-center" value={contactForm.emoji} onChange={(e) => setContactForm(p => ({...p, emoji: e.target.value}))} />
+                <input type="text" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3" placeholder="Nom" value={contactForm.name} onChange={(e) => setContactForm(p => ({...p, name: e.target.value}))} />
+              </div>
               <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3" placeholder="Pays" value={contactForm.country} onChange={(e) => setContactForm(p => ({...p, country: e.target.value}))} />
-              <button type="submit" disabled={isPending} className="py-3 bg-white text-black font-black rounded-xl uppercase">Créer</button>
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button>
+                <button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Créer</button>
+              </div>
             </form>
           </div>
         </div>
