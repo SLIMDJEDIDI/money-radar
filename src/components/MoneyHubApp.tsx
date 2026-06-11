@@ -83,20 +83,27 @@ export default function MoneyHubApp({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setTransactionForm(p => ({ ...p, photo: e.target.files![0] })); };
 
   const refreshHubState = async () => {
-    const res = await fetch('/api/dashboard-data');
-    if (res.ok) {
-      const data = await res.json();
-      setContacts(data.contacts);
-      setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
-      setMetrics(data.metrics);
-      setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
-      setAuditTrails(data.auditTrails.map((a: any) => ({ ...a, createdAt: new Date(a.createdAt) })));
-      if (selectedContact) {
-        const updated = data.contacts.find((c: any) => c.id === selectedContact.id);
-        if (updated) setSelectedContact(updated);
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`/api/dashboard-data?t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setContacts(data.contacts);
+        setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
+        setMetrics(data.metrics);
+        setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
+        setAuditTrails(data.auditTrails.map((a: any) => ({ ...a, createdAt: new Date(a.createdAt) })));
+      } else {
+        window.location.reload();
       }
+    } catch (e) {
+      window.location.reload();
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
     }
   };
+
+  const handleSelectContact = (c: any) => setSelectedContact(c);
 
   const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
 
