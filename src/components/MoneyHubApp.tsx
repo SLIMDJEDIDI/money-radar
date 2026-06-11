@@ -519,11 +519,22 @@ export default function MoneyHubApp({
   };
 
   const handleMasterWipeToZero = async () => {
-    if (!window.confirm('⚠️ WIPE GLOBAL ?')) return;
+    const password = window.prompt('⚠️ SÉCURITÉ : Saisissez votre mot de passe pour confirmer la réinitialisation complète de la base de données :');
+    if (password === null) return; // Annulé par l'utilisateur
+    if (!password) {
+      alert('Erreur: Le mot de passe est obligatoire pour cette opération.');
+      return;
+    }
+
     startTransition(async () => {
-      const res = await resetDatabaseToZero();
-      if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
+      const res = await resetDatabaseToZero(password, currentUser.id);
+      if (res.success) { 
+        setSelectedContact(null); 
+        setActiveModal(null); 
+        await refreshHubState(); 
+        alert('Base de données réinitialisée à zéro avec succès !');
+      }
+      else alert(res.error || 'Échec de la réinitialisation.');
     });
   };
 

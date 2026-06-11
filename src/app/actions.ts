@@ -660,9 +660,23 @@ export async function changeUserPassword(formData: FormData) {
   }
 }
 
-// 6. Master Reset Database to Zero (Money Hub Schema Reset)
-export async function resetDatabaseToZero() {
+// 6. Master Reset Database to Zero (Money Hub Schema Reset with secure password confirmation)
+export async function resetDatabaseToZero(password: string, userId: string) {
   try {
+    if (!password || !userId) {
+      return { success: false, error: 'Informations de sécurité manquantes.' };
+    }
+
+    // Fetch user and verify active password and administrator role
+    const user = await prisma.hubUser.findUnique({ where: { id: userId } });
+    if (!user || user.passwordHash !== password) {
+      return { success: false, error: 'Mot de passe de confirmation incorrect.' };
+    }
+
+    if (user.role !== 'admin') {
+      return { success: false, error: 'Droits insuffisants. Seul un administrateur peut réinitialiser le système.' };
+    }
+
     await prisma.$transaction(async (tx) => {
       // Clear all active tables
       await tx.hubAuditTrail.deleteMany({});
