@@ -151,6 +151,7 @@ interface MoneyHubAppProps {
   initialMetrics: Metrics;
 }
 
+// Global Currency symbols
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$',
   EUR: '€',
@@ -227,6 +228,26 @@ export default function MoneyHubApp({
 
   // Filters
   const [contactFilterType, setContactFilterType] = useState<'ALL' | 'HELD' | 'RECEIVABLE' | 'PAYABLE'>('ALL');
+
+  // Custom Confirmation Modal Configuration State (UX Friendly)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    confirmText: string;
+    cancelText: string;
+    onConfirm: (password?: string) => void | Promise<void>;
+    requirePassword?: boolean;
+    isDanger?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    confirmText: 'Confirmer',
+    cancelText: 'Annuler',
+    onConfirm: () => {}
+  });
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Inline edit state
   const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
@@ -472,13 +493,24 @@ export default function MoneyHubApp({
     });
   };
 
-  const handleDeleteTransaction = async (tId: string) => {
+  // Upgraded UX-Friendly Confirmations (REPLACES ALL WINDOW.CONFIRMS)
+  const handleDeleteTransaction = (tId: string) => {
     if (!currentUser?.canDelete) { alert('Droits insuffisants'); return; }
-    if (!window.confirm('Supprimer définitivement ?')) return;
-    startTransition(async () => {
-      const res = await deleteHubTransaction(tId, currentUser?.username);
-      if (res.success) await refreshHubState();
-      else alert(res.error);
+    
+    setConfirmModal({
+      isOpen: true,
+      title: '🗑️ SUPPRIMER L\'OPÉRATION',
+      description: 'Êtes-vous sûr de vouloir supprimer définitivement cette opération ? Les balances de vos fiches partenaires seront recalculées de manière transparente.',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      isDanger: true,
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res = await deleteHubTransaction(tId, currentUser?.username);
+          if (res.success) await refreshHubState();
+          else alert(res.error);
+        });
+      }
     });
   };
 
@@ -490,12 +522,21 @@ export default function MoneyHubApp({
     });
   };
 
-  const handleDeleteReminder = async (id: string) => {
-    if (!window.confirm('Supprimer ?')) return;
-    startTransition(async () => {
-      const res = await deleteReminder(id);
-      if (res.success) await refreshHubState();
-      else alert('Échec');
+  const handleDeleteReminder = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '🗑️ SUPPRIMER LE RAPPEL',
+      description: 'Êtes-vous sûr de vouloir supprimer ce rappel ? Cette opération n\'affecte pas vos comptes.',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      isDanger: true,
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res = await deleteReminder(id);
+          if (res.success) await refreshHubState();
+          else alert('Échec');
+        });
+      }
     });
   };
 
@@ -518,23 +559,31 @@ export default function MoneyHubApp({
     });
   };
 
-  const handleMasterWipeToZero = async () => {
-    const password = window.prompt('⚠️ SÉCURITÉ : Saisissez votre mot de passe pour confirmer la réinitialisation complète de la base de données :');
-    if (password === null) return; // Annulé par l'utilisateur
-    if (!password) {
-      alert('Erreur: Le mot de passe est obligatoire pour cette opération.');
-      return;
-    }
-
+  const handleMasterWipeToZero = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: '⚠️ RÉINITIALISATION GLOBALE',
+      description: 'ATTENTION: Cette action va complètement effacer vos historiques de transactions, vider vos contacts et réinitialiser la base de données de Supabase. Pour confirmer, veuillez saisir votre mot de passe administrateur active ci-dessous :',
+      confirmText: 'Réinitialiser à zéro',
+      cancelText: 'Conserver les données',
+      isDanger: true,
+      requirePassword: true,
+      onConfirm: async (typedPassword) => {
+        if (!typedPassword) {
+          alert('Erreur: Mot de passe requis.');
+          return;
+        }
     startTransition(async () => {
-      const res = await resetDatabaseToZero(password, currentUser.id);
+      const res = await resetDatabaseToZero(typedPassword, currentUser?.id || '');
       if (res.success) { 
-        setSelectedContact(null); 
-        setActiveModal(null); 
-        await refreshHubState(); 
-        alert('Base de données réinitialisée à zéro avec succès !');
+            setSelectedContact(null); 
+            setActiveModal(null); 
+            await refreshHubState(); 
+            alert(' MONEY HUB réinitialisé avec succès !');
+          }
+          else alert(res.error || 'Échec de la réinitialisation.');
+        });
       }
-      else alert(res.error || 'Échec de la réinitialisation.');
     });
   };
 
@@ -564,13 +613,28 @@ export default function MoneyHubApp({
     });
   };
 
-  const handleEraseAccount = async (id: string, name: string) => {
-    if (!window.confirm(`Supprimer ${name} ?`)) return;
-    startTransition(async () => {
-      const res = await deleteContact(id);
-      if (res.success) { if (selectedContact?.id === id) setSelectedContact(null); await refreshHubState(); }
-      else alert(res.error);
+  const handleEraseAccount = (id: string, name: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '🗑️ SUPPRIMER LE CONTACT',
+      description: `Êtes-vous absolument sûr de vouloir supprimer définitivement "${name}" ? Ses informations et son historique de transactions seront effacés de Supabase.`,
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler',
+      isDanger: true,
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res = await deleteContact(id);
+          if (res.success) { if (selectedContact?.id === id) setSelectedContact(null); await refreshHubState(); }
+          else alert(res.error || 'Impossible de supprimer ce partenaire (il possède un historique de transactions).');
+        });
+      }
     });
+  };
+
+  const handleContactFormDeleteClick = (id: string) => {
+    const contact = allContacts.find(c => c.id === id);
+    if (!contact) return;
+    handleEraseAccount(id, contact.name);
   };
 
   const getTransactionTypeStyle = (type: string) => {
@@ -780,7 +844,7 @@ export default function MoneyHubApp({
           <div className="w-full max-w-md bg-neutral-950 border-l border-neutral-800 h-full overflow-y-auto p-6 flex flex-col gap-8">
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4">
               <div className="flex items-center gap-3"><span className="text-4xl">{selectedContact.emoji}</span><div><h3 className="text-xl font-black">{selectedContact.name}</h3><p className="text-xs text-neutral-500 uppercase">{selectedContact.country}</p></div></div>
-              <button onClick={() => setSelectedContact(null)} className="p-2 bg-neutral-900 rounded-full"><X className="h-5 w-5" /></button>
+              <button onClick={() => setSelectedContact(null)} className="p-2 bg-neutral-950 rounded-full"><X className="h-5 w-5" /></button>
             </div>
             <div className={`p-6 rounded-3xl border ${selectedContact.netPositionUsd >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}>
               <p className="text-xs font-bold text-neutral-500 uppercase">Position Nette Globale (USD)</p>
@@ -850,6 +914,71 @@ export default function MoneyHubApp({
               <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm" placeholder="Note..." value={reminderForm.note} onChange={(e) => setReminderForm(p => ({...p, note: e.target.value}))} />
               <button type="submit" disabled={isPending} className="py-3 bg-white text-black font-black rounded-xl uppercase">Enregistrer</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM CONFIRMATION MODAL (UX FRIENDLY, NO BROWSER POPUPS) */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 relative flex flex-col gap-5 text-center shadow-2xl">
+            <div className="flex flex-col gap-2 items-center">
+              <span className={`p-3 rounded-2xl border ${
+                confirmModal.isDanger 
+                  ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' 
+                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              }`}>
+                <AlertTriangle className="h-6 w-6" />
+              </span>
+              <h3 className="text-base font-black tracking-wide uppercase text-white mt-1">
+                {confirmModal.title}
+              </h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                {confirmModal.description}
+              </p>
+            </div>
+
+            {confirmModal.requirePassword && (
+              <div>
+                <input
+                  type="password"
+                  required
+                  placeholder="Saisissez votre mot de passe"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-center text-sm text-white focus:border-neutral-600 outline-none"
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  setConfirmPassword('');
+                }}
+                className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-neutral-200 font-extrabold text-xs tracking-wider uppercase rounded-xl transition"
+              >
+                {confirmModal.cancelText}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const pass = confirmPassword;
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  setConfirmPassword('');
+                  await confirmModal.onConfirm(pass);
+                }}
+                className={`flex-1 py-2.5 font-black text-xs tracking-wider uppercase rounded-xl transition ${
+                  confirmModal.isDanger 
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white' 
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                }`}
+              >
+                {confirmModal.confirmText}
+              </button>
+            </div>
           </div>
         </div>
       )}
