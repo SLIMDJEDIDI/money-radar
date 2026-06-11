@@ -59,6 +59,7 @@ export default function MoneyHubApp({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isPending, startTransition] = useTransition();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedContact, setSelectedContact] = useState<any>(null);
@@ -292,19 +293,6 @@ export default function MoneyHubApp({
           </div>
         )}
 
-        {activeSection === 'history' && (
-          <div className="flex flex-col gap-3 animate-fade-up">
-            <h2 className="text-xs font-black text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2"> <History className="h-4 w-4" /> Historique de Traçabilité </h2>
-            {auditTrails.map((a: any) => (
-              <div key={a.id} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex flex-col gap-2">
-                <div className="flex justify-between items-start"><p className="text-[10px] font-black px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 uppercase">{a.entityType} : {a.action}</p><p className="text-[10px] text-neutral-500 font-bold">{new Date(a.createdAt).toLocaleString()}</p></div>
-                <p className="text-xs font-bold text-neutral-300">{a.details}</p>
-                <p className="text-[9px] text-neutral-500 font-black uppercase">Fait par : <span className="text-emerald-500">{a.modifiedBy}</span></p>
-              </div>
-            ))}
-          </div>
-        )}
-
         {activeSection === 'settings' && (
           <div className="flex flex-col gap-6">
             <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex justify-between items-center"><div><p className="text-sm font-black">{currentUser.username}</p><p className="text-xs text-neutral-500">{currentUser.role}</p></div><button onClick={handleLogout} className="p-3 bg-rose-950/20 text-rose-400 rounded-2xl border border-rose-900/40"><LogOut className="h-5 w-5" /></button></div>
@@ -333,10 +321,10 @@ export default function MoneyHubApp({
             { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-4 w-4" /> },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4" /> },
             { id: 'transactions', label: 'Ops', icon: <ArrowLeftRight className="h-4 w-4" /> },
-            { id: 'history', label: 'Audit', icon: <History className="h-4 w-4" /> },
+            { id: 'reminders', label: 'Rappels', icon: <Calendar className="h-4 w-4" /> },
             { id: 'settings', label: 'Param', icon: <Settings className="h-4 w-4" /> },
           ].map(s => (
-            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-1 px-4 py-2.5 rounded-2xl transition active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black' : 'text-neutral-500'}`}>
+            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-1 px-3 sm:px-4 py-2.5 rounded-2xl transition active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black' : 'text-neutral-500'}`}>
               {s.icon} <span className="text-[8px] font-black uppercase tracking-tighter">{s.label}</span>
             </button>
           ))}
