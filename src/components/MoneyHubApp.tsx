@@ -221,7 +221,7 @@ export default function MoneyHubApp({
   const [isPending, startTransition] = useTransition();
 
   // Modals Controller
-  const [activeModal, setActiveModal] = useState<'add_transaction' | 'edit_transaction' | 'add_reminder' | 'add_contact' | 'edit_contact' | 'settings' | null>(null);
+  const [activeModal, setActiveModal] = useState<'add_transaction' | 'edit_transaction' | 'add_reminder' | 'add_contact' | 'edit_contact' | 'settings' | 'quick_actions' | null>(null);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -959,6 +959,40 @@ export default function MoneyHubApp({
                   setConfirmPassword('');
                 }}
                 className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-neutral-200 font-extrabold text-xs tracking-wider uppercase rounded-xl transition"
+              >
+                {confirmModal.cancelText}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const pass = confirmPassword;
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  setConfirmPassword('');
+                  await confirmModal.onConfirm(pass);
+                }}
+                className={`flex-1 py-2.5 font-black text-xs tracking-wider uppercase rounded-xl transition ${
+                  confirmModal.isDanger 
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white' 
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                }`}
+              >
+                {confirmModal.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxImage && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-pointer" onClick={() => setLightboxImage(null)}>
+          <button className="absolute top-6 right-6 p-2 bg-neutral-900 border border-neutral-800 text-white rounded-full"><X className="h-5 w-5" /></button>
+          <img src={lightboxImage} className="max-w-full max-h-[85vh] rounded-2xl object-contain border border-neutral-800" />
+        </div>
+      )}
+    </div>
+  );
+}
+        className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-neutral-200 font-extrabold text-xs tracking-wider uppercase rounded-xl transition"
               >
                 {confirmModal.cancelText}
               </button>
