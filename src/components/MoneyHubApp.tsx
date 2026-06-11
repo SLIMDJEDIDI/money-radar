@@ -1,210 +1,65 @@
 'use client';
 
-import React, { useState, useTransition, useMemo, useEffect } from 'react';
+import React, { useState, useTransition, useMemo, useEffect, useOptimistic } from 'react';
 import {
-  Plus,
-  ArrowLeftRight,
-  Camera,
-  Search,
-  X,
-  ChevronRight,
-  RefreshCw,
-  Clock,
-  ExternalLink,
-  UserPlus,
-  Trash2,
-  Users,
-  Building,
-  User,
-  AlertTriangle,
-  Coins,
-  Package,
-  Settings,
-  Edit,
-  ArrowUpRight,
-  CheckCircle,
-  HelpCircle,
-  ShieldCheck,
-  Lock,
-  LogOut,
-  Calendar,
-  FileSpreadsheet,
-  FileText,
-  DollarSign,
-  Sun,
-  Moon,
-  Database
+  Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, RefreshCw, Clock, ExternalLink,
+  UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock,
+  Sun, Moon, CheckCircle, DollarSign, History
 } from 'lucide-react';
 import {
-  createContact,
-  updateContact,
-  deleteContact,
-  createHubTransaction,
-  updateHubTransaction,
-  deleteHubTransaction,
-  createReminder,
-  toggleReminderCompleted,
-  deleteReminder,
-  updateCurrencyRate,
-  toggleCurrencyActive,
-  createCategory,
-  deleteCategory,
-  createAssistantUser,
-  deleteAssistantUser,
-  changeUserPassword,
-  resetDatabaseToZero,
-  loginUser
+  createContact, updateContact, deleteContact,
+  createHubTransaction, deleteHubTransaction,
+  createReminder, toggleReminderCompleted, deleteReminder,
+  resetDatabaseToZero, loginUser
 } from '../app/actions';
 
-interface Contact {
-  id: string;
-  name: string;
-  emoji: string;
-  country: string | null;
-  isArchived: boolean;
-  heldBalanceUsd: number;
-  receivableBalanceUsd: number;
-  payableBalanceUsd: number;
-  netPositionUsd: number;
-}
+const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', CNY: '¥', TND: 'DT', HKD: 'HK$' };
 
-interface Currency {
-  id: string;
-  code: string;
-  symbol: string;
-  rateToUsd: number;
-  isActive: boolean;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  isCustom: boolean;
-}
-
-interface Transaction {
-  id: string;
-  amount: number;
-  currencyCode: string;
-  amountInUsd: number;
-  contactId: string;
-  contact: Contact;
-  type: string; // "HELD" | "RECEIVABLE" | "PAYABLE"
-  category: string;
-  note: string | null;
-  photoPath: string | null;
-  attachmentName: string | null;
-  createdAt: Date;
-}
-
-interface Reminder {
-  id: string;
-  amount: number;
-  currencyCode: string;
-  amountInUsd: number;
-  contactId: string;
-  contact: Contact;
-  dueDate: Date;
-  note: string | null;
-  isCompleted: boolean;
-}
-
-interface AuditTrail {
-  id: string;
-  transactionId: string | null;
-  transaction?: Transaction | null;
-  fieldName: string;
-  oldValue: string | null;
-  newValue: string | null;
-  modifiedBy: string;
-  createdAt: Date;
-}
-
-interface HubUser {
-  id: string;
-  username: string;
-  passwordHash: string;
-  role: string;
-  canWrite: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-}
-
-interface Metrics {
-  totalAvoirs: number;
-  totalReceivables: number;
-  totalPayables: number;
-  upcomingPayments: number;
-  netPosition: number;
-}
-
-interface MoneyHubAppProps {
-  initialContacts: Contact[];
-  initialAllContacts: Contact[];
-  initialCurrencies: Currency[];
-  initialActiveCurrencies: Currency[];
-  initialCategories: Category[];
-  initialTransactions: any[];
-  initialReminders: any[];
-  initialAuditTrails: any[];
-  initialUsers: HubUser[];
-  initialMetrics: Metrics;
-}
-
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  CNY: '¥',
-  TND: 'DT',
-  HKD: 'HK$',
-};
+interface Contact { id: string; name: string; emoji: string; country: string | null; isArchived: boolean; heldBalanceUsd: number; receivableBalanceUsd: number; payableBalanceUsd: number; netPositionUsd: number; }
 
 export default function MoneyHubApp({
-  initialContacts,
-  initialAllContacts,
-  initialCurrencies,
-  initialActiveCurrencies,
-  initialCategories,
-  initialTransactions,
-  initialReminders,
-  initialAuditTrails,
-  initialUsers,
-  initialMetrics
-}: MoneyHubAppProps) {
+  initialContacts, initialCurrencies, initialActiveCurrencies, initialCategories,
+  initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics
+}: any) {
+  // --- AUTH & THEME ---
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-  const [loginError, setLoginFormError] = useState('');
+  const [loginError, setLoginError] = useState('');
   useEffect(() => {
     const saved = localStorage.getItem('hub_session_user');
     if (saved) setCurrentUser(JSON.parse(saved));
   }, []);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'settings'>('dashboard');
-  
-  const [contacts, setContacts] = useState<Contact[]>(initialContacts);
-  const [allContacts, setAllContacts] = useState<Contact[]>(initialAllContacts);
-  const [currencies, setCurrencies] = useState<Currency[]>(initialCurrencies);
-  const [activeCurrencies, setActiveCurrencies] = useState<Currency[]>(initialActiveCurrencies);
-  const [categories, setCategories] = useState<Category[]>(initialCategories);
-  const [transactions, setTransactions] = useState<Transaction[]>(
-    initialTransactions.map(t => ({ ...t, createdAt: new Date(t.createdAt) }))
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings'>('dashboard');
+
+  // --- DATA STATES ---
+  const [contacts, setContacts] = useState(initialContacts);
+  const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
+  const [metrics, setMetrics] = useState(initialMetrics);
+
+  // --- OPTIMISTIC UI ---
+  const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(
+    transactions,
+    (state: any, newTx: any) => {
+      if (newTx.action === 'delete') return state.filter((t:any) => t.id !== newTx.id);
+      return [newTx, ...state];
+    }
   );
-  const [reminders, setReminders] = useState<Reminder[]>(
-    initialReminders.map(r => ({ ...r, dueDate: new Date(r.dueDate) }))
+
+  const [optimisticContacts, addOptimisticContact] = useOptimistic(
+    contacts,
+    (state: any, newContact: any) => {
+      if (newContact.action === 'delete') return state.filter((c:any) => c.id !== newContact.id);
+      return [...state, newContact].sort((a:any,b:any) => a.name.localeCompare(b.name));
+    }
   );
-  const [auditTrails, setAuditTrails] = useState<AuditTrail[]>(
-    initialAuditTrails.map(a => ({ ...a, createdAt: new Date(a.createdAt) }))
-  );
-  const [users, setUsers] = useState<HubUser[]>(initialUsers);
-  const [metrics, setMetrics] = useState<Metrics>(initialMetrics);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isPending, startTransition] = useTransition();
 
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [selectedContact, setSelectedContact] = useState<any>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [contactFilterType, setContactFilterType] = useState<'ALL' | 'HELD' | 'RECEIVABLE' | 'PAYABLE'>('ALL');
 
@@ -213,195 +68,117 @@ export default function MoneyHubApp({
   const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState({ name: '', emoji: '', color: 'blue' });
 
-  const [transactionForm, setTransactionForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', photo: null as File | null });
+  const [transactionForm, setTransactionForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' });
+  const [contactForm, setContactForm] = useState({ id: '', name: '', emoji: '👤', country: '' });
   const [reminderForm, setReminderForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' });
-  const [contactForm, setContactForm] = useState({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newAssistantForm, setNewAssistantForm] = useState({ username: '', password: '', canEdit: false, canDelete: false });
-  const [newPasswordForm, setNewPasswordForm] = useState({ password: '' });
 
-  const formatUSD = (val: number) => {
-    const isNegative = val < 0;
-    const formatted = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Math.abs(val));
-    return isNegative ? `-${formatted}` : formatted;
-  };
-
+  const formatUSD = (val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
   const formatRawCurrency = (val: number, curr: string) => {
-    const isNegative = val < 0;
-    const formatted = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(Math.abs(val));
     const symbol = CURRENCY_SYMBOLS[curr] || curr;
-    return isNegative ? `-${symbol} ${formatted}` : `${symbol} ${formatted}`;
+    return `${symbol} ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(val)}`;
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setTransactionForm(p => ({ ...p, photo: e.target.files![0] })); };
-  const handleSelectContact = (c: Contact) => setSelectedContact(c);
 
   const refreshHubState = async () => {
     const res = await fetch('/api/dashboard-data');
     if (res.ok) {
       const data = await res.json();
-      setContacts(data.contacts); setAllContacts(data.allContacts); setCurrencies(data.currencies); setActiveCurrencies(data.activeCurrencies);
-      setCategories(data.categories); setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
-      setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
-      setAuditTrails(data.auditTrails.map((a: any) => ({ ...a, createdAt: new Date(a.createdAt) })));
-      setUsers(data.users); setMetrics(data.metrics);
-      if (selectedContact) { const updated = data.allContacts.find((c: any) => c.id === selectedContact.id); if (updated) setSelectedContact(updated); }
+      setContacts(data.contacts);
+      setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
+      setMetrics(data.metrics);
+      if (selectedContact) {
+        const updated = data.allContacts.find((c: any) => c.id === selectedContact.id);
+        if (updated) setSelectedContact(updated);
+      }
     }
   };
 
+  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
+  const handleStartInlineEdit = (contact: Contact) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
+  const handleSaveInlineEdit = async (e: React.FormEvent, id: string) => {
+    e.preventDefault(); const data = new FormData(); data.append('contactId', id); data.append('name', editFormData.name); data.append('emoji', editFormData.emoji); data.append('country', ''); data.append('isArchived', 'false');
+    startTransition(async () => { const res = await updateContact(data, currentUser.username); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
+  };
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const data = new FormData(); data.append('username', loginForm.username); data.append('password', loginForm.password);
     const res = await loginUser(data);
     if (res.success && res.user) { setCurrentUser(res.user); localStorage.setItem('hub_session_user', JSON.stringify(res.user)); }
-    else setLoginFormError(res.error || 'Erreur');
+    else setLoginError('Identifiants invalides');
   };
-  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
 
-  const filteredContacts = useMemo(() => {
-    let result = contacts;
-    if (contactFilterType === 'HELD') result = result.filter(c => c.heldBalanceUsd > 0);
-    else if (contactFilterType === 'RECEIVABLE') result = result.filter(c => c.receivableBalanceUsd > 0);
-    else if (contactFilterType === 'PAYABLE') result = result.filter(c => c.payableBalanceUsd > 0);
-    if (searchQuery) { const q = searchQuery.toLowerCase(); result = result.filter(c => c.name.toLowerCase().includes(q) || (c.country && c.country.toLowerCase().includes(q))); }
-    return result;
-  }, [contacts, contactFilterType, searchQuery]);
-
-  const filteredTransactions = useMemo(() => {
-    if (!searchQuery) return transactions;
-    const q = searchQuery.toLowerCase();
-    return transactions.filter(t => t.contact.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q) || (t.note && t.note.toLowerCase().includes(q)) || t.currencyCode.toLowerCase().includes(q));
-  }, [transactions, searchQuery]);
-
-  const filteredReminders = useMemo(() => {
-    if (!searchQuery) return reminders;
-    const q = searchQuery.toLowerCase();
-    return reminders.filter(r => r.contact.name.toLowerCase().includes(q) || (r.note && r.note.toLowerCase().includes(q)));
-  }, [reminders, searchQuery]);
-
-  const handleCreateContact = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!contactForm.name) return;
-    const data = new FormData(); data.append('name', contactForm.name); data.append('emoji', contactForm.emoji); data.append('country', contactForm.country);
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const contact = contacts.find((c:any) => c.id === transactionForm.contactId);
+    const amount = parseFloat(transactionForm.amount);
     startTransition(async () => {
-      const res = await createContact(data);
-      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
+      addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
+      const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any)); data.append('modifiedBy', currentUser.username);
+      const res = await createHubTransaction(data, currentUser.username);
+      if (res.success) { setActiveModal(null); await refreshHubState(); }
     });
   };
 
-  const handleUpdateContact = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!contactForm.id || !contactForm.name) return;
-    const data = new FormData(); data.append('contactId', contactForm.id); data.append('name', contactForm.name); data.append('emoji', contactForm.emoji); data.append('country', contactForm.country); data.append('isArchived', contactForm.isArchived ? 'true' : 'false');
-    startTransition(async () => {
-      const res = await updateContact(data);
-      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
-    });
+  const handleDeleteTx = (id: string) => {
+    setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => {
+      startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id, currentUser.username); await refreshHubState(); });
+    }});
   };
 
-  const handleOpenEditContact = (c: Contact) => { setContactForm({ id: c.id, name: c.name, emoji: c.emoji, country: c.country || '', isArchived: c.isArchived }); setActiveModal('edit_contact'); };
-
-  const handleCreateTransaction = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!transactionForm.contactId || !transactionForm.amount) return;
-    const data = new FormData(); data.append('contactId', transactionForm.contactId); data.append('amount', transactionForm.amount); data.append('currencyCode', transactionForm.currencyCode); data.append('type', transactionForm.type); data.append('category', transactionForm.category); data.append('note', transactionForm.note); data.append('modifiedBy', currentUser?.username); if (transactionForm.photo) data.append('photo', transactionForm.photo);
+  const handleAddContact = async (e: React.FormEvent) => {
+    e.preventDefault();
     startTransition(async () => {
-      const res = await createHubTransaction(data);
-      if (res.success) { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', photo: null }); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
-    });
-  };
-
-  const handleToggleReminder = async (id: string, isDone: boolean) => {
-    startTransition(async () => {
-      const res = await toggleReminderCompleted(id, isDone);
-      if (res.success) await refreshHubState();
-      else alert('Échec');
-    });
-  };
-
-  const handleDeleteReminder = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: '🗑️ SUPPRIMER LE RAPPEL',
-      description: 'Êtes-vous sûr de vouloir supprimer ce rappel ?',
-      confirmText: 'Supprimer',
-      cancelText: 'Annuler',
-      isDanger: true,
-      onConfirm: async () => {
-        startTransition(async () => {
-          const res = await deleteReminder(id);
-          if (res.success) await refreshHubState();
-          else alert('Échec');
-        });
-      }
-    });
-  };
-
-  const handleCreateReminderSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!reminderForm.contactId || !reminderForm.amount || !reminderForm.dueDate) return;
-    const data = new FormData(); data.append('contactId', reminderForm.contactId); data.append('amount', reminderForm.amount); data.append('currencyCode', reminderForm.currencyCode); data.append('dueDate', reminderForm.dueDate); data.append('note', reminderForm.note);
-    startTransition(async () => {
-      const res = await createReminder(data);
-      if (res.success) { setReminderForm({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' }); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
+      addOptimisticContact({ id: 'temp', name: contactForm.name, emoji: contactForm.emoji, netPositionUsd: 0, heldBalanceUsd:0, receivableBalanceUsd:0, payableBalanceUsd:0 });
+      const data = new FormData(); Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
+      const res = await createContact(data, currentUser.username);
+      if (res.success) { setActiveModal(null); await refreshHubState(); }
     });
   };
 
   const handleMasterWipeToZero = () => {
-    setConfirmModal({ isOpen: true, title: '⚠️ RÉINITIALISATION GLOBALE', description: 'Action irréversible. Saisissez votre mot de passe administrateur :', confirmText: 'Wipe', cancelText: 'Annuler', isDanger: true, requirePassword: true, onConfirm: async (p: any) => {
+    setConfirmModal({ isOpen: true, title: '⚠️ WIPE GLOBAL ?', description: 'Saisissez votre mot de passe :', confirmText: 'Wipe', isDanger: true, requirePassword: true, onConfirm: async (p: any) => {
       startTransition(async () => {
         const res = await resetDatabaseToZero(p, currentUser?.id);
-        if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); alert('Reset OK'); } else alert(res.error);
+        if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error);
       });
     }});
   };
 
-  const handleStartInlineEdit = (contact: Contact) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
-  const handleSaveInlineEdit = async (e: React.FormEvent, id: string) => {
-    e.preventDefault(); const data = new FormData(); data.append('contactId', id); data.append('name', editFormData.name); data.append('emoji', editFormData.emoji); data.append('country', ''); data.append('isArchived', 'false');
-    startTransition(async () => { const res = await updateContact(data); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
-  };
-
-  const handleEraseAccount = (id: string, name: string) => {
-    setConfirmModal({ isOpen: true, title: '🗑️ SUPPRIMER CONTACT', description: `Supprimer ${name} ?`, confirmText: 'Supprimer', cancelText: 'Annuler', isDanger: true, onConfirm: async () => {
-      startTransition(async () => { const res = await deleteContact(id); if (res.success) { if (selectedContact?.id === id) setSelectedContact(null); await refreshHubState(); } else alert(res.error); });
-    }});
-  };
-
   if (!currentUser) return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
-      <div className="w-full max-w-sm glass-panel border border-neutral-800 rounded-3xl p-8 flex flex-col gap-6 text-center shadow-2xl relative">
-        <div className="flex flex-col gap-1 items-center"><span className="p-3 bg-neutral-900 border border-neutral-800 text-emerald-400 rounded-2xl mb-2"><Lock className="h-6 w-6" /></span><h1 className="text-2xl font-black tracking-wider uppercase">MONEY HUB</h1><p className="text-[10px] text-neutral-500 uppercase tracking-widest">PRIVÉ • SECURISE</p></div>
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm glass-panel border border-neutral-800 rounded-3xl p-8 flex flex-col gap-6 text-center shadow-2xl animate-scale-in">
+        <div className="flex flex-col gap-1 items-center"><span className="p-3 bg-neutral-900 border border-neutral-800 text-emerald-400 rounded-2xl mb-2"><Lock className="h-6 w-6" /></span><h1 className="text-2xl font-black uppercase">MONEY HUB</h1></div>
         <form onSubmit={handleLogin} className="flex flex-col gap-4 mt-2">
-          <input type="text" required placeholder="Identifiant" value={loginForm.username} onChange={(e) => setLoginForm(prev => ({ ...prev, username: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-3 px-4 text-sm text-white focus:border-neutral-600 outline-none" />
-          <input type="password" required placeholder="Mot de passe" value={loginForm.password} onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-3 px-4 text-sm text-white focus:border-neutral-600 outline-none" />
+          <input type="text" required placeholder="Identifiant" value={loginForm.username} onChange={(e) => setLoginForm(p => ({ ...p, username: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl py-3 px-4 text-sm focus:border-emerald-500/50 outline-none text-white" />
+          <input type="password" required placeholder="Mot de passe" value={loginForm.password} onChange={(e) => setLoginForm(p => ({ ...p, password: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl py-3 px-4 text-sm focus:border-emerald-500/50 outline-none text-white" />
           {loginError && <p className="text-rose-400 text-xs font-bold">{loginError}</p>}
-          <button type="submit" className="w-full py-3 bg-emerald-500 text-black font-black uppercase rounded-xl active:scale-95 transition">CONNEXION</button>
+          <button type="submit" className="w-full py-3 bg-emerald-500 text-black font-black uppercase rounded-xl active:scale-95 transition shadow-lg shadow-emerald-500/20">Accéder</button>
         </form>
       </div>
     </div>
   );
 
+  const filteredMovements = optimisticTransactions.filter((t:any) => !searchQuery || t.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.note?.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
     <div className={`min-h-screen pb-28 ambient-bg ${theme === 'light' ? 'bg-neutral-50 text-black' : 'bg-[#050505] text-white'}`}>
-      <header className="sticky top-0 z-40 bg-[#050505]/90 backdrop-blur-xl border-b border-neutral-900/80 p-4">
+      <header className="sticky top-0 z-40 bg-[#050505]/80 backdrop-blur-xl border-b border-neutral-900/50 p-4">
         <div className="max-w-4xl mx-auto flex flex-col gap-3">
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2.5"><span className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-sm shadow-emerald-500/20 shadow-lg">M</span><h1 className="text-lg font-black uppercase tracking-widest">MONEY HUB</h1></div>
-            <div className="flex gap-1.5">
-              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full bg-neutral-900 border border-neutral-800">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
+            <div className="flex items-center gap-2.5"><div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center text-black font-black">H</div><h1 className="text-lg font-black tracking-widest uppercase">MONEY HUB</h1></div>
+            <div className="flex gap-2">
+              <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full bg-neutral-900 border border-neutral-800">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
               <button onClick={refreshHubState} className="p-2 rounded-full bg-neutral-900 border border-neutral-800"><RefreshCw className={`h-4 w-4 ${isPending ? 'animate-spin' : ''}`} /></button>
-              <button onClick={handleLogout} className="p-2 rounded-full bg-rose-950/20 border border-rose-900/40 text-rose-400"><LogOut className="h-4 w-4" /></button>
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', photo: null }); setActiveModal('add_transaction'); }} className="flex-1 py-3.5 bg-gradient-to-r from-emerald-400 to-emerald-500 text-black font-black uppercase text-sm rounded-2xl flex items-center justify-center gap-2 shadow-emerald-500/30 shadow-lg active:scale-[0.97] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
-            <button onClick={() => { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal('add_contact'); }} className="px-4 py-3.5 bg-neutral-900 border border-neutral-700 text-white font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-1.5 active:scale-[0.97] transition" title="Ajouter contact"> <UserPlus className="h-5 w-5" /> <span className="hidden sm:inline">Partenaire</span> </button>
+            <button onClick={() => setActiveModal('add_tx')} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-sm rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Opération </button>
+            <button onClick={() => setActiveModal('add_contact')} className="px-5 py-3.5 bg-neutral-900 border border-neutral-800 text-white font-black uppercase text-xs rounded-2xl active:scale-[0.98] transition"> <UserPlus className="h-5 w-5" /> </button>
           </div>
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
             <input type="text" placeholder="Rechercher..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-3 pl-10 pr-9 text-sm focus:border-emerald-500/40 transition outline-none" />
-            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-neutral-900 hover:bg-neutral-700"><X className="h-3.5 w-3.5" /></button>}
           </div>
         </div>
       </header>
@@ -409,25 +186,22 @@ export default function MoneyHubApp({
       <main className="max-w-4xl mx-auto p-4 flex flex-col gap-6 animate-fade-up">
         {activeSection === 'dashboard' && (
           <div className="flex flex-col gap-5">
-            <div className="relative overflow-hidden bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 rounded-3xl glow-green">
-              <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-emerald-500/10 blur-3xl" />
-              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Position Nette Mondiale</p>
-              <h2 className={`text-5xl font-black mt-2 tracking-tight ${metrics.netPosition >= 0 ? 'text-white' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
-              <p className="text-[11px] text-neutral-500 mt-2 font-semibold">Avoirs + Créances − Dettes · en USD</p>
+            <div className="bg-gradient-to-br from-neutral-900 to-black border border-neutral-800 p-7 rounded-[32px] shadow-2xl relative overflow-hidden">
+              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Position Nette</p>
+              <h2 className="text-5xl font-black mt-2 tracking-tighter">{formatUSD(metrics.netPosition)}</h2>
+              <p className="text-[10px] text-emerald-500/80 mt-2 font-bold uppercase tracking-widest">Global USD</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-blue-500/40 transition active:scale-[0.97]"> <p className="text-[10px] font-black text-neutral-400 uppercase">Avoirs</p> <p className="text-2xl font-black text-blue-400 mt-2">{formatUSD(metrics.totalAvoirs)}</p> </div>
-              <div onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-emerald-500/40 transition active:scale-[0.97]"> <p className="text-[10px] font-black text-neutral-400 uppercase">À recevoir</p> <p className="text-2xl font-black text-emerald-400 mt-2">{formatUSD(metrics.totalReceivables)}</p> </div>
-              <div onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-rose-500/40 transition active:scale-[0.97]"> <p className="text-[10px] font-black text-neutral-400 uppercase">À payer</p> <p className="text-2xl font-black text-rose-400 mt-2">{formatUSD(metrics.totalPayables)}</p> </div>
-              <div onClick={() => setActiveSection('reminders')} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-amber-500/40 transition active:scale-[0.97]"> <p className="text-[10px] font-black text-neutral-400 uppercase">À venir</p> <p className="text-2xl font-black text-amber-500 mt-2">{formatUSD(metrics.upcomingPayments)}</p> </div>
+              <div onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer"> <p className="text-[10px] font-black text-neutral-500 uppercase">Avoirs</p> <p className="text-2xl font-black text-blue-400 mt-1">{formatUSD(metrics.totalAvoirs)}</p> </div>
+              <div onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer"> <p className="text-[10px] font-black text-neutral-500 uppercase">Créances</p> <p className="text-2xl font-black text-emerald-400 mt-1">{formatUSD(metrics.totalReceivables)}</p> </div>
+              <div onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer"> <p className="text-[10px] font-black text-neutral-500 uppercase">Dettes</p> <p className="text-2xl font-black text-rose-400 mt-1">{formatUSD(metrics.totalPayables)}</p> </div>
+              <div onClick={() => setActiveSection('reminders')} className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer"> <p className="text-[10px] font-black text-neutral-500 uppercase">Rappels</p> <p className="text-2xl font-black text-amber-500 mt-1">{formatUSD(metrics.upcomingPayments)}</p> </div>
             </div>
-            {reminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).length > 0 && (
-              <div onClick={() => setActiveSection('reminders')} className="bg-rose-950/20 border border-rose-900/50 p-4 rounded-2xl cursor-pointer flex items-center gap-3 active:scale-[0.98] transition"> <span className="p-2 rounded-xl bg-rose-500/20 text-rose-400"><AlertTriangle className="h-5 w-5" /></span> <div className="flex-1"> <p className="text-sm font-black text-rose-300">{reminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).length} retard(s)</p> <p className="text-[11px] text-rose-400/70">Cliquez pour voir les urgences</p> </div> <ChevronRight className="h-5 w-5 text-rose-400" /> </div>
-            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
-              {filteredContacts.slice(0, 6).map(c => (
-                <div key={c.id} onClick={() => handleSelectContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-neutral-600 transition active:scale-[0.98]">
-                  <div className="flex justify-between items-center"><div className="flex items-center gap-3"><span className="text-2xl">{c.emoji}</span><div><p className="font-extrabold text-sm">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase">{c.country}</p></div></div><p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p></div>
+              {optimisticContacts.slice(0, 4).map((c: any) => (
+                <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-4 rounded-2xl flex justify-between items-center active:scale-[0.98] transition cursor-pointer">
+                  <div className="flex items-center gap-3"><span className="text-2xl">{c.emoji}</span><p className="font-extrabold text-sm">{c.name}</p></div>
+                  <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>
                 </div>
               ))}
             </div>
@@ -436,13 +210,16 @@ export default function MoneyHubApp({
 
         {activeSection === 'contacts' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredContacts.map(c => (
+            {optimisticContacts.map((c: any) => (
               <div key={c.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex flex-col gap-4">
-                <div className="flex justify-between items-start"><div onClick={() => handleSelectContact(c)} className="flex items-center gap-3 cursor-pointer"><span className="text-3xl">{c.emoji}</span><div><p className="font-extrabold text-white">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase">{c.country}</p></div></div><button onClick={() => handleOpenEditContact(c)} className="p-2 rounded-lg bg-neutral-950 border border-neutral-800 text-blue-400"><Edit className="h-4 w-4" /></button></div>
-                <div className="grid grid-cols-3 gap-2 border-t border-neutral-800 pt-3 text-[10px] text-center font-bold">
-                  <div><p className="text-neutral-500">AVOIRS</p><p className="text-blue-400">{formatUSD(c.heldBalanceUsd)}</p></div>
-                  <div><p className="text-neutral-500">CRÉANCES</p><p className="text-emerald-400">{formatUSD(c.receivableBalanceUsd)}</p></div>
-                  <div><p className="text-neutral-500">DETTES</p><p className="text-rose-400">{formatUSD(c.payableBalanceUsd)}</p></div>
+                <div className="flex justify-between items-start">
+                  <div onClick={() => setSelectedContact(c)} className="flex items-center gap-3 cursor-pointer"><span className="text-3xl">{c.emoji}</span><div><p className="font-black text-white">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase font-bold">{c.country}</p></div></div>
+                  <button onClick={() => { setContactForm(c); setActiveModal('edit_contact'); }} className="p-2 text-blue-400"><Edit className="h-4 w-4" /></button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 border-t border-neutral-800 pt-3 text-[10px] text-center font-black uppercase">
+                  <div><p className="text-neutral-500 mb-1">Avoirs</p><p className="text-blue-400">{formatUSD(c.heldBalanceUsd)}</p></div>
+                  <div><p className="text-neutral-500 mb-1">Créances</p><p className="text-emerald-400">{formatUSD(c.receivableBalanceUsd)}</p></div>
+                  <div><p className="text-neutral-500 mb-1">Dettes</p><p className="text-rose-400">{formatUSD(c.payableBalanceUsd)}</p></div>
                 </div>
               </div>
             ))}
@@ -451,92 +228,62 @@ export default function MoneyHubApp({
 
         {activeSection === 'transactions' && (
           <div className="flex flex-col gap-3">
-            {filteredTransactions.map(t => (
-              <div key={t.id} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex justify-between items-center gap-4">
-                <div className="flex items-center gap-3"><span className="text-2xl p-2 rounded-xl bg-neutral-950 border border-neutral-800">{t.contact.emoji}</span><div><p className="text-sm font-extrabold">{t.contact.name}</p><p className="text-xs text-neutral-500 mt-1">{t.category} : {t.note}</p></div></div>
-                <div className="text-right flex items-center gap-3"><div><p className="text-sm font-black">{formatUSD(t.amountInUsd)}</p><p className="text-[10px] text-neutral-500">{t.createdAt.toLocaleDateString()}</p></div> {t.photoPath && <button onClick={() => setLightboxImage(t.photoPath)} className="p-2 rounded-lg bg-neutral-950 border border-neutral-800 text-blue-400"><Camera className="h-4 w-4" /></button>}</div>
+            {filteredMovements.map((t: any) => (
+              <div key={t.id} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex justify-between items-center">
+                <div className="flex items-center gap-3"><span className="text-2xl p-2 bg-neutral-950 rounded-xl">{t.contact?.emoji}</span><div><p className="text-sm font-black">{t.contact?.name}</p><p className="text-[10px] text-neutral-500 font-bold uppercase">{t.category} · {t.type}</p></div></div>
+                <div className="text-right flex items-center gap-3"><div><p className="text-sm font-black">{formatUSD(t.amountInUsd)}</p><p className="text-[10px] text-neutral-500">{t.createdAt.toLocaleDateString()}</p></div><button onClick={() => handleDeleteTx(t.id)} className="p-2 text-rose-500"><Trash2 className="h-4 w-4" /></button></div>
               </div>
             ))}
           </div>
         )}
 
-        {activeSection === 'reminders' && (
-          <div className="flex flex-col gap-6">
-            <button onClick={() => setActiveModal('add_reminder')} className="w-full py-4 bg-amber-600 text-white font-black uppercase rounded-2xl active:scale-95 transition">+ Créer un Rappel</button>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-3"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest">Retards</h3>
-                {filteredReminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).map(r => (
-                  <div key={r.id} className="p-4 rounded-2xl border border-rose-950 bg-rose-950/10 flex justify-between items-center">
-                    <div><p className="text-xs font-extrabold text-rose-400">{r.contact.name}</p><p className="text-xs font-bold mt-1">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-1 font-black">LE {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-2 rounded-full bg-emerald-500 text-black"><CheckCircle className="h-4 w-4" /></button>
-                  </div>
-                ))}
+        {activeSection === 'history' && (
+          <div className="flex flex-col gap-3">
+            <h2 className="text-xs font-black text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2"> <History className="h-4 w-4" /> Historique de Traçabilité </h2>
+            {initialAuditTrails.map((a: any) => (
+              <div key={a.id} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex flex-col gap-2">
+                <div className="flex justify-between items-start"><p className="text-[10px] font-black px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 uppercase">{a.entityType} : {a.action}</p><p className="text-[10px] text-neutral-500 font-bold">{new Date(a.createdAt).toLocaleString()}</p></div>
+                <p className="text-xs font-bold text-neutral-300">{a.details}</p>
+                <p className="text-[9px] text-neutral-500 font-black uppercase">Fait par : <span className="text-emerald-500">{a.modifiedBy}</span></p>
               </div>
-              <div className="flex flex-col gap-3"><h3 className="text-xs font-black text-neutral-400 uppercase tracking-widest">Échéances</h3>
-                {filteredReminders.filter(r => !r.isCompleted && new Date(r.dueDate) >= new Date()).map(r => (
-                  <div key={r.id} className="p-4 rounded-2xl border border-neutral-800 bg-neutral-900/40 flex justify-between items-center">
-                    <div><p className="text-xs font-extrabold">{r.contact.name}</p><p className="text-xs font-bold mt-1">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-1 font-black">LE {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-2 rounded-full bg-emerald-500 text-black"><CheckCircle className="h-4 w-4" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
         )}
 
         {activeSection === 'settings' && (
-          <div className="flex flex-col gap-8">
-            <div className="bg-rose-950/10 border border-rose-950 p-6 rounded-3xl flex justify-between items-center gap-4">
-              <div><h4 className="text-sm font-black text-rose-400 uppercase">Master Wipe</h4><p className="text-xs text-neutral-500 mt-1">Réinitialiser tout à zéro</p></div>
-              <button onClick={handleMasterWipeToZero} className="py-2.5 px-5 bg-rose-600 text-white font-black text-xs rounded-xl uppercase transition active:scale-95">Reset DB</button>
-            </div>
-            <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex flex-col gap-6">
-              <div className="flex justify-between items-center"><h3 className="text-sm font-black uppercase flex items-center gap-2"><Settings className="h-4 w-4" /> Répertoire & Édition</h3> <button onClick={() => { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal('add_contact'); }} className="py-1.5 px-4 rounded-xl bg-emerald-500 text-black font-black text-[10px] uppercase transition">+ Ajouter un Partenaire</button></div>
-              <div className="flex flex-col gap-2">
-                {allContacts.map(c => (
-                  <div key={c.id} className="p-4 rounded-2xl bg-neutral-950 border border-neutral-800 flex justify-between items-center">
-                    {editingHolderId === c.id ? (
-                      <form onSubmit={(e) => handleSaveInlineEdit(e, c.id)} className="flex flex-1 gap-2"><input type="text" className="w-12 bg-black border border-neutral-800 rounded p-1 text-center text-white" value={editFormData.emoji} onChange={(e) => setEditFormData(p => ({...p, emoji: e.target.value}))} /><input type="text" className="flex-1 bg-black border border-neutral-800 rounded p-1 text-white" value={editFormData.name} onChange={(e) => setEditFormData(p => ({...p, name: e.target.value}))} /><button type="submit" className="bg-white text-black px-3 rounded text-[10px] font-black uppercase">SAVE</button><button type="button" onClick={() => setEditingHolderId(null)} className="text-neutral-500 px-2 text-[10px] font-black">X</button></form>
-                    ) : (
-                      <><div className="flex items-center gap-3"><span className="text-xl">{c.emoji}</span><p className="text-sm font-extrabold text-white">{c.name}</p></div><div className="flex gap-2"><button onClick={() => handleStartInlineEdit(c)} className="p-2 text-blue-400"><Edit className="h-4 w-4" /></button><button onClick={() => handleEraseAccount(c.id, c.name)} className="p-2 text-rose-400"><Trash2 className="h-4 w-4" /></button></div></>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div className="flex flex-col gap-6">
+            <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex justify-between items-center"><div><p className="text-sm font-black">{currentUser.username}</p><p className="text-xs text-neutral-500">{currentUser.role}</p></div><button onClick={handleLogout} className="p-3 bg-rose-950/20 text-rose-400 rounded-2xl border border-rose-900/40"><LogOut className="h-5 w-5" /></button></div>
+            {currentUser.role === 'admin' && ( <button onClick={handleMasterWipeToZero} className="w-full py-4 bg-rose-600 text-white font-black uppercase rounded-2xl transition">⚠️ Master Wipe Database</button> )}
           </div>
         )}
       </main>
 
       <nav className="fixed bottom-4 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
-        <div className="glass-panel border border-neutral-800 rounded-2xl px-2 py-2 shadow-2xl flex items-center gap-1 pointer-events-auto">
-          {[{ id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-4 w-4" /> }, { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4" /> }, { id: 'transactions', label: 'Opérations', icon: <ArrowLeftRight className="h-4 w-4" /> }, { id: 'reminders', label: 'Rappels', icon: <Calendar className="h-4 w-4" /> }, { id: 'settings', label: 'Réglages', icon: <Settings className="h-4 w-4" /> }].map(s => (
-            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-0.5 px-3 sm:px-4 py-1.5 rounded-xl transition active:scale-90 ${activeSection === s.id ? 'bg-white text-black' : 'text-neutral-500'}`}> {s.icon} <span className="text-[9px] font-black uppercase tracking-tight">{s.label}</span> </button>
+        <div className="glass-panel border border-neutral-800 rounded-3xl p-2 shadow-2xl flex items-center gap-1 pointer-events-auto">
+          {[
+            { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-4 w-4" /> },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4" /> },
+            { id: 'transactions', label: 'Ops', icon: <ArrowLeftRight className="h-4 w-4" /> },
+            { id: 'history', label: 'Audit', icon: <History className="h-4 w-4" /> },
+            { id: 'settings', label: 'Param', icon: <Settings className="h-4 w-4" /> },
+          ].map(s => (
+            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-1 px-4 py-2.5 rounded-2xl transition active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black' : 'text-neutral-500'}`}>
+              {s.icon} <span className="text-[8px] font-black uppercase tracking-tighter">{s.label}</span>
+            </button>
           ))}
         </div>
       </nav>
 
-      {selectedContact && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end" onClick={() => setSelectedContact(null)}>
-          <div className="w-full max-w-md bg-neutral-950 border-l border-neutral-800 h-full overflow-y-auto p-6 flex flex-col gap-8 animate-in slide-in-from-right duration-300" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-3"><span className="text-4xl">{selectedContact.emoji}</span><div><h3 className="text-xl font-black">{selectedContact.name}</h3><p className="text-xs text-neutral-500 uppercase">{selectedContact.country}</p></div></div><button onClick={() => setSelectedContact(null)} className="p-2 bg-neutral-900 rounded-full"><X className="h-5 w-5" /></button></div>
-            <div className={`p-6 rounded-3xl border ${selectedContact.netPositionUsd >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}><p className="text-xs font-bold text-neutral-500 uppercase">Position Nette</p><p className={`text-4xl font-black mt-1 ${selectedContact.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p></div>
-            <div className="flex flex-col gap-2"> <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Avoirs</p><p className="font-black text-blue-400">{formatUSD(selectedContact.heldBalanceUsd)}</p></div> <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Créances</p><p className="font-black text-emerald-400">{formatUSD(selectedContact.receivableBalanceUsd)}</p></div> <div className="p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Dettes</p><p className="font-black text-rose-400">{formatUSD(selectedContact.payableBalanceUsd)}</p></div> </div>
-          </div>
-        </div>
-      )}
-
-      {activeModal === 'add_transaction' && (
+      {activeModal === 'add_tx' && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
-          <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-3"><h3 className="font-black uppercase text-emerald-400">Enregistrer opération</h3><button onClick={() => setActiveModal(null)}><X className="h-4 w-4" /></button></div>
-            <form onSubmit={handleCreateTransaction} className="flex flex-col gap-4">
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" value={transactionForm.contactId} onChange={(e) => setTransactionForm(p => ({...p, contactId: e.target.value}))}><option value="">-- Partenaire --</option>{allContacts.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
-              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 font-bold text-white outline-none" placeholder="Montant" value={transactionForm.amount} onChange={(e) => setTransactionForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 text-white" value={transactionForm.currencyCode} onChange={(e) => setTransactionForm(p => ({...p, currencyCode: e.target.value}))}>{activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" value={transactionForm.type} onChange={(e) => setTransactionForm(p => ({...p, type: e.target.value}))}><option value="HELD">Avoir</option><option value="RECEIVABLE">Créance</option><option value="PAYABLE">Dette</option></select>
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" value={transactionForm.category} onChange={(e) => setTransactionForm(p => ({...p, category: e.target.value}))}>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" placeholder="Note..." value={transactionForm.note} onChange={(e) => setTransactionForm(p => ({...p, note: e.target.value}))} />
-              <div className="flex gap-2 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">{isPending ? 'Sync...' : 'Enregistrer'}</button></div>
+          <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-[32px] p-7 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><h3 className="font-black uppercase text-emerald-400 tracking-widest">Enregistrer Opération</h3><button onClick={() => setActiveModal(null)} className="p-2 bg-neutral-900 rounded-full"><X className="h-4 w-4" /></button></div>
+            <form onSubmit={handleAddTransaction} className="flex flex-col gap-4">
+              <select required className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-sm text-white" value={transactionForm.contactId} onChange={e => setTransactionForm(p=>({...p, contactId: e.target.value}))}><option value="">Partenaire</option>{contacts.map((c:any) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
+              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-xl font-black text-white" placeholder="0.00" value={transactionForm.amount} onChange={e => setTransactionForm(p=>({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-2xl px-4 font-black text-white" value={transactionForm.currencyCode} onChange={e => setTransactionForm(p=>({...p, currencyCode: e.target.value}))}>{initialActiveCurrencies.map((c:any) => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
+              <div className="grid grid-cols-3 gap-2">{['HELD', 'RECEIVABLE', 'PAYABLE'].map(type => (<button key={type} type="button" onClick={() => setTransactionForm(p=>({...p, type}))} className={`py-3 rounded-xl text-[9px] font-black uppercase border transition ${transactionForm.type === type ? 'bg-white text-black' : 'border-neutral-800 text-neutral-500'}`}>{type === 'HELD' ? 'Avoir' : type === 'RECEIVABLE' ? 'Créance' : 'Dette'}</button>))}</div>
+              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-sm text-white" placeholder="Commentaire..." value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
+              <div className="flex gap-3 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-4 bg-neutral-900 text-white font-black rounded-2xl uppercase">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-4 bg-emerald-500 text-black font-black rounded-2xl uppercase shadow-lg shadow-emerald-500/20">Enregistrer</button></div>
             </form>
           </div>
         </div>
@@ -544,27 +291,33 @@ export default function MoneyHubApp({
 
       {activeModal === 'add_contact' && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
-          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-[32px] p-7 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-3"><h3 className="font-black uppercase text-emerald-400">Nouveau Partenaire</h3><button onClick={() => setActiveModal(null)}><X className="h-4 w-4" /></button></div>
-            <form onSubmit={handleCreateContact} className="flex flex-col gap-4">
-              <div className="flex gap-2"><input type="text" className="w-16 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-center text-white" value={contactForm.emoji} onChange={(e) => setContactForm(p => ({...p, emoji: e.target.value}))} /><input type="text" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white" placeholder="Nom" value={contactForm.name} onChange={(e) => setContactForm(p => ({...p, name: e.target.value}))} /></div>
-              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" placeholder="Pays" value={contactForm.country} onChange={(e) => setContactForm(p => ({...p, country: e.target.value}))} />
-              <div className="flex gap-2 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Créer</button></div>
+            <form onSubmit={handleAddContact} className="flex flex-col gap-4">
+              <div className="flex gap-2"><input type="text" className="w-16 bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-center text-white" value={contactForm.emoji} onChange={(e) => setContactForm(p => ({...p, emoji: e.target.value}))} /><input type="text" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-white" placeholder="Nom" value={contactForm.name} onChange={(e) => setContactForm(p => ({...p, name: e.target.value}))} /></div>
+              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-white" placeholder="Pays" value={contactForm.country} onChange={(e) => setContactForm(p => ({...p, country: e.target.value}))} />
+              <div className="flex gap-2 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-4 bg-neutral-900 text-white font-black rounded-2xl uppercase">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-4 bg-white text-black font-black rounded-2xl uppercase">Créer</button></div>
             </form>
           </div>
         </div>
       )}
 
-      {activeModal === 'add_reminder' && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
-          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 flex flex-col gap-6 animate-scale-in" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-3"><h3 className="font-black uppercase text-amber-500">Nouveau Rappel</h3><button onClick={() => setActiveModal(null)}><X className="h-4 w-4" /></button></div>
-            <form onSubmit={handleCreateReminderSubmit} className="flex flex-col gap-4">
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" value={reminderForm.contactId} onChange={(e) => setReminderForm(p => ({...p, contactId: e.target.value}))}><option value="">-- Partenaire --</option>{allContacts.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
-              <div className="flex gap-2"><input type="number" step="any" required className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-white font-bold" placeholder="Montant" value={reminderForm.amount} onChange={(e) => setReminderForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-xl px-2 text-white font-bold" value={reminderForm.currencyCode} onChange={(e) => setReminderForm(p => ({...p, currencyCode: e.target.value}))}>{activeCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
-              <input type="date" required className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm text-white" value={reminderForm.dueDate} onChange={(e) => setReminderForm(p => ({...p, dueDate: e.target.value}))} />
-              <div className="flex gap-2 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-3 bg-neutral-900 text-white font-black rounded-xl uppercase active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-3 bg-white text-black font-black rounded-xl uppercase active:scale-95 transition">Enregistrer</button></div>
-            </form>
+      {selectedContact && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end" onClick={() => setSelectedContact(null)}>
+          <div className="w-full max-w-md bg-neutral-950 border-l border-neutral-800 h-full overflow-y-auto p-6 flex flex-col gap-8 animate-in slide-in-from-right duration-300" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-3"><span className="text-4xl">{selectedContact.emoji}</span><div><h3 className="text-xl font-black">{selectedContact.name}</h3><p className="text-xs text-neutral-500 uppercase">{selectedContact.country}</p></div></div><button onClick={() => setSelectedContact(null)} className="p-2 bg-neutral-900 rounded-full"><X className="h-5 w-5" /></button></div>
+            <div className={`p-6 rounded-3xl border ${selectedContact.netPositionUsd >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}><p className="text-xs font-bold text-neutral-500 uppercase">Position Nette</p><p className={`text-4xl font-black mt-1 ${selectedContact.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p></div>
+            <div className="flex flex-col gap-2"><div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Avoirs</p><p className="font-black text-blue-400">{formatUSD(selectedContact.heldBalanceUsd)}</p></div><div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Créances</p><p className="font-black text-emerald-400">{formatUSD(selectedContact.receivableBalanceUsd)}</p></div><div className="p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl flex justify-between items-center"><p className="text-xs font-bold text-neutral-400">Dettes</p><p className="font-black text-rose-400">{formatUSD(selectedContact.payableBalanceUsd)}</p></div></div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/95 flex items-center justify-center p-4 animate-in scale-in duration-200" onClick={() => setConfirmModal({isOpen: false})}>
+          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-[32px] p-8 text-center flex flex-col gap-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex flex-col gap-3 items-center"><div className={`p-4 rounded-3xl ${confirmModal.isDanger ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}><AlertTriangle className="h-8 w-8" /></div><h3 className="text-xl font-black uppercase">{confirmModal.title}</h3><p className="text-xs text-neutral-400 font-bold">{confirmModal.description}</p></div>
+            {confirmModal.requirePassword && ( <input type="password" placeholder="Mot de passe" className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-center text-sm outline-none text-white" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /> )}
+            <div className="flex gap-3"><button onClick={() => setConfirmModal({isOpen:false})} className="flex-1 py-4 bg-neutral-900 text-white font-black rounded-2xl uppercase">Non</button><button onClick={async () => { const p = confirmPassword; setConfirmModal({isOpen:false}); setConfirmPassword(''); await confirmModal.onConfirm(p); }} className={`flex-1 py-4 font-black uppercase rounded-2xl ${confirmModal.isDanger ? 'bg-rose-600 text-white' : 'bg-emerald-500 text-black'}`}>{confirmModal.confirmText}</button></div>
           </div>
         </div>
       )}
@@ -573,18 +326,6 @@ export default function MoneyHubApp({
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-pointer" onClick={() => setLightboxImage(null)}>
           <button className="absolute top-6 right-6 p-2 bg-neutral-900 border border-neutral-800 text-white rounded-full"><X className="h-5 w-5" /></button>
           <img src={lightboxImage} alt="Pièce Jointe" className="max-w-full max-h-[85vh] rounded-2xl object-contain border border-neutral-800" />
-        </div>
-      )}
-
-      {confirmModal.isOpen && (
-        <div className="fixed inset-0 z-[110] bg-black/95 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setConfirmModal({ isOpen: false })}>
-          <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 relative flex flex-col gap-5 text-center shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
-            <div className="flex flex-col gap-2 items-center"><span className={`p-3 rounded-2xl border ${confirmModal.isDanger ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}><AlertTriangle className="h-6 w-6" /></span><h3 className="text-base font-black uppercase text-white mt-1">{confirmModal.title}</h3><p className="text-xs text-neutral-400 leading-relaxed">{confirmModal.description}</p></div>
-            {confirmModal.requirePassword && (
-              <div><input type="password" required placeholder="Mot de passe" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-center text-sm text-white focus:border-neutral-600 outline-none" /></div>
-            )}
-            <div className="flex gap-2"><button type="button" onClick={() => { setConfirmModal({ isOpen: false }); setConfirmPassword(''); }} className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 font-extrabold text-xs uppercase rounded-xl transition">Annuler</button><button type="button" onClick={async () => { const p = confirmPassword; setConfirmModal({ isOpen: false }); setConfirmPassword(''); await confirmModal.onConfirm(p); }} className={`flex-1 py-2.5 font-black text-xs uppercase rounded-xl transition ${confirmModal.isDanger ? 'bg-rose-600 text-white' : 'bg-emerald-500 text-black'}`}>{confirmModal.confirmText}</button></div>
-          </div>
         </div>
       )}
     </div>

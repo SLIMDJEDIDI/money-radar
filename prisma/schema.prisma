@@ -12,23 +12,26 @@ model HubContact {
   id                  String           @id @default(cuid())
   name                String           @unique
   emoji               String           @default("👤")
-  country             String?          // e.g. "Chine", "Tunisie", "France"
+  country             String?
   isArchived          Boolean          @default(false)
-  heldBalanceUsd      Float            @default(0)    // Avoirs (Aggregated USD)
-  receivableBalanceUsd Float           @default(0)    // Créances (Aggregated USD)
-  payableBalanceUsd    Float            @default(0)    // Dettes (Aggregated USD)
-  netPositionUsd      Float            @default(0)    // held + receivable - payable
+  heldBalanceUsd      Float            @default(0)
+  receivableBalanceUsd Float           @default(0)
+  payableBalanceUsd    Float            @default(0)
+  netPositionUsd      Float            @default(0)
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   transactions        HubTransaction[] @relation("ContactTransactions")
   reminders           HubReminder[]    @relation("ContactReminders")
+
+  @@index([name])
+  @@index([isArchived])
 }
 
 model HubCurrency {
   id        String   @id @default(cuid())
-  code      String   @unique // e.g. "USD", "EUR", "CNY", "TND", "HKD"
-  symbol    String   // e.g. "$", "€", "¥", "DT", "HK$"
-  rateToUsd Float    // conversion rate (e.g. 1 EUR = 1.08 USD, 1 TND = 0.32 USD)
+  code      String   @unique
+  symbol    String
+  rateToUsd Float
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -36,7 +39,7 @@ model HubCurrency {
 
 model HubCategory {
   id        String   @id @default(cuid())
-  name      String   @unique // e.g. "Virement", "Prêt", "Dépôt", "Investissement"
+  name      String   @unique
   isCustom  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -44,19 +47,22 @@ model HubCategory {
 
 model HubTransaction {
   id             String           @id @default(cuid())
-  amount         Float            // Original amount
+  amount         Float
   currencyCode   String           @default("USD")
-  amountInUsd    Float            // Converted amount in USD
+  amountInUsd    Float
   contactId      String
   contact        HubContact       @relation("ContactTransactions", fields: [contactId], references: [id], onDelete: Cascade)
-  type           String           // "HELD" (Avoirs), "RECEIVABLE" (Créance), "PAYABLE" (Dette)
-  category       String           // "Virement", "Prêt", etc.
+  type           String           // "HELD", "RECEIVABLE", "PAYABLE"
+  category       String
   note           String?
-  photoPath      String?          // Attachment filepath/URL
-  attachmentName String?          // Name of the uploaded file
+  photoPath      String?
+  attachmentName String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  audits         HubAuditTrail[]  @relation("TransactionAudits")
+
+  @@index([contactId])
+  @@index([type])
+  @@index([createdAt])
 }
 
 model HubReminder {
@@ -71,24 +77,33 @@ model HubReminder {
   isCompleted  Boolean    @default(false)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([contactId])
+  @@index([dueDate])
+  @@index([isCompleted])
 }
 
 model HubAuditTrail {
-  id            String          @id @default(cuid())
-  transactionId String?
-  transaction   HubTransaction? @relation("TransactionAudits", fields: [transactionId], references: [id], onDelete: SetNull)
-  fieldName     String          // "amount", "note", "delete", "create", "edit"
-  oldValue      String?
-  newValue      String?
-  modifiedBy    String          @default("Administrateur")
-  createdAt     DateTime        @default(now())
+  id            String   @id @default(cuid())
+  entityType    String   // "TRANSACTION", "CONTACT", "REMINDER", "SETTING", "USER"
+  entityId      String?
+  action        String   // "CREATE", "UPDATE", "DELETE", "WIPE", "LOGIN"
+  details       String?  // Description textuelle riche
+  oldValue      String?  // Valeur avant modif (JSON ou texte)
+  newValue      String?  // Valeur après modif (JSON ou texte)
+  modifiedBy    String   // Nom de l'utilisateur
+  createdAt     DateTime @default(now())
+
+  @@index([entityType])
+  @@index([createdAt])
+  @@index([modifiedBy])
 }
 
 model HubUser {
   id           String   @id @default(cuid())
   username     String   @unique
-  passwordHash String   // MD5 or plain text or SHA-256 (simple string compare for private app)
-  role         String   @default("assistant") // "admin" | "assistant"
+  passwordHash String
+  role         String   @default("assistant")
   canWrite     Boolean  @default(true)
   canEdit      Boolean  @default(false)
   canDelete    Boolean  @default(false)
