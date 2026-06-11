@@ -667,55 +667,100 @@ export default function MoneyHubApp({
   }
 
   return (
-    <div className={`min-h-screen pb-24 ${theme === 'light' ? 'bg-neutral-50 text-black' : 'bg-black text-white'}`}>
-      <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-md border-b border-neutral-900 p-4">
-        <div className="max-w-4xl mx-auto flex flex-col gap-4">
+    <div className={`min-h-screen pb-28 ambient-bg ${theme === 'light' ? 'bg-neutral-50 text-black' : 'bg-[#050505] text-white'}`}>
+      <header className="sticky top-0 z-40 bg-[#050505]/90 backdrop-blur-xl border-b border-neutral-900/80 p-4">
+        <div className="max-w-4xl mx-auto flex flex-col gap-3">
           <div className="flex justify-between items-center">
-            <h1 className="text-xl font-black uppercase tracking-widest">MONEY HUB</h1>
-            <div className="flex gap-2">
-              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full bg-neutral-900 border border-neutral-800">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
-              <button onClick={refreshHubState} className="p-2 rounded-full bg-neutral-900 border border-neutral-800"><RefreshCw className={`h-4 w-4 ${isPending ? 'animate-spin' : ''}`} /></button>
-              <button onClick={handleLogout} className="p-2 rounded-full bg-rose-950/20 border border-rose-900/40 text-rose-400"><LogOut className="h-4 w-4" /></button>
+            <div className="flex items-center gap-2.5">
+              <span className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-sm shadow-lg shadow-emerald-500/20">M</span>
+              <h1 className="text-lg font-black uppercase tracking-widest">MONEY HUB</h1>
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition active:scale-90">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
+              <button onClick={refreshHubState} className="p-2 rounded-full bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition active:scale-90"><RefreshCw className={`h-4 w-4 ${isPending ? 'animate-spin' : ''}`} /></button>
+              <button onClick={handleLogout} className="p-2 rounded-full bg-rose-950/20 border border-rose-900/40 text-rose-400 hover:bg-rose-950/40 transition active:scale-90"><LogOut className="h-4 w-4" /></button>
             </div>
           </div>
+
+          {/* ALWAYS-VISIBLE PRIMARY ACTIONS — FIRST THING THE USER SEES */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', photo: null }); setActiveModal('add_transaction'); }}
+              className="flex-1 py-3.5 bg-gradient-to-r from-emerald-400 to-emerald-500 text-black font-black uppercase text-sm rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 active:scale-[0.97] transition hover:from-emerald-300 hover:to-emerald-400"
+            >
+              <Plus className="h-5 w-5 stroke-[3]" />
+              Nouvelle Opération
+            </button>
+            <button
+              onClick={() => { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal('add_contact'); }}
+              className="px-4 py-3.5 bg-neutral-900 border border-neutral-700 text-white font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-1.5 active:scale-[0.97] transition hover:bg-neutral-800"
+              title="Ajouter un partenaire"
+            >
+              <UserPlus className="h-5 w-5" />
+              <span className="hidden sm:inline">Partenaire</span>
+            </button>
+          </div>
+
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
-            <input type="text" placeholder="Recherche..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-3 pl-10 text-sm focus:border-neutral-600" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
+            <input type="text" placeholder="Rechercher un nom, montant, devise..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-3 pl-10 pr-9 text-sm focus:border-emerald-500/40 transition outline-none" />
+            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full bg-neutral-800 hover:bg-neutral-700"><X className="h-3.5 w-3.5" /></button>}
           </div>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto p-4 flex flex-col gap-8">
         {activeSection === 'dashboard' && (
-          <div className="flex flex-col gap-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl glow-blue">
-                <p className="text-xs font-bold text-neutral-500 uppercase">Position Nette (USD)</p>
-                <h2 className="text-4xl font-black mt-2">{formatUSD(metrics.netPosition)}</h2>
+          <div className="flex flex-col gap-5 animate-fade-up">
+            {/* HERO NET POSITION */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-neutral-900 to-neutral-950 border border-neutral-800 p-6 rounded-3xl glow-green">
+              <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-emerald-500/10 blur-3xl" />
+              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Position Nette Mondiale</p>
+              <h2 className={`text-5xl font-black mt-2 tracking-tight ${metrics.netPosition >= 0 ? 'text-white' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
+              <p className="text-[11px] text-neutral-500 mt-2 font-semibold">Avoirs + Créances − Dettes · en USD</p>
+            </div>
+
+            {/* SMART STAT CARDS */}
+            <div className="grid grid-cols-2 gap-3">
+              <div onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-blue-500/40 transition active:scale-[0.97]">
+                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-400" /><p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">Avoirs</p></div>
+                <p className="text-2xl font-black text-blue-400 mt-2">{formatUSD(metrics.totalAvoirs)}</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-3xl cursor-pointer">
-                  <p className="text-[10px] font-bold text-neutral-500 uppercase">Avoirs</p>
-                  <p className="text-xl font-black text-blue-400 mt-1">{formatUSD(metrics.totalAvoirs)}</p>
-                </div>
-                <div onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-3xl cursor-pointer">
-                  <p className="text-[10px] font-bold text-neutral-500 uppercase">Créances</p>
-                  <p className="text-xl font-black text-emerald-400 mt-1">{formatUSD(metrics.totalReceivables)}</p>
-                </div>
-                <div onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-3xl cursor-pointer">
-                  <p className="text-[10px] font-bold text-neutral-500 uppercase">Dettes</p>
-                  <p className="text-xl font-black text-rose-400 mt-1">{formatUSD(metrics.totalPayables)}</p>
-                </div>
-                <div onClick={() => setActiveSection('reminders')} className="bg-neutral-900 border border-neutral-800 p-4 rounded-3xl cursor-pointer">
-                  <p className="text-[10px] font-bold text-neutral-500 uppercase">Rappels</p>
-                  <p className="text-xl font-black text-amber-500 mt-1">{formatUSD(metrics.upcomingPayments)}</p>
-                </div>
+              <div onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-emerald-500/40 transition active:scale-[0.97]">
+                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-400" /><p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">À recevoir</p></div>
+                <p className="text-2xl font-black text-emerald-400 mt-2">{formatUSD(metrics.totalReceivables)}</p>
+              </div>
+              <div onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-rose-500/40 transition active:scale-[0.97]">
+                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-rose-400" /><p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">À payer</p></div>
+                <p className="text-2xl font-black text-rose-400 mt-2">{formatUSD(metrics.totalPayables)}</p>
+              </div>
+              <div onClick={() => setActiveSection('reminders')} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-amber-500/40 transition active:scale-[0.97]">
+                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">À venir</p></div>
+                <p className="text-2xl font-black text-amber-500 mt-2">{formatUSD(metrics.upcomingPayments)}</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredContacts.slice(0, 4).map(c => (
-                <div key={c.id} onClick={() => handleSelectContact(c)} className="bg-neutral-900/50 border border-neutral-800 p-5 rounded-3xl cursor-pointer hover:border-neutral-700 transition">
-                  <div className="flex justify-between items-start">
+
+            {/* URGENT REMINDERS ALERT (time-saving) */}
+            {reminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).length > 0 && (
+              <div onClick={() => setActiveSection('reminders')} className="bg-rose-950/20 border border-rose-900/50 p-4 rounded-2xl cursor-pointer flex items-center gap-3 active:scale-[0.98] transition">
+                <span className="p-2 rounded-xl bg-rose-500/20 text-rose-400"><AlertTriangle className="h-5 w-5" /></span>
+                <div className="flex-1">
+                  <p className="text-sm font-black text-rose-300">{reminders.filter(r => !r.isCompleted && new Date(r.dueDate) < new Date()).length} paiement(s) en retard</p>
+                  <p className="text-[11px] text-rose-400/70">Cliquez pour voir les échéances urgentes</p>
+                </div>
+                <ChevronRight className="h-5 w-5 text-rose-400" />
+              </div>
+            )}
+
+            {/* TOP PARTNERS QUICK ACCESS */}
+            <div className="flex items-center justify-between mt-1">
+              <h3 className="text-xs font-black text-neutral-400 uppercase tracking-widest">Partenaires</h3>
+              <button onClick={() => setActiveSection('contacts')} className="text-[11px] font-bold text-emerald-400 flex items-center gap-0.5">Tout voir <ChevronRight className="h-3.5 w-3.5" /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filteredContacts.slice(0, 6).map(c => (
+                <div key={c.id} onClick={() => handleSelectContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-neutral-600 transition active:scale-[0.98]">
+                  <div className="flex justify-between items-center">
                     <div className="flex items-center gap-3"><span className="text-2xl">{c.emoji}</span><div><p className="font-extrabold text-sm">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase">{c.country}</p></div></div>
                     <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>
                   </div>
@@ -830,12 +875,20 @@ export default function MoneyHubApp({
         )}
       </main>
 
-      <div className="fixed bottom-6 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
-        <nav className="glass-panel border border-neutral-800 rounded-full px-5 py-3 shadow-2xl flex items-center gap-4 pointer-events-auto overflow-x-auto max-w-full">
-          {['dashboard', 'contacts', 'transactions', 'reminders', 'settings'].map(s => (
-            <button key={s} onClick={() => setActiveSection(s as any)} className={`text-[10px] font-black uppercase px-4 py-2.5 rounded-full transition ${activeSection === s ? 'bg-white text-black' : 'text-neutral-500'}`}>{s}</button>
+      <div className="fixed bottom-4 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
+        <nav className="glass-panel border border-neutral-800 rounded-2xl px-2 py-2 shadow-2xl flex items-center gap-1 pointer-events-auto">
+          {[
+            { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-4 w-4" /> },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4" /> },
+            { id: 'transactions', label: 'Opérations', icon: <ArrowLeftRight className="h-4 w-4" /> },
+            { id: 'reminders', label: 'Rappels', icon: <Calendar className="h-4 w-4" /> },
+            { id: 'settings', label: 'Réglages', icon: <Settings className="h-4 w-4" /> },
+          ].map(s => (
+            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-0.5 px-3 sm:px-4 py-1.5 rounded-xl transition active:scale-90 ${activeSection === s.id ? 'bg-white text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              {s.icon}
+              <span className="text-[9px] font-black uppercase tracking-tight">{s.label}</span>
+            </button>
           ))}
-          <button onClick={() => setActiveModal('add_transaction')} className="p-3 bg-emerald-500 text-black rounded-full shadow-lg active:scale-95 transition"><Plus className="h-5 w-5 stroke-[3]" /></button>
         </nav>
       </div>
 
@@ -959,40 +1012,6 @@ export default function MoneyHubApp({
                   setConfirmPassword('');
                 }}
                 className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-neutral-200 font-extrabold text-xs tracking-wider uppercase rounded-xl transition"
-              >
-                {confirmModal.cancelText}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const pass = confirmPassword;
-                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                  setConfirmPassword('');
-                  await confirmModal.onConfirm(pass);
-                }}
-                className={`flex-1 py-2.5 font-black text-xs tracking-wider uppercase rounded-xl transition ${
-                  confirmModal.isDanger 
-                    ? 'bg-rose-600 hover:bg-rose-500 text-white' 
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-black'
-                }`}
-              >
-                {confirmModal.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {lightboxImage && (
-        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-pointer" onClick={() => setLightboxImage(null)}>
-          <button className="absolute top-6 right-6 p-2 bg-neutral-900 border border-neutral-800 text-white rounded-full"><X className="h-5 w-5" /></button>
-          <img src={lightboxImage} className="max-w-full max-h-[85vh] rounded-2xl object-contain border border-neutral-800" />
-        </div>
-      )}
-    </div>
-  );
-}
-        className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-neutral-200 font-extrabold text-xs tracking-wider uppercase rounded-xl transition"
               >
                 {confirmModal.cancelText}
               </button>
