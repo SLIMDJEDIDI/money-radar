@@ -13,7 +13,7 @@ import {
   resetDatabaseToZero, loginUser
 } from '../app/actions';
 
-const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', CNY: '¥', RMB: '¥', TND: 'DT', HKD: 'HK$' };
+const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
 
 // --- HELPER COMPONENTS (MEMOIZED FOR SPEED) ---
 const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note }: any) => (

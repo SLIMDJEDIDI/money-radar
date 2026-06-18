@@ -11,10 +11,23 @@ export interface HubMetrics {
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
 export async function getHubDashboardData(searchQuery: string = '') {
   try {
-    // Ensure RMB exists
-    const rmb = await prisma.hubCurrency.findUnique({ where: { code: 'RMB' } });
-    if (!rmb) {
-      await prisma.hubCurrency.create({ data: { code: 'RMB', symbol: '¥', rateToUsd: 0.14 } });
+    // Ensure core currencies exist
+    const coreCodes = ['USD', 'RMB', 'EURO', 'TND'];
+    const existingCurrencies = await prisma.hubCurrency.findMany({
+      where: { code: { in: coreCodes } }
+    });
+    
+    if (existingCurrencies.length < coreCodes.length) {
+      const existingCodes = existingCurrencies.map(c => c.code);
+      const missing = coreCodes.filter(c => !existingCodes.includes(c));
+      
+      for (const code of missing) {
+        let symbol = '$', rate = 1.0;
+        if (code === 'RMB') { symbol = '¥'; rate = 0.14; }
+        else if (code === 'EURO') { symbol = '€'; rate = 1.08; }
+        else if (code === 'TND') { symbol = 'DT'; rate = 0.32; }
+        await prisma.hubCurrency.create({ data: { code, symbol, rateToUsd: rate } });
+      }
     }
 
     // Parallel fetch for speed
