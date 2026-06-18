@@ -11,6 +11,12 @@ export interface HubMetrics {
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
 export async function getHubDashboardData(searchQuery: string = '') {
   try {
+    // Ensure RMB exists
+    const rmb = await prisma.hubCurrency.findUnique({ where: { code: 'RMB' } });
+    if (!rmb) {
+      await prisma.hubCurrency.create({ data: { code: 'RMB', symbol: '¥', rateToUsd: 0.14 } });
+    }
+
     // Parallel fetch for speed
     const [currencies, categories, contacts, transactions, reminders, auditTrails, users] = await Promise.all([
       prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } }),

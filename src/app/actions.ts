@@ -262,6 +262,18 @@ export async function resetDatabaseToZero(password: string, userId: string) {
       await tx.hubReminder.deleteMany({});
       await tx.hubTransaction.deleteMany({});
       await tx.hubContact.deleteMany({});
+      await tx.hubCurrency.deleteMany({});
+
+      await tx.hubCurrency.createMany({
+        data: [
+          { code: 'USD', symbol: '$', rateToUsd: 1.0 },
+          { code: 'EUR', symbol: '€', rateToUsd: 1.08 },
+          { code: 'RMB', symbol: '¥', rateToUsd: 0.14 },
+          { code: 'CNY', symbol: '¥', rateToUsd: 0.14 },
+          { code: 'TND', symbol: 'DT', rateToUsd: 0.32 },
+          { code: 'HKD', symbol: 'HK$', rateToUsd: 0.13 },
+        ]
+      });
 
       await tx.hubContact.createMany({
         data: [
