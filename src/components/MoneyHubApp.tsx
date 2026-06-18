@@ -220,7 +220,7 @@ export default function MoneyHubApp({
     }});
   };
 
-  const handleSelectContact = (c: Contact) => setSelectedContact(c);
+  const handleSelectContact = (c: any) => setSelectedContact(c);
 
   const getTransactionTypeStyle = (type: string) => {
     switch (type) {
@@ -233,12 +233,14 @@ export default function MoneyHubApp({
 
   const filteredContacts = useMemo(() => {
     let result = [...optimisticContacts];
-    // Always maintain "Non-zero first" sort even in optimistic UI
+    // SMART SORT: 
+    // 1. Partners with highest absolute balance (importance) first
+    // 2. Then alphabetical
     result.sort((a, b) => {
-      const aHasMoney = Math.abs(a.netPositionUsd) > 0.01 || a.heldBalanceUsd > 0.01 || a.receivableBalanceUsd > 0.01 || a.payableBalanceUsd > 0.01;
-      const bHasMoney = Math.abs(b.netPositionUsd) > 0.01 || b.heldBalanceUsd > 0.01 || b.receivableBalanceUsd > 0.01 || b.payableBalanceUsd > 0.01;
-      if (aHasMoney && !bHasMoney) return -1;
-      if (!aHasMoney && bHasMoney) return 1;
+      const aVolume = Math.max(Math.abs(a.heldBalanceUsd), Math.abs(a.receivableBalanceUsd), Math.abs(a.payableBalanceUsd));
+      const bVolume = Math.max(Math.abs(b.heldBalanceUsd), Math.abs(b.receivableBalanceUsd), Math.abs(b.payableBalanceUsd));
+      
+      if (bVolume !== aVolume) return bVolume - aVolume;
       return a.name.localeCompare(b.name);
     });
 
