@@ -261,7 +261,7 @@ export default function MoneyHubApp({
                 <div key={card.label} onClick={() => { if(card.type === 'REMINDER') setActiveSection('reminders'); else { setContactFilterType(card.type as any); setActiveSection('contacts'); } }} className={`bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer hover:border-${card.style}-500/40 transition active:scale-[0.97]`}>
                   <p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">{card.label}</p>
                   <p className={`text-2xl font-black text-${card.style}-400 mt-2`}>{formatUSD(card.val)}</p>
-                  <p className={`text-[8px] text-${card.style}-400/70 font-black italic uppercase mt-1`}>{getTransactionTypeStyle(card.type).note || 'Échéances à venir'}</p>
+                  <p className={`text-[10px] text-${card.style}-300 font-black italic uppercase mt-1.5 opacity-90 tracking-tighter`}>{getTransactionTypeStyle(card.type).note || 'Échéances à venir'}</p>
                 </div>
               ))}
             </div>
@@ -282,13 +282,21 @@ export default function MoneyHubApp({
               <Plus className="h-7 w-7 text-emerald-500" /><p className="text-xs font-black uppercase tracking-widest">Nouveau Partenaire</p>
             </div>
             {optimisticContacts.map((c: any) => (
-              <div key={c.id} className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl flex flex-col gap-5 hover:border-neutral-700 transition shadow-lg">
+              <div key={c.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex flex-col gap-4">
                 <div className="flex justify-between items-start">
                   <div onClick={() => setSelectedContact(c)} className="flex items-center gap-3 cursor-pointer">
-                    <span className="text-3xl">{c.emoji}</span>
-                    <div><p className="font-black text-white text-xl uppercase tracking-tighter leading-tight">{c.name}</p><p className="text-[10px] text-neutral-500 uppercase font-black tracking-widest mt-1">{c.country}</p></div>
+                    <span className="text-3xl p-1 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span>
+                    <div>
+                      <p className="font-black text-white text-xl uppercase tracking-tighter leading-none">{c.name}</p>
+                      <p className="text-[10px] text-neutral-500 uppercase font-black tracking-widest mt-1.5">{c.country}</p>
+                    </div>
                   </div>
-                  <button onClick={(e) => handleOpenEditContact(e, c)} className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-blue-400 active:scale-90 transition shadow-md hover:bg-neutral-900"><Edit className="h-4 w-4" /></button>
+                  <button 
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenEditContact(e, c); }} 
+                    className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 text-blue-400 active:scale-90 transition shadow-lg hover:border-blue-500/30"
+                  >
+                    <Edit className="h-4.5 w-4.5" />
+                  </button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 border-t border-neutral-800 pt-4 text-[10px] text-center font-black uppercase tracking-tighter">
                   <div className="flex flex-col gap-1"><p className="text-neutral-500">Avoirs</p><p className="text-blue-400 font-black">{formatUSD(c.heldBalanceUsd)}</p></div>
