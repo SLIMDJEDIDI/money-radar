@@ -540,7 +540,7 @@ export default function MoneyHubApp({
   );
 
   function handleContactFormDeleteClick(id: string) {
-    const contact = allContacts.find(c => c.id === id);
+    const contact = contacts.find((c:any) => c.id === id);
     if (!contact) return;
     handleEraseAccount(id, contact.name);
   }
