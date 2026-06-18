@@ -320,7 +320,7 @@ export default function MoneyHubApp({
               <button onClick={() => setActiveSection('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filteredContacts.filter((c:any) => Math.abs(c.netPositionUsd) > 0.01).slice(0, 6).map((c: any) => (
+              {filteredContacts.map((c: any) => (
                 <div key={c.id} onClick={() => handleSelectContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md">
                   <div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div>
                   <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>
