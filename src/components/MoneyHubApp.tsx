@@ -16,6 +16,12 @@ import {
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
 
+const TYPE_EXPLAIN: Record<string, string> = {
+  HELD: "AVOIR : ton argent qu'il garde pour toi (ex: une avance que tu lui as versée). Cet argent est à toi, mais il est chez lui.",
+  RECEIVABLE: "CRÉANCE : il te doit de l'argent. Tu attends qu'il te rembourse ou te paie ce montant.",
+  PAYABLE: "DETTE : tu lui dois de l'argent. C'est un montant que tu dois lui payer.",
+};
+
 // --- HELPER COMPONENTS (MEMOIZED FOR SPEED) ---
 const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note, extra }: any) => (
   <div 
@@ -140,6 +146,7 @@ export default function MoneyHubApp({
   const [postponeTarget, setPostponeTarget] = useState<any>(null);
   const [postponeDate, setPostponeDate] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [drawerTypeFilter, setDrawerTypeFilter] = useState<string | null>(null);
 
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
@@ -590,6 +597,7 @@ export default function MoneyHubApp({
                   <button key={type} type="button" onClick={() => setTransactionForm(p=>({...p, type}))} className={`py-5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === type ? 'bg-white text-black border-white shadow-emerald-500/10' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{getTransactionTypeStyle(type).label}</span><span className="text-[7px] font-black opacity-50 tracking-tighter uppercase">{getTransactionTypeStyle(type).note}</span></button>
                 ))}
               </div>
+              <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{TYPE_EXPLAIN[transactionForm.type]}</p></div>
               <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white focus:border-neutral-600 outline-none shadow-inner" placeholder="Commentaire / Référence" value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
               <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-5 bg-emerald-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-emerald-500/30 active:scale-95 transition tracking-widest text-xs">Enregistrer</button></div>
             </form>
@@ -644,16 +652,18 @@ export default function MoneyHubApp({
         const positive = selectedContact.netPositionUsd >= 0;
         const tnd = selectedContact.heldBalanceTnd || 0;
         const breakdown = [
-          { key: 'HELD', label: 'Avoirs', val: selectedContact.heldBalanceUsd, tnd, style: 'blue', icon: <DollarSign className="h-4 w-4" />, note: 'Mon argent chez lui' },
-          { key: 'RECEIVABLE', label: 'Créances', val: selectedContact.receivableBalanceUsd, tnd: 0, style: 'emerald', icon: <ArrowUpRight className="h-4 w-4" />, note: 'Il me doit' },
-          { key: 'PAYABLE', label: 'Dettes', val: selectedContact.payableBalanceUsd, tnd: 0, style: 'rose', icon: <ArrowUpRight className="h-4 w-4 rotate-180" />, note: 'Je lui dois' },
+          { key: 'HELD', label: 'Avoirs', val: selectedContact.heldBalanceUsd, tnd, style: 'blue', icon: <DollarSign className="h-4 w-4" />, note: 'Mon argent chez lui', explain: 'AVOIR = ton argent qu\'il garde pour toi (ex: une avance que tu lui as versée). Cet argent est à toi, mais il est chez lui.' },
+          { key: 'RECEIVABLE', label: 'Créances', val: selectedContact.receivableBalanceUsd, tnd: 0, style: 'emerald', icon: <ArrowUpRight className="h-4 w-4" />, note: 'Il me doit', explain: 'CRÉANCE = il te doit de l\'argent. Tu attends qu\'il te rembourse ou te paie ce montant.' },
+          { key: 'PAYABLE', label: 'Dettes', val: selectedContact.payableBalanceUsd, tnd: 0, style: 'rose', icon: <ArrowUpRight className="h-4 w-4 rotate-180" />, note: 'Je lui dois', explain: 'DETTE = tu lui dois de l\'argent. C\'est un montant que tu dois lui payer.' },
         ];
+        const activeExplain = drawerTypeFilter ? breakdown.find(b => b.key === drawerTypeFilter) : null;
         const startOpForPartner = () => {
           setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' });
           setActiveModal('add_tx');
         };
+        const closeDrawer = () => { setSelectedContact(null); setDrawerTypeFilter(null); };
         return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setSelectedContact(null)}>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={closeDrawer}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-400 shadow-2xl shadow-emerald-500/5" onClick={e => e.stopPropagation()}>
 
             {/* HERO HEADER — colored by net position */}
@@ -667,7 +677,7 @@ export default function MoneyHubApp({
                     <p className="text-[10px] text-neutral-400 uppercase font-black tracking-[0.25em] mt-2 truncate">{selectedContact.country || 'GLOBAL'}</p>
                   </div>
                 </div>
-                <button onClick={() => setSelectedContact(null)} className="p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90 shadow-lg shrink-0"><X className="h-5 w-5" /></button>
+                <button onClick={closeDrawer} className="p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90 shadow-lg shrink-0"><X className="h-5 w-5" /></button>
               </div>
               <div className="relative mt-7">
                 <p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.25em] mb-1">Position Nette</p>
@@ -682,31 +692,46 @@ export default function MoneyHubApp({
               <button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button>
             </div>
 
-            {/* BREAKDOWN — compact horizontal pills */}
+            {/* BREAKDOWN — clickable pills that filter the timeline + explain the term */}
             <div className="px-7 pt-6 grid grid-cols-3 gap-2.5">
               {breakdown.map(b => {
                 const showUsd = b.key !== 'HELD' || b.val > 0.01 || b.tnd <= 0.01;
+                const active = drawerTypeFilter === b.key;
                 return (
-                <div key={b.key} className={`p-3.5 rounded-2xl border bg-${b.style}-500/5 border-${b.style}-500/20 flex flex-col gap-2`}>
+                <button key={b.key} onClick={() => setDrawerTypeFilter(active ? null : b.key)} className={`text-left p-3.5 rounded-2xl border bg-${b.style}-500/5 flex flex-col gap-2 active:scale-[0.97] transition cursor-pointer ${active ? `border-${b.style}-500/60 ring-2 ring-${b.style}-500/40` : `border-${b.style}-500/20 hover:border-${b.style}-500/40`}`}>
                   <span className={`text-${b.style}-400 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider`}>{b.icon}{b.label}</span>
                   {showUsd && <p className={`text-${b.style}-400 font-black text-base tracking-tighter break-words leading-none`}>{formatUSD(b.val)}</p>}
                   {b.key === 'HELD' && b.tnd > 0.01 && <p className={`text-amber-400 font-black tracking-tighter break-words leading-none ${showUsd ? 'text-[11px]' : 'text-base'}`}>{formatRawCurrency(b.tnd, 'TND')}</p>}
-                </div>
+                  <span className={`text-[8px] font-black uppercase tracking-wider ${active ? `text-${b.style}-400` : 'text-neutral-500'}`}>{b.note}</span>
+                </button>
                 );
               })}
             </div>
 
+            {/* EXPLANATION BANNER — appears when a pill is selected */}
+            {activeExplain && (
+              <div className={`mx-7 mt-4 p-4 rounded-2xl border bg-${activeExplain.style}-500/5 border-${activeExplain.style}-500/20 flex items-start gap-3 animate-in fade-in duration-200`}>
+                <span className={`text-${activeExplain.style}-400 shrink-0 mt-0.5`}>{activeExplain.icon}</span>
+                <p className="text-[11px] font-bold text-neutral-300 leading-relaxed">{activeExplain.explain}</p>
+              </div>
+            )}
+
             {/* TIMELINE */}
             <div className="px-7 pt-8 pb-10 flex flex-col gap-4">
               <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
-                <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique</h4>
-                <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>
+                <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique{drawerTypeFilter && <span className="text-neutral-500">· {breakdown.find(b=>b.key===drawerTypeFilter)?.label}</span>}</h4>
+                {drawerTypeFilter
+                  ? <button onClick={() => setDrawerTypeFilter(null)} className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1">Tout voir <X className="h-3 w-3" /></button>
+                  : <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>}
               </div>
-              {txCount === 0 && (
-                <EmptyState icon={<ArrowLeftRight className="h-8 w-8" />} title="Aucune opération" subtitle="Touchez « Opération » ci-dessus pour enregistrer la première transaction de ce partenaire." />
-              )}
+              {(() => {
+                const shown = drawerTypeFilter ? partnerTx.filter((t:any) => t.type === drawerTypeFilter) : partnerTx;
+                if (shown.length === 0) return (
+                <EmptyState icon={<ArrowLeftRight className="h-8 w-8" />} title="Aucune opération" subtitle={drawerTypeFilter ? "Aucune opération de ce type pour ce partenaire." : "Touchez « Opération » ci-dessus pour enregistrer la première transaction de ce partenaire."} />
+                );
+                return (
               <div className="flex flex-col gap-3">
-                {partnerTx.slice(0,30).map((t:any) => {
+                {shown.slice(0,30).map((t:any) => {
                   const st = getTransactionTypeStyle(t.type);
                   const dotColor = st.style === 'blue' ? 'bg-blue-500' : st.style === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
                   const txtColor = st.style === 'blue' ? 'text-blue-400' : st.style === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
@@ -727,6 +752,8 @@ export default function MoneyHubApp({
                   );
                 })}
               </div>
+                );
+              })()}
             </div>
           </div>
         </div>
