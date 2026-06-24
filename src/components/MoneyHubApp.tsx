@@ -55,7 +55,7 @@ const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect }:
         <span className={`text-xl font-black tracking-tighter ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-[10px] text-center font-black uppercase tracking-tighter">
-        <div className="flex flex-col gap-1"><p className="text-neutral-400">Avoirs</p><p className="text-blue-400 font-black text-xs break-all">{formatUSD(c.heldBalanceUsd)}</p>{hasTnd && <p className="text-amber-400 font-black text-[10px] break-all">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div>
+        <div className="flex flex-col gap-1"><p className="text-neutral-400">Avoirs</p>{c.heldBalanceUsd > 0.01 && <p className="text-blue-400 font-black text-xs break-all">{formatUSD(c.heldBalanceUsd)}</p>}{hasTnd && <p className="text-amber-400 font-black text-xs break-all">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}{c.heldBalanceUsd <= 0.01 && !hasTnd && <p className="text-blue-400 font-black text-xs break-all">{formatUSD(0)}</p>}</div>
         <div className="flex flex-col gap-1"><p className="text-neutral-400">Créances</p><p className="text-emerald-400 font-black text-xs break-all">{formatUSD(c.receivableBalanceUsd)}</p></div>
         <div className="flex flex-col gap-1"><p className="text-neutral-400">Dettes</p><p className="text-rose-400 font-black text-xs break-all">{formatUSD(c.payableBalanceUsd)}</p></div>
       </div>
@@ -584,7 +584,15 @@ export default function MoneyHubApp({
               ].map(row => (
                 <div key={row.label} className={`p-6 bg-neutral-900/40 border border-neutral-800 rounded-[36px] flex justify-between items-center gap-3 shadow-inner group hover:border-${row.style}-500/30 transition-all duration-500`}>
                   <div className="flex flex-col min-w-0"><p className={`text-[11px] font-black text-neutral-400 uppercase tracking-widest group-hover:text-${row.style}-400 transition`}>{row.label}</p><p className={`text-[9px] text-${row.style}-500 font-black italic uppercase mt-1.5 opacity-70 tracking-tighter`}>{row.note}</p></div>
-                  <div className="flex flex-col items-end min-w-0"><p className={`font-black text-${row.style}-400 text-2xl sm:text-3xl tracking-tighter break-all text-right transition duration-500`}>{formatUSD(row.val)}</p>{row.label === 'Avoirs détenus' && (selectedContact.heldBalanceTnd || 0) > 0.01 && <p className="font-black text-amber-400 text-sm tracking-tighter break-all text-right">{formatRawCurrency(selectedContact.heldBalanceTnd, 'TND')}</p>}</div>
+                  <div className="flex flex-col items-end min-w-0">{(() => {
+                    const isAvoirs = row.label === 'Avoirs détenus';
+                    const tnd = selectedContact.heldBalanceTnd || 0;
+                    const showUsd = !isAvoirs || row.val > 0.01 || tnd <= 0.01;
+                    return (<>
+                      {showUsd && <p className={`font-black text-${row.style}-400 text-2xl sm:text-3xl tracking-tighter break-all text-right transition duration-500`}>{formatUSD(row.val)}</p>}
+                      {isAvoirs && tnd > 0.01 && <p className={`font-black text-amber-400 tracking-tighter break-all text-right ${showUsd ? 'text-sm' : 'text-2xl sm:text-3xl'}`}>{formatRawCurrency(tnd, 'TND')}</p>}
+                    </>);
+                  })()}</div>
                 </div>
               ))}
             </div>
