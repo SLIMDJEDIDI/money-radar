@@ -298,6 +298,54 @@ export async function createHubTransaction(formData: FormData) {
   }
 }
 
+// Settle (pay down) a partner's DEBT using their available AVOIR (held) balance.
+// Moves min(held, payable) from held -> reduces payable. Records an audit entry.
+export async function settleDebtFromAvoir(contactId: string) {
+  try {
+    const session = await requireSession();
+    let settledUsd = 0;
+    await prisma.$transaction(async (tx) => {
+      const contact = await tx.hubContact.findUnique({ where: { id: contactId } });
+      if (!contact) throw new Error('NOT_FOUND');
+
+      const held = contact.heldBalanceUsd;
+      const payable = contact.payableBalanceUsd;
+      settledUsd = Math.min(held, payable);
+      if (settledUsd <= 0.01) return; // nothing to settle
+
+      const h = held - settledUsd;
+      const p = payable - settledUsd;
+
+      await tx.hubContact.update({
+        where: { id: contactId },
+        data: { heldBalanceUsd: h, payableBalanceUsd: p, netPositionUsd: h + contact.receivableBalanceUsd - p },
+      });
+
+      // Record a settlement transaction for traceability (USD)
+      await tx.hubTransaction.create({
+        data: {
+          amount: settledUsd, currencyCode: 'USD', amountInUsd: settledUsd,
+          contactId, type: 'PAYABLE', category: 'Règlement dette',
+          note: `Dette réglée automatiquement depuis l'Avoir (${settledUsd.toFixed(2)} $)`,
+        },
+      });
+
+      await logAudit(tx, {
+        entityType: 'CONTACT', entityId: contactId, action: 'SETTLE_DEBT',
+        details: `Dette de ${contact.name} réglée via Avoir: ${settledUsd.toFixed(2)} $`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, settledUsd };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
+    return { success: false, error: 'Erreur lors du règlement de la dette' };
+  }
+}
+
 export async function deleteHubTransaction(id: string) {
   try {
     const session = await requireSession();

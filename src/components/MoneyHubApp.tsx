@@ -10,7 +10,7 @@ import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
   createReminder, toggleReminderCompleted, deleteReminder,
-  confirmReminderReceived, postponeReminder,
+  confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser
 } from '../app/actions';
 
@@ -297,11 +297,15 @@ export default function MoneyHubApp({
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
       const data = new FormData();
       Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
+      const opType = transactionForm.type;
+      const opContactId = transactionForm.contactId;
       const res: any = await createHubTransaction(data);
       if (res.success) {
         setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
         setActiveModal(null);
         await refreshHubState();
+        // SMART: if we just added an AVOIR to a partner we OWE money to, offer to settle the debt
+        if (opType === 'HELD') maybePromptSettleDebt(opContactId);
       } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
         handleSessionExpired();
       } else {
@@ -384,6 +388,36 @@ export default function MoneyHubApp({
       if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
       else alert(res.error);
     });
+  };
+
+  // After recharging an AVOIR: if we owe this partner money (DEBT), alert and offer to settle it.
+  const maybePromptSettleDebt = async (contactId: string) => {
+    try {
+      const r = await fetch(`/api/dashboard-data?t=${Date.now()}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      const c = data.contacts.find((x: any) => x.id === contactId) || data.allContacts?.find((x: any) => x.id === contactId);
+      if (!c) return;
+      const held = c.heldBalanceUsd || 0;
+      const debt = c.payableBalanceUsd || 0;
+      if (debt > 0.01 && held > 0.01) {
+        const settle = Math.min(held, debt);
+        setConfirmModal({
+          isOpen: true,
+          title: '💸 Régler la dette ?',
+          description: `Tu dois ${formatUSD(debt)} à ${c.name} et tu détiens ${formatUSD(held)} en Avoir chez lui. Veux-tu utiliser cet Avoir pour régler la dette (${formatUSD(settle)}) ?`,
+          confirmText: 'Régler maintenant',
+          onConfirm: async () => {
+            startTransition(async () => {
+              const res: any = await settleDebtFromAvoir(contactId);
+              if (res.success) await refreshHubState();
+              else if (res.code) handleSessionExpired();
+              else alert(res.error || 'Erreur');
+            });
+          }
+        });
+      }
+    } catch { /* silent */ }
   };
 
   const handleToggleReminder = async (id: string, isDone: boolean) => { 
