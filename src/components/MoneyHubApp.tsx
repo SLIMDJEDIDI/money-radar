@@ -10,7 +10,7 @@ import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
   createReminder, toggleReminderCompleted, deleteReminder,
-  resetDatabaseToZero, loginUser
+  resetDatabaseToZero, loginUser, logoutUser
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
@@ -119,7 +119,11 @@ export default function MoneyHubApp({
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   };
 
-  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
+  const handleLogout = async () => {
+    try { await logoutUser(); } catch {}
+    setCurrentUser(null);
+    localStorage.removeItem('hub_session_user');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,15 +139,15 @@ export default function MoneyHubApp({
     const amount = parseFloat(transactionForm.amount);
     startTransition(async () => {
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
-      const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any)); data.append('modifiedBy', currentUser.username);
-      const res = await createHubTransaction(data, currentUser.username);
+      const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
+      const res = await createHubTransaction(data);
       if (res.success) { setActiveModal(null); await refreshHubState(); }
     });
   };
 
   const handleDeleteTx = (id: string) => {
     setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => {
-      startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id, currentUser.username); await refreshHubState(); });
+      startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); });
     }});
   };
 
@@ -153,7 +157,7 @@ export default function MoneyHubApp({
       addOptimisticContact({ id: 'temp', name: contactForm.name, emoji: contactForm.emoji, netPositionUsd: 0, heldBalanceUsd:0, receivableBalanceUsd:0, payableBalanceUsd:0 });
       const data = new FormData();
       Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
-      const res = await createContact(data, currentUser.username);
+      const res = await createContact(data);
       if (res.success) { setActiveModal(null); await refreshHubState(); }
     });
   };
@@ -162,7 +166,7 @@ export default function MoneyHubApp({
     e.preventDefault(); if (!contactForm.id || !contactForm.name) return;
     const data = new FormData(); data.append('contactId', contactForm.id); data.append('name', contactForm.name); data.append('emoji', contactForm.emoji); data.append('country', contactForm.country); data.append('isArchived', contactForm.isArchived ? 'true' : 'false');
     startTransition(async () => {
-      const res = await updateContact(data, currentUser.username);
+      const res = await updateContact(data);
       if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
       else alert(res.error);
     });
@@ -204,19 +208,19 @@ export default function MoneyHubApp({
 
   const handleMasterWipeToZero = () => {
     setConfirmModal({ isOpen: true, title: '⚠️ WIPE GLOBAL ?', description: 'Action irréversible. Mot de passe :', confirmText: 'Wipe', isDanger: true, requirePassword: true, onConfirm: async (p: any) => {
-      startTransition(async () => { const res = await resetDatabaseToZero(p, currentUser?.id); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); });
+      startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); });
     }});
   };
 
   const handleStartInlineEdit = (contact: any) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
   const handleSaveInlineEdit = async (e: React.FormEvent, id: string) => {
     e.preventDefault(); const data = new FormData(); data.append('contactId', id); data.append('name', editFormData.name); data.append('emoji', editFormData.emoji); data.append('country', ''); data.append('isArchived', 'false');
-    startTransition(async () => { const res = await updateContact(data, currentUser.username); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
+    startTransition(async () => { const res = await updateContact(data); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
   };
 
   const handleEraseAccount = (id: string, name: string) => {
     setConfirmModal({ isOpen: true, title: '🗑️ SUPPRIMER CONTACT', description: `Supprimer définitivement ${name} ?`, confirmText: 'Supprimer', cancelText: 'Annuler', isDanger: true, onConfirm: async () => {
-      startTransition(async () => { addOptimisticContact({ id, action: 'delete' }); await deleteContact(id, currentUser.username); await refreshHubState(); });
+      startTransition(async () => { addOptimisticContact({ id, action: 'delete' }); await deleteContact(id); await refreshHubState(); });
     }});
   };
 

@@ -38,7 +38,11 @@ export async function getHubDashboardData(searchQuery: string = '') {
       prisma.hubTransaction.findMany({ include: { contact: true }, orderBy: { createdAt: 'desc' } }),
       prisma.hubReminder.findMany({ include: { contact: true }, orderBy: { dueDate: 'asc' } }),
       prisma.hubAuditTrail.findMany({ orderBy: { createdAt: 'desc' }, take: 40 }),
-      prisma.hubUser.findMany({ orderBy: { username: 'asc' } })
+      // SECURITY: never expose passwordHash to the client
+      prisma.hubUser.findMany({
+        orderBy: { username: 'asc' },
+        select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true },
+      })
     ]);
 
     const activeCurrencies = currencies.filter(c => c.isActive);
