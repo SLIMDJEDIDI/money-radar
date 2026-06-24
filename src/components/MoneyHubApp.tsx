@@ -578,37 +578,100 @@ export default function MoneyHubApp({
         </div>
       )}
 
-      {selectedContact && (
+      {selectedContact && (() => {
+        const partnerTx = transactions.filter((t:any) => t.contactId === selectedContact.id);
+        const txCount = partnerTx.length;
+        const positive = selectedContact.netPositionUsd >= 0;
+        const tnd = selectedContact.heldBalanceTnd || 0;
+        const breakdown = [
+          { key: 'HELD', label: 'Avoirs', val: selectedContact.heldBalanceUsd, tnd, style: 'blue', icon: <DollarSign className="h-4 w-4" />, note: 'Mon argent chez lui' },
+          { key: 'RECEIVABLE', label: 'Créances', val: selectedContact.receivableBalanceUsd, tnd: 0, style: 'emerald', icon: <ArrowUpRight className="h-4 w-4" />, note: 'Il me doit' },
+          { key: 'PAYABLE', label: 'Dettes', val: selectedContact.payableBalanceUsd, tnd: 0, style: 'rose', icon: <ArrowUpRight className="h-4 w-4 rotate-180" />, note: 'Je lui dois' },
+        ];
+        const startOpForPartner = () => {
+          setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' });
+          setActiveModal('add_tx');
+        };
+        return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setSelectedContact(null)}>
-          <div className="w-full max-w-md bg-[#050505] border-l border-neutral-800 h-full overflow-y-auto p-7 flex flex-col gap-9 animate-in slide-in-from-right duration-400 shadow-2xl shadow-emerald-500/5" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-6"><div className="flex items-center gap-5"><span className="text-6xl p-3 bg-neutral-900 border border-neutral-800 rounded-3xl shadow-xl">{selectedContact.emoji}</span><div><h3 className="text-3xl font-black text-white uppercase tracking-tighter leading-tight">{selectedContact.name}</h3><p className="text-xs text-neutral-500 uppercase font-black tracking-[0.3em] mt-2">{selectedContact.country || 'GLOBAL'}</p></div></div><button onClick={() => setSelectedContact(null)} className="p-3 bg-neutral-900 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90 shadow-lg"><X className="h-6 w-6" /></button></div>
-            <div className={`p-6 rounded-[32px] border-2 shadow-2xl ring-1 ring-white/5 relative overflow-hidden ${selectedContact.netPositionUsd >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}><div className={`absolute -bottom-6 -right-4 opacity-[0.06] pointer-events-none ${selectedContact.netPositionUsd >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}><Coins className="h-32 w-32" /></div><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-2 relative">Position Nette Globale</p><p className={`font-black tracking-tighter leading-none break-words relative text-3xl sm:text-4xl ${selectedContact.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p></div>
-            <div className="flex flex-col gap-4">
-              {[
-                { label: 'Avoirs détenus', val: selectedContact.heldBalanceUsd, style: 'blue', note: 'Mon argent chez lui' },
-                { label: 'Créances', val: selectedContact.receivableBalanceUsd, style: 'emerald', note: 'Il me doit de l\'argent' },
-                { label: 'Dettes', val: selectedContact.payableBalanceUsd, style: 'rose', note: 'Je lui dois de l\'argent' }
-              ].map(row => (
-                <div key={row.label} className={`p-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex flex-col gap-3 shadow-inner group hover:border-${row.style}-500/30 transition-all duration-500`}>
-                  <div className="flex justify-between items-start">
-                    <div className="flex flex-col"><p className={`text-[10px] font-black text-neutral-400 uppercase tracking-[0.15em] group-hover:text-${row.style}-400 transition`}>{row.label}</p><p className={`text-[9px] text-${row.style}-500 font-black italic uppercase mt-1 opacity-70 tracking-tighter`}>{row.note}</p></div>
+          <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-400 shadow-2xl shadow-emerald-500/5" onClick={e => e.stopPropagation()}>
+
+            {/* HERO HEADER — colored by net position */}
+            <div className={`relative overflow-hidden px-7 pt-7 pb-8 border-b border-white/5 ${positive ? 'bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent' : 'bg-gradient-to-br from-rose-500/10 via-transparent to-transparent'}`}>
+              <div className={`absolute -top-8 -right-6 opacity-[0.07] pointer-events-none ${positive ? 'text-emerald-400' : 'text-rose-400'}`}><Coins className="h-40 w-40" /></div>
+              <div className="flex justify-between items-start relative">
+                <div className="flex items-center gap-4 min-w-0">
+                  <span className="text-5xl p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-3xl shadow-xl shrink-0">{selectedContact.emoji}</span>
+                  <div className="min-w-0">
+                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none truncate">{selectedContact.name}</h3>
+                    <p className="text-[10px] text-neutral-400 uppercase font-black tracking-[0.25em] mt-2 truncate">{selectedContact.country || 'GLOBAL'}</p>
                   </div>
-                  <div className="flex flex-col items-end w-full">{(() => {
-                    const isAvoirs = row.label === 'Avoirs détenus';
-                    const tnd = selectedContact.heldBalanceTnd || 0;
-                    const showUsd = !isAvoirs || row.val > 0.01 || tnd <= 0.01;
-                    return (<>
-                      {showUsd && <p className={`font-black text-${row.style}-400 text-3xl tracking-tighter break-words text-right transition duration-500 leading-none`}>{formatUSD(row.val)}</p>}
-                      {isAvoirs && tnd > 0.01 && <p className={`font-black text-amber-400 tracking-tighter break-words text-right mt-1 ${showUsd ? 'text-sm' : 'text-3xl'}`}>{formatRawCurrency(tnd, 'TND')}</p>}
-                    </>);
-                  })()}</div>
                 </div>
-              ))}
+                <button onClick={() => setSelectedContact(null)} className="p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90 shadow-lg shrink-0"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="relative mt-7">
+                <p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.25em] mb-1">Position Nette</p>
+                <p className={`font-black tracking-tighter leading-none break-words text-4xl ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p>
+                {tnd > 0.01 && <p className="text-amber-400 font-black text-sm tracking-tighter mt-1.5">+ {formatRawCurrency(tnd, 'TND')} <span className="text-neutral-500 text-[10px]">(local)</span></p>}
+              </div>
             </div>
-            <div className="flex flex-col gap-5 mt-4"><h4 className="text-[11px] font-black text-neutral-600 uppercase tracking-[0.3em] border-b border-neutral-900 pb-4 flex items-center gap-3"><Clock className="h-4 w-4" /> Historique Chronologique</h4><div className="flex flex-col gap-3">{transactions.filter((t:any) => t.contactId === selectedContact.id).slice(0,12).map((t:any) => (<div key={t.id} className="p-5 bg-neutral-900/20 border border-neutral-800 rounded-[28px] flex justify-between items-center shadow-sm hover:border-neutral-600 hover:bg-neutral-900/40 transition duration-300"><div className="flex flex-col gap-1"><p className="text-sm font-black text-neutral-100 uppercase tracking-tight">{t.category}</p><p className={`text-[10px] font-black uppercase tracking-widest ${getTransactionTypeStyle(t.type).style === 'blue' ? 'text-blue-500' : getTransactionTypeStyle(t.type).style === 'emerald' ? 'text-emerald-500' : 'text-rose-500'}`}>{getTransactionTypeStyle(t.type).label}</p></div><div className="text-right flex flex-col gap-1.5"><p className="text-base font-black text-white tracking-tighter leading-none">{formatRawCurrency(t.amount, t.currencyCode)}</p>{t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}<p className="text-[10px] text-neutral-700 font-black uppercase">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div></div>))}</div></div>
+
+            {/* QUICK ACTIONS */}
+            <div className="px-7 pt-6 flex gap-3">
+              <button onClick={startOpForPartner} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 active:scale-[0.97] transition tracking-widest"><Plus className="h-4 w-4 stroke-[3]" /> Opération</button>
+              <button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button>
+            </div>
+
+            {/* BREAKDOWN — compact horizontal pills */}
+            <div className="px-7 pt-6 grid grid-cols-3 gap-2.5">
+              {breakdown.map(b => {
+                const showUsd = b.key !== 'HELD' || b.val > 0.01 || b.tnd <= 0.01;
+                return (
+                <div key={b.key} className={`p-3.5 rounded-2xl border bg-${b.style}-500/5 border-${b.style}-500/20 flex flex-col gap-2`}>
+                  <span className={`text-${b.style}-400 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider`}>{b.icon}{b.label}</span>
+                  {showUsd && <p className={`text-${b.style}-400 font-black text-base tracking-tighter break-words leading-none`}>{formatUSD(b.val)}</p>}
+                  {b.key === 'HELD' && b.tnd > 0.01 && <p className={`text-amber-400 font-black tracking-tighter break-words leading-none ${showUsd ? 'text-[11px]' : 'text-base'}`}>{formatRawCurrency(b.tnd, 'TND')}</p>}
+                </div>
+                );
+              })}
+            </div>
+
+            {/* TIMELINE */}
+            <div className="px-7 pt-8 pb-10 flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
+                <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique</h4>
+                <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>
+              </div>
+              {txCount === 0 && (
+                <EmptyState icon={<ArrowLeftRight className="h-8 w-8" />} title="Aucune opération" subtitle="Touchez « Opération » ci-dessus pour enregistrer la première transaction de ce partenaire." />
+              )}
+              <div className="flex flex-col gap-3">
+                {partnerTx.slice(0,30).map((t:any) => {
+                  const st = getTransactionTypeStyle(t.type);
+                  const dotColor = st.style === 'blue' ? 'bg-blue-500' : st.style === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
+                  const txtColor = st.style === 'blue' ? 'text-blue-400' : st.style === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
+                  return (
+                  <div key={t.id} className="group relative p-4 pl-5 bg-neutral-900/30 border border-neutral-800 rounded-3xl flex justify-between items-center gap-3 hover:border-neutral-700 hover:bg-neutral-900/50 transition">
+                    <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${dotColor}`} />
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <p className="text-sm font-black text-neutral-100 uppercase tracking-tight truncate">{t.category}</p>
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${txtColor}`}>{st.label}</p>
+                      <p className="text-[10px] text-neutral-600 font-black uppercase mt-0.5">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                    </div>
+                    <div className="text-right flex flex-col gap-0.5 shrink-0">
+                      <p className="text-base font-black text-white tracking-tighter leading-none break-words">{formatRawCurrency(t.amount, t.currencyCode)}</p>
+                      {t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}
+                    </div>
+                    <button onClick={() => handleDeleteTx(t.id)} className="p-2 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl active:scale-90 transition shrink-0" title="Supprimer"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {confirmModal.isOpen && (
         <div className="fixed inset-0 z-[220] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in scale-in duration-300 shadow-2xl" onClick={() => setConfirmModal({isOpen: false})}>
