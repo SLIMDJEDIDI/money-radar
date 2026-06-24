@@ -157,6 +157,9 @@ export default function MoneyHubApp({
   const [postponeDate, setPostponeDate] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [drawerTypeFilter, setDrawerTypeFilter] = useState<string | null>(null);
+  const [inlineNewPartner, setInlineNewPartner] = useState(false);
+  const [inlinePartnerName, setInlinePartnerName] = useState('');
+  const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
 
   // --- NAVIGATION HISTORY (back / forward through sections) ---
   const [navStack, setNavStack] = useState<string[]>(['dashboard']);
@@ -331,6 +334,39 @@ export default function MoneyHubApp({
     setCurrentUser(null);
     localStorage.removeItem('hub_session_user');
     alert('Votre session a expiré. Veuillez vous reconnecter.');
+  };
+
+  // Reset inline partner creation whenever the operation modal is not open
+  useEffect(() => {
+    if (activeModal !== 'add_tx') {
+      setInlineNewPartner(false);
+      setInlinePartnerName('');
+      setInlinePartnerCountry('');
+    }
+  }, [activeModal]);
+
+  // Create a partner inline (from the operation dropdown) and auto-select it
+  const handleInlineCreatePartner = () => {
+    const name = inlinePartnerName.trim();
+    if (!name) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('name', name);
+      data.append('emoji', '👤');
+      data.append('country', inlinePartnerCountry.trim());
+      const res: any = await createContact(data);
+      if (res.success && res.contact) {
+        await refreshHubState();
+        setTransactionForm(p => ({ ...p, contactId: res.contact.id }));
+        setInlineNewPartner(false);
+        setInlinePartnerName('');
+        setInlinePartnerCountry('');
+      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
+        handleSessionExpired();
+      } else {
+        alert(res.error || 'Erreur lors de la création du partenaire');
+      }
+    });
   };
 
   const handleUpdateContact = async (e: React.FormEvent) => {
@@ -742,7 +778,20 @@ export default function MoneyHubApp({
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl shadow-emerald-500/5 ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-emerald-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">Nouvelle Opération</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleAddTransaction} className="flex flex-col gap-4">
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50 appearance-none shadow-inner" value={transactionForm.contactId} onChange={e => setTransactionForm(p=>({...p, contactId: e.target.value}))}><option value="">Partenaire</option>{contacts.map((c:any) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
+              {!inlineNewPartner ? (
+                <select required className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50 appearance-none shadow-inner" value={transactionForm.contactId} onChange={e => { if (e.target.value === '__new__') { setInlineNewPartner(true); } else { setTransactionForm(p=>({...p, contactId: e.target.value})); } }}>
+                  <option value="">Partenaire</option>
+                  <option value="__new__">➕ Nouveau partenaire…</option>
+                  {contacts.map((c:any) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                </select>
+              ) : (
+                <div className="flex flex-col gap-2.5 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-[20px] animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Nouveau partenaire</span><button type="button" onClick={() => { setInlineNewPartner(false); setInlinePartnerName(''); setInlinePartnerCountry(''); }} className="text-neutral-500 hover:text-white transition"><X className="h-4 w-4" /></button></div>
+                  <input type="text" autoFocus placeholder="Nom du partenaire" className="bg-neutral-900 border border-neutral-800 rounded-2xl p-3.5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50 shadow-inner" value={inlinePartnerName} onChange={e => setInlinePartnerName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleInlineCreatePartner(); } }} />
+                  <input type="text" placeholder="Pays / région (optionnel)" className="bg-neutral-900 border border-neutral-800 rounded-2xl p-3.5 text-xs text-white font-black uppercase outline-none focus:border-neutral-600 shadow-inner" value={inlinePartnerCountry} onChange={e => setInlinePartnerCountry(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleInlineCreatePartner(); } }} />
+                  <button type="button" onClick={handleInlineCreatePartner} disabled={!inlinePartnerName.trim() || isPending} className="py-3 bg-emerald-500 text-black font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition disabled:opacity-40 flex items-center justify-center gap-2"><Plus className="h-4 w-4 stroke-[3]" /> Créer & sélectionner</button>
+                </div>
+              )}
               <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-emerald-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={transactionForm.amount} onChange={e => setTransactionForm(p=>({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-[20px] px-5 font-black text-white outline-none focus:border-neutral-600 shadow-inner" value={transactionForm.currencyCode} onChange={e => setTransactionForm(p=>({...p, currencyCode: e.target.value}))}>{initialActiveCurrencies.map((c:any) => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
               <div className="grid grid-cols-3 gap-2.5">
                 {['HELD', 'RECEIVABLE', 'PAYABLE'].map(type => (
