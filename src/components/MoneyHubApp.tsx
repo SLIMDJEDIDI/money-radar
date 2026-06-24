@@ -16,13 +16,14 @@ import {
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
 
 // --- HELPER COMPONENTS (MEMOIZED FOR SPEED) ---
-const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note }: any) => (
+const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note, extra }: any) => (
   <div 
     onClick={onClick}
     className={`bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer transition-all active:scale-[0.97] hover:border-${style}-500/40 ${activeFilter === type ? `ring-2 ring-${style}-500/50 border-${style}-500/50` : ''}`}
   >
     <p className="text-[10px] font-black text-neutral-300 uppercase tracking-wider">{label}</p>
-    <p className={`text-2xl font-black text-${style}-400 mt-2 tracking-tighter`}>{val}</p>
+    <p className={`text-2xl font-black text-${style}-400 mt-2 tracking-tighter break-all`}>{val}</p>
+    {extra && <p className="text-xs font-black text-amber-400 mt-1 tracking-tighter break-all">{extra}</p>}
     <p className={`text-[10px] text-${style}-300 font-black italic uppercase mt-1.5 tracking-tighter`}>{note}</p>
   </div>
 ));
@@ -369,12 +370,13 @@ export default function MoneyHubApp({
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-5 border-t border-white/5">
                 <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-neutral-300 font-black uppercase tracking-widest">Live · USD</span></span>
                 <span className="text-[10px] font-black uppercase tracking-wider text-blue-400">Avoirs {formatUSD(metrics.totalAvoirs)}</span>
+                {metrics.totalAvoirsTnd > 0.01 && <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">Avoirs {formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}</span>}
                 <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">+ Créances {formatUSD(metrics.totalReceivables)}</span>
                 <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">− Dettes {formatUSD(metrics.totalPayables)}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} />
+              <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} />
               <StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="emerald" note="Il me doit" onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} />
               <StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} />
               <StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => setActiveSection('reminders')} />

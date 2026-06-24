@@ -84,6 +84,19 @@ export async function getHubDashboardData(searchQuery: string = '') {
     });
     reminders.forEach(r => { if (!r.isCompleted) upcomingPayments += r.amountInUsd; });
 
+    // TND is a LOCAL currency — keep "Avoirs" in TND separate, do NOT fold into USD total.
+    const archivedContactIds = new Set(contacts.filter(c => c.isArchived).map(c => c.id));
+    let totalAvoirsTnd = 0;       // raw TND amount held
+    let totalAvoirsTndInUsd = 0;  // its USD equivalent (to subtract from USD total)
+    transactions.forEach(t => {
+      if (t.type !== 'HELD' || t.currencyCode !== 'TND') return;
+      if (archivedContactIds.has(t.contactId)) return;
+      totalAvoirsTnd += t.amount;
+      totalAvoirsTndInUsd += t.amountInUsd;
+    });
+    // Remove the TND portion from the USD aggregate so it is not double counted
+    const totalAvoirsUsd = totalAvoirs - totalAvoirsTndInUsd;
+
     return {
       contacts: filteredContacts,
       allContacts: formattedContacts,
@@ -95,8 +108,11 @@ export async function getHubDashboardData(searchQuery: string = '') {
       auditTrails,
       users,
       metrics: {
-        totalAvoirs, totalReceivables, totalPayables, upcomingPayments,
-        netPosition: totalAvoirs + totalReceivables - totalPayables
+        totalAvoirs: totalAvoirsUsd,
+        totalAvoirsTnd,
+        totalReceivables, totalPayables, upcomingPayments,
+        // Net position stays in USD and excludes the local TND avoirs
+        netPosition: totalAvoirsUsd + totalReceivables - totalPayables
       },
     };
   } catch (error) {
