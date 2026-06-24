@@ -4,7 +4,7 @@ import { prisma } from '../lib/db';
 import { revalidatePath } from 'next/cache';
 import {
   verifyPassword, hashPassword, needsUpgrade,
-  setSessionCookie, clearSessionCookie, requireSession, requireAdmin,
+  setSessionCookie, clearSessionCookie, requireSession, requireAdmin, getSession,
 } from '../lib/auth';
 
 // --- LOGIQUE D'AUDIT ---
@@ -100,16 +100,36 @@ export async function logoutUser() {
 }
 
 export async function getCurrentUser() {
+  // Step 1: is there a valid signed session cookie at all?
+  const session = await getSession();
+  if (!session) {
+    // No/invalid/expired cookie -> genuinely logged out
+    return { authenticated: false as const };
+  }
+
+  // Step 2: confirm the user still exists. A DB hiccup here must NOT log the
+  // user out — we return a transient flag so the client keeps the session.
   try {
-    const session = await requireSession();
     const user = await prisma.hubUser.findUnique({ where: { id: session.id } });
-    if (!user) return null;
+    if (!user) return { authenticated: false as const };
+
+    // Sliding session: extend the cookie on each successful validation
+    await setSessionCookie({ id: user.id, username: user.username, role: user.role });
+
     return {
-      id: user.id, username: user.username, role: user.role,
-      canWrite: user.canWrite, canEdit: user.canEdit, canDelete: user.canDelete,
+      authenticated: true as const,
+      user: {
+        id: user.id, username: user.username, role: user.role,
+        canWrite: user.canWrite, canEdit: user.canEdit, canDelete: user.canDelete,
+      },
     };
   } catch {
-    return null;
+    // Transient backend error: trust the signed cookie, keep the user logged in
+    return {
+      authenticated: true as const,
+      transient: true as const,
+      user: { id: session.id, username: session.username, role: session.role, canWrite: true, canEdit: true, canDelete: true },
+    };
   }
 }
 

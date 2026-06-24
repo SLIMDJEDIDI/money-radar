@@ -94,18 +94,25 @@ export default function MoneyHubApp({
     // The localStorage cache can exist without a valid cookie (e.g. after the
     // security migration or cookie expiry) which made mutations fail silently.
     (async () => {
+      // Optimistically restore from cache so a slow/cold server never flashes
+      // the login screen mid-session.
+      const cached = localStorage.getItem('hub_session_user');
+      if (cached) { try { setCurrentUser(JSON.parse(cached)); } catch {} }
+
       try {
-        const user = await getCurrentUser();
-        if (user) {
-          setCurrentUser(user);
-          localStorage.setItem('hub_session_user', JSON.stringify(user));
-        } else {
+        const res: any = await getCurrentUser();
+        if (res?.authenticated && res.user) {
+          // Confirmed valid session
+          setCurrentUser(res.user);
+          localStorage.setItem('hub_session_user', JSON.stringify(res.user));
+        } else if (res?.authenticated === false) {
+          // Genuinely logged out (no/expired cookie)
           setCurrentUser(null);
           localStorage.removeItem('hub_session_user');
         }
+        // any other shape (network/transient) -> keep whatever we have
       } catch {
-        setCurrentUser(null);
-        localStorage.removeItem('hub_session_user');
+        // Network error: DO NOT log out — keep the cached session
       }
     })();
   }, []);

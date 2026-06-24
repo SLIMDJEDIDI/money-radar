@@ -2,7 +2,7 @@ import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
 import { cookies } from 'next/headers';
 
 const SESSION_COOKIE = 'hub_session';
-const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12h
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days (sliding)
 
 function getSecret(): string {
   // Prefer an explicit secret; fall back to a derived one so the app never
