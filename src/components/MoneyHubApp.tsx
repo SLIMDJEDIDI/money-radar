@@ -4,12 +4,13 @@ import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useC
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, RefreshCw, Clock, ExternalLink,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
   createReminder, toggleReminderCompleted, deleteReminder,
+  confirmReminderReceived, postponeReminder,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser
 } from '../app/actions';
 
@@ -136,6 +137,9 @@ export default function MoneyHubApp({
   const [reminderForm, setReminderForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' });
   const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState({ name: '', emoji: '', color: 'blue' });
+  const [postponeTarget, setPostponeTarget] = useState<any>(null);
+  const [postponeDate, setPostponeDate] = useState('');
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
@@ -236,6 +240,42 @@ export default function MoneyHubApp({
     }); 
   };
 
+  // Confirm payment received -> moves amount into AVOIR balance
+  const handleConfirmReceived = (r: any) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '✅ Paiement reçu ?',
+      description: `Confirmer la réception de ${formatRawCurrency(r.amount, r.currencyCode)} de ${r.contact?.name} ? Le montant sera ajouté à ses Avoirs.`,
+      confirmText: 'Confirmer',
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res: any = await confirmReminderReceived(r.id);
+          if (res.success) await refreshHubState();
+          else if (res.code) handleSessionExpired();
+          else alert(res.error || 'Erreur');
+        });
+      }
+    });
+  };
+
+  // Postpone reminder to a new follow-up date
+  const handlePostpone = (r: any) => {
+    setPostponeTarget(r);
+    setPostponeDate('');
+  };
+
+  const submitPostpone = async () => {
+    if (!postponeTarget || !postponeDate) return;
+    const target = postponeTarget;
+    setPostponeTarget(null);
+    startTransition(async () => {
+      const res: any = await postponeReminder(target.id, postponeDate);
+      if (res.success) await refreshHubState();
+      else if (res.code) handleSessionExpired();
+      else alert(res.error || 'Erreur');
+    });
+  };
+
   const handleDeleteReminder = (id: string) => {
     setConfirmModal({
       isOpen: true, title: 'Supprimer ?', description: 'Supprimer ce rappel ?', confirmText: 'Supprimer', isDanger: true,
@@ -321,6 +361,25 @@ export default function MoneyHubApp({
     [optimisticTransactions, searchQuery]
   );
 
+  // Reminders due today or overdue (the ones needing attention/notification)
+  const dueReminders = useMemo(() => {
+    const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+    return reminders
+      .filter((r:any) => !r.isCompleted && new Date(r.dueDate) <= endOfToday)
+      .sort((a:any, b:any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }, [reminders]);
+
+  // Auto-surface the notification center once per session when payments are due
+  useEffect(() => {
+    if (!currentUser || dueReminders.length === 0) return;
+    const today = new Date().toDateString();
+    const seen = sessionStorage.getItem('hub_notif_seen');
+    if (seen !== today) {
+      setShowNotifications(true);
+      sessionStorage.setItem('hub_notif_seen', today);
+    }
+  }, [currentUser, dueReminders.length]);
+
   if (!currentUser) return (
     <div className="min-h-screen bg-[#020202] flex items-center justify-center p-4">
       <div className="w-full max-w-sm glass-panel border border-neutral-800 rounded-[40px] p-10 text-center shadow-2xl animate-scale-in">
@@ -346,6 +405,7 @@ export default function MoneyHubApp({
               <div><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
             </div>
             <div className="flex gap-2">
+              <button onClick={() => setShowNotifications(true)} className="relative p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><Bell className={`h-4 w-4 ${dueReminders.length > 0 ? 'text-amber-400' : ''}`} />{dueReminders.length > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black">{dueReminders.length}</span>}</button>
               <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
               <button onClick={refreshHubState} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 shadow-lg"><RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} /></button>
             </div>
@@ -462,16 +522,16 @@ export default function MoneyHubApp({
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) < new Date()).map((r:any) => (
                   <div key={r.id} className="p-5 rounded-[32px] border border-rose-950 bg-rose-950/20 flex justify-between items-center shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" />
-                    <div><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-3 rounded-2xl bg-emerald-500 text-black active:scale-90 transition shadow-lg shadow-emerald-500/20"><CheckCircle className="h-5 w-5" /></button>
+                    <div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p>
+                    <div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminder(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 hover:bg-rose-500/10 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
                   </div>
                 ))}
               </div>
               <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] px-1">Prochaines Échéances</h3>
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) >= new Date()).map((r:any) => (
-                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center">
-                    <div><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p></div>
-                    <button onClick={() => handleToggleReminder(r.id, true)} className="p-3 rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400 active:scale-90 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-5 w-5" /></button>
+                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3">
+                    <div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p>
+                    <div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminder(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 hover:bg-rose-500/10 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
                   </div>
                 ))}
               </div>
@@ -672,6 +732,56 @@ export default function MoneyHubApp({
         </div>
         );
       })()}
+
+      {/* NOTIFICATION CENTER */}
+      {showNotifications && (
+        <div className="fixed inset-0 z-[210] bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setShowNotifications(false)}>
+          <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-300 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10">
+              <div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{dueReminders.length > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length}</span>}</div>
+              <button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="px-7 py-6 flex flex-col gap-4">
+              {dueReminders.length === 0 && (
+                <EmptyState icon={<CheckCircle className="h-8 w-8" />} title="Tout est à jour" subtitle="Aucun paiement attendu aujourd'hui. Les échéances arrivées à terme apparaîtront ici." />
+              )}
+              {dueReminders.map((r:any) => {
+                const overdue = new Date(r.dueDate) < new Date(new Date().toDateString());
+                return (
+                <div key={r.id} className={`p-5 rounded-[28px] border flex flex-col gap-4 shadow-lg ${overdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}>
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="min-w-0">
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${overdue ? 'text-rose-400' : 'text-amber-400'}`}>{overdue ? '⚠ En retard' : '🔔 Échéance aujourd\'hui'}</p>
+                      <p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{r.contact?.name}</p>
+                      <p className="text-2xl font-black text-white tracking-tighter mt-1 break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p>
+                      {r.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black">≈ {formatUSD(r.amountInUsd)}</p>}
+                      <p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {new Date(r.dueDate).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })}</p>
+                      {r.note && <p className="text-[11px] text-neutral-500 font-bold mt-1 italic">{r.note}</p>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <button onClick={() => handleConfirmReceived(r)} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Reçu</button>
+                    <button onClick={() => handlePostpone(r)} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Reporter</button>
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POSTPONE MODAL */}
+      {postponeTarget && (
+        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPostponeTarget(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-amber-500/40 rounded-[40px] p-8 flex flex-col gap-6 ring-1 ring-amber-500/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-[0.2em] text-sm text-amber-400 flex items-center gap-2"><CalendarClock className="h-5 w-5" /> Reporter</h3><button onClick={() => setPostponeTarget(null)} className="p-2.5 bg-neutral-900 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
+            <p className="text-xs font-bold text-neutral-400 leading-relaxed">Nouveau suivi pour <span className="text-white font-black">{postponeTarget.contact?.name}</span> · {formatRawCurrency(postponeTarget.amount, postponeTarget.currencyCode)}. Vous serez notifié à cette nouvelle date.</p>
+            <input type="date" value={postponeDate} onChange={(e) => setPostponeDate(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" />
+            <div className="flex gap-3"><button onClick={() => setPostponeTarget(null)} className="flex-1 py-4 bg-neutral-900 text-neutral-400 font-black rounded-[20px] uppercase active:scale-95 transition border border-neutral-800 tracking-widest text-[10px]">Annuler</button><button onClick={submitPostpone} disabled={!postponeDate} className="flex-[2] py-4 bg-amber-500 text-black font-black rounded-[20px] uppercase active:scale-95 transition shadow-xl tracking-widest text-[10px] disabled:opacity-40">Confirmer</button></div>
+          </div>
+        </div>
+      )}
 
       {confirmModal.isOpen && (
         <div className="fixed inset-0 z-[220] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in scale-in duration-300 shadow-2xl" onClick={() => setConfirmModal({isOpen: false})}>

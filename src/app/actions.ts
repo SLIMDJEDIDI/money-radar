@@ -368,14 +368,28 @@ export async function resetDatabaseToZero(password: string) {
 
 // Additional missing wrappers for UI — all guarded by session
 export async function createReminder(formData: FormData) {
-  await requireSession();
+  const session = await requireSession();
   const cid = formData.get('contactId') as string;
   const amt = parseFloat(formData.get('amount') as string);
   const cur = formData.get('currencyCode') as string;
   const due = new Date(formData.get('dueDate') as string);
+  const note = formData.get('note') as string || '';
 
-  await prisma.hubReminder.create({
-    data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd: amt, dueDate: due }
+  // Proper USD conversion using the currency rate
+  const currency = await prisma.hubCurrency.findUnique({ where: { code: cur } });
+  const rate = currency ? currency.rateToUsd : 1.0;
+  const amountInUsd = amt * rate;
+
+  await prisma.$transaction(async (tx) => {
+    const reminder = await tx.hubReminder.create({
+      data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd, dueDate: due, note }
+    });
+    const contact = await tx.hubContact.findUnique({ where: { id: cid } });
+    await logAudit(tx, {
+      entityType: 'REMINDER', entityId: reminder.id, action: 'CREATE',
+      details: `Paiement attendu: ${amt} ${cur} de ${contact?.name} le ${due.toLocaleDateString('fr-FR')}`,
+      modifiedBy: session.username,
+    });
   });
   revalidatePath('/');
   return { success: true };
@@ -386,6 +400,80 @@ export async function toggleReminderCompleted(id: string, isCompleted: boolean) 
   await prisma.hubReminder.update({ where: { id }, data: { isCompleted } });
   revalidatePath('/');
   return { success: true };
+}
+
+// Confirm a payment was received -> move it into the partner's AVOIR (HELD) balance
+export async function confirmReminderReceived(id: string) {
+  try {
+    const session = await requireSession();
+    await prisma.$transaction(async (tx) => {
+      const reminder = await tx.hubReminder.findUnique({ where: { id }, include: { contact: true } });
+      if (!reminder) throw new Error('NOT_FOUND');
+      if (reminder.isCompleted) return;
+
+      // Create the AVOIR (HELD) transaction in the original currency
+      await tx.hubTransaction.create({
+        data: {
+          amount: reminder.amount,
+          currencyCode: reminder.currencyCode,
+          amountInUsd: reminder.amountInUsd,
+          contactId: reminder.contactId,
+          type: 'HELD',
+          category: 'Paiement reçu',
+          note: `Encaissement du rappel du ${new Date(reminder.dueDate).toLocaleDateString('fr-FR')}`,
+        },
+      });
+
+      // Update partner balances (held += amount)
+      const c = reminder.contact;
+      const h = c.heldBalanceUsd + reminder.amountInUsd;
+      await tx.hubContact.update({
+        where: { id: c.id },
+        data: { heldBalanceUsd: h, netPositionUsd: h + c.receivableBalanceUsd - c.payableBalanceUsd },
+      });
+
+      // Mark reminder completed
+      await tx.hubReminder.update({ where: { id }, data: { isCompleted: true } });
+
+      await logAudit(tx, {
+        entityType: 'REMINDER', entityId: id, action: 'RECEIVED',
+        details: `Paiement reçu de ${c.name}: ${reminder.amount} ${reminder.currencyCode} ajouté aux Avoirs`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
+    return { success: false, error: 'Erreur lors de la confirmation' };
+  }
+}
+
+// Postpone a reminder to a new follow-up date
+export async function postponeReminder(id: string, newDate: string) {
+  try {
+    const session = await requireSession();
+    const due = new Date(newDate);
+    await prisma.$transaction(async (tx) => {
+      const reminder = await tx.hubReminder.findUnique({ where: { id }, include: { contact: true } });
+      if (!reminder) throw new Error('NOT_FOUND');
+      await tx.hubReminder.update({ where: { id }, data: { dueDate: due, isCompleted: false } });
+      await logAudit(tx, {
+        entityType: 'REMINDER', entityId: id, action: 'POSTPONED',
+        details: `Rappel ${reminder.contact?.name} reporté au ${due.toLocaleDateString('fr-FR')}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
+    return { success: false, error: 'Erreur lors du report' };
+  }
 }
 
 export async function deleteReminder(id: string) {
