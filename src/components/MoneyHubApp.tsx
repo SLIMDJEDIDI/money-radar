@@ -2,7 +2,7 @@
 
 import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, memo } from 'react';
 import {
-  Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, RefreshCw, Clock, ExternalLink,
+  Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock,
   Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock
 } from 'lucide-react';
@@ -157,6 +157,67 @@ export default function MoneyHubApp({
   const [postponeDate, setPostponeDate] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [drawerTypeFilter, setDrawerTypeFilter] = useState<string | null>(null);
+
+  // --- NAVIGATION HISTORY (back / forward through sections) ---
+  const [navStack, setNavStack] = useState<string[]>(['dashboard']);
+  const [navPos, setNavPos] = useState(0);
+  const canGoBack = navPos > 0;
+  const canGoForward = navPos < navStack.length - 1;
+
+  // Navigate to a section and record it in history
+  const navigateTo = useCallback((section: string) => {
+    setActiveSection(section as any);
+    setNavStack(prev => {
+      // if same as current, do nothing
+      if (prev[navPos] === section) return prev;
+      const truncated = prev.slice(0, navPos + 1);
+      truncated.push(section);
+      setNavPos(truncated.length - 1);
+      return truncated;
+    });
+  }, [navPos]);
+
+  // Close the top-most open overlay (modal / drawer / notifications). Returns true if something closed.
+  const closeTopOverlay = useCallback(() => {
+    if (postponeTarget) { setPostponeTarget(null); return true; }
+    if (confirmModal.isOpen) { setConfirmModal({ isOpen: false }); return true; }
+    if (activeModal) { setActiveModal(null); return true; }
+    if (showNotifications) { setShowNotifications(false); return true; }
+    if (selectedContact) { setSelectedContact(null); setDrawerTypeFilter(null); return true; }
+    return false;
+  }, [postponeTarget, confirmModal, activeModal, showNotifications, selectedContact]);
+
+  const goBack = useCallback(() => {
+    if (closeTopOverlay()) return;
+    setNavPos(prev => {
+      if (prev <= 0) return prev;
+      const next = prev - 1;
+      setActiveSection(navStack[next] as any);
+      return next;
+    });
+  }, [closeTopOverlay, navStack]);
+
+  const goForward = useCallback(() => {
+    setNavPos(prev => {
+      if (prev >= navStack.length - 1) return prev;
+      const next = prev + 1;
+      setActiveSection(navStack[next] as any);
+      return next;
+    });
+  }, [navStack]);
+
+  // Browser / mobile hardware back button support
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      e.preventDefault?.();
+      goBack();
+      // keep a state entry so the next back press is captured again
+      window.history.pushState({ hub: true }, '');
+    };
+    window.history.pushState({ hub: true }, '');
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [goBack]);
 
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
@@ -449,9 +510,13 @@ export default function MoneyHubApp({
       <header className="sticky top-0 z-40 bg-[#050505]/90 backdrop-blur-2xl border-b border-neutral-900/50 p-4 pt-6">
         <div className="max-w-4xl mx-auto flex flex-col gap-4">
           <div className="flex justify-between items-center px-1">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-emerald-500/10">M</div>
-              <div><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
+            <div className="flex items-center gap-2.5">
+              <div className="flex gap-1.5">
+                <button onClick={goBack} disabled={!canGoBack && !selectedContact && !activeModal && !showNotifications && !confirmModal.isOpen && !postponeTarget} title="Précédent" className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft className="h-4 w-4" /></button>
+                <button onClick={goForward} disabled={!canGoForward} title="Suivant" className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight className="h-4 w-4" /></button>
+              </div>
+              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-emerald-500/10 cursor-pointer" onClick={() => navigateTo('dashboard')}>M</div>
+              <div className="hidden sm:block"><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowNotifications(true)} className="relative p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><Bell className={`h-4 w-4 ${dueReminders.length > 0 ? 'text-amber-400' : ''}`} />{dueReminders.length > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black">{dueReminders.length}</span>}</button>
@@ -486,14 +551,14 @@ export default function MoneyHubApp({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} />
-              <StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="emerald" note="Il me doit" onClick={() => { setContactFilterType('RECEIVABLE'); setActiveSection('contacts'); }} />
-              <StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); setActiveSection('contacts'); }} />
-              <StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => setActiveSection('reminders')} />
+              <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); navigateTo('contacts'); }} />
+              <StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="emerald" note="Il me doit" onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} />
+              <StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} />
+              <StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => navigateTo('reminders')} />
             </div>
             <div className="flex justify-between items-center mt-2 px-1">
               <h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Partenaires Actifs</h3>
-              <button onClick={() => setActiveSection('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
+              <button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {filteredContacts.map((c: any) => {
@@ -619,7 +684,7 @@ export default function MoneyHubApp({
             { id: 'reminders', label: 'Rappels', icon: <Calendar className="h-5 w-5" /> },
             { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5" /> },
           ].map(s => (
-            <button key={s.id} onClick={() => setActiveSection(s.id as any)} className={`flex flex-col items-center gap-1.5 px-5 py-3.5 rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
+            <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-col items-center gap-1.5 px-5 py-3.5 rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
               {s.icon} <span className="text-[9px] font-black uppercase tracking-tighter">{s.label}</span>
             </button>
           ))}
