@@ -578,17 +578,62 @@ export default function MoneyHubApp({
           </div>
         )}
 
-        {activeSection === 'contacts' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-10">
-            <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 bg-neutral-900/10 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-neutral-900/30 transition-all active:scale-95 group">
-              <div className="p-4 bg-emerald-500/10 rounded-3xl group-hover:scale-110 transition"><Plus className="h-8 w-8 text-emerald-500" /></div>
-              <p className="text-xs font-black uppercase tracking-widest text-neutral-400">Ajouter un Partenaire</p>
-            </div>
-            {filteredContacts.map((c: any) => (
-              <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} />
-            ))}
+        {activeSection === 'contacts' && (() => {
+          const filterMeta: Record<string, { label: string; type: string; color: string; cta: string }> = {
+            HELD: { label: 'Avoirs', type: 'HELD', color: 'blue', cta: 'Enregistrer un avoir' },
+            RECEIVABLE: { label: 'À recevoir', type: 'RECEIVABLE', color: 'emerald', cta: 'Ajouter une somme à recevoir' },
+            PAYABLE: { label: 'À payer', type: 'PAYABLE', color: 'rose', cta: 'Ajouter une dette' },
+          };
+          const meta = contactFilterType !== 'ALL' ? filterMeta[contactFilterType] : null;
+          const startOpWithType = (type: string) => {
+            setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type, category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
+            setActiveModal('add_tx');
+          };
+          return (
+          <div className="flex flex-col gap-4 pb-10">
+            {meta && (
+              <div className={`flex items-center justify-between gap-3 p-4 rounded-2xl border bg-${meta.color}-500/5 border-${meta.color}-500/20`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className={`text-[10px] font-black uppercase tracking-widest text-${meta.color}-400`}>Filtre : {meta.label}</span>
+                  <span className="text-[10px] font-black text-neutral-500">· {filteredContacts.length} partenaire(s)</span>
+                </div>
+                <button onClick={() => setContactFilterType('ALL')} className="text-[10px] font-black text-neutral-400 uppercase tracking-wider flex items-center gap-1 shrink-0 hover:text-white transition">Tout voir <X className="h-3 w-3" /></button>
+              </div>
+            )}
+
+            {/* SMART EMPTY STATE when a filter yields no partners */}
+            {meta && filteredContacts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center text-center gap-5 py-16 px-6 animate-fade-up">
+                <div className={`p-6 bg-${meta.color}-500/5 border border-${meta.color}-500/20 rounded-[32px] text-${meta.color}-400 shadow-inner`}><DollarSign className="h-10 w-10" /></div>
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-black uppercase tracking-widest text-neutral-200">Aucun montant « {meta.label} »</p>
+                  <p className="text-xs font-bold text-neutral-500 max-w-xs leading-relaxed">Choisis un partenaire existant et indique le montant — l'opération sera créée automatiquement.</p>
+                </div>
+                <button onClick={() => startOpWithType(meta.type)} className={`px-6 py-4 bg-${meta.color}-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl active:scale-[0.97] transition tracking-widest`}><Plus className="h-4 w-4 stroke-[3]" /> {meta.cta}</button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {!meta && (
+                  <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 bg-neutral-900/10 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-neutral-900/30 transition-all active:scale-95 group">
+                    <div className="p-4 bg-emerald-500/10 rounded-3xl group-hover:scale-110 transition"><Plus className="h-8 w-8 text-emerald-500" /></div>
+                    <p className="text-xs font-black uppercase tracking-widest text-neutral-400">Ajouter un Partenaire</p>
+                  </div>
+                )}
+                {/* When filtering, offer a quick "add this type of operation" card too */}
+                {meta && (
+                  <div onClick={() => startOpWithType(meta.type)} className={`border border-dashed border-${meta.color}-500/30 bg-${meta.color}-500/5 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-${meta.color}-500/10 transition-all active:scale-95 group`}>
+                    <div className={`p-4 bg-${meta.color}-500/10 rounded-3xl group-hover:scale-110 transition`}><Plus className={`h-8 w-8 text-${meta.color}-400`} /></div>
+                    <p className="text-xs font-black uppercase tracking-widest text-neutral-300 text-center">{meta.cta}</p>
+                  </div>
+                )}
+                {filteredContacts.map((c: any) => (
+                  <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} />
+                ))}
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {activeSection === 'transactions' && (
           <div className="flex flex-col gap-3 pb-10">
