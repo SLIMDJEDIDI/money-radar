@@ -21,9 +21,9 @@ const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note }:
     onClick={onClick}
     className={`bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer transition-all active:scale-[0.97] hover:border-${style}-500/40 ${activeFilter === type ? `ring-2 ring-${style}-500/50 border-${style}-500/50` : ''}`}
   >
-    <p className="text-[10px] font-black text-neutral-400 uppercase tracking-wider">{label}</p>
+    <p className="text-[10px] font-black text-neutral-300 uppercase tracking-wider">{label}</p>
     <p className={`text-2xl font-black text-${style}-400 mt-2 tracking-tighter`}>{val}</p>
-    <p className={`text-[10px] text-${style}-300 font-black italic uppercase mt-1.5 opacity-90 tracking-tighter`}>{note}</p>
+    <p className={`text-[10px] text-${style}-300 font-black italic uppercase mt-1.5 tracking-tighter`}>{note}</p>
   </div>
 ));
 StatCard.displayName = 'StatCard';
@@ -307,11 +307,16 @@ export default function MoneyHubApp({
       <main className="max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up">
         {activeSection === 'dashboard' && (
           <div className="flex flex-col gap-5">
-            <div className="bg-gradient-to-br from-neutral-900 to-black border border-neutral-800 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-              <div className="absolute top-0 right-0 p-8 opacity-5"><DollarSign className="h-32 w-32" /></div>
-              <p className="text-[11px] font-black text-neutral-500 uppercase tracking-[0.2em] mb-2">Position Nette Globale</p>
-              <h2 className="text-6xl font-black tracking-tighter">{formatUSD(metrics.netPosition)}</h2>
-              <div className="flex items-center gap-2 mt-4"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><p className="text-[10px] text-emerald-500/80 font-black uppercase tracking-widest italic">Total Aggregé · USD</p></div>
+            <div className={`bg-gradient-to-br from-neutral-900 to-black border p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5 ${metrics.netPosition >= 0 ? 'border-emerald-500/20' : 'border-rose-500/20'}`}>
+              <div className={`absolute top-0 right-0 p-8 opacity-[0.07] ${metrics.netPosition >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}><DollarSign className="h-32 w-32" /></div>
+              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-2">Position Nette Globale</p>
+              <h2 className={`text-6xl font-black tracking-tighter ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-5 border-t border-white/5">
+                <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-neutral-300 font-black uppercase tracking-widest">Live · USD</span></span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-400">Avoirs {formatUSD(metrics.totalAvoirs)}</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">+ Créances {formatUSD(metrics.totalReceivables)}</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">− Dettes {formatUSD(metrics.totalPayables)}</span>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); setActiveSection('contacts'); }} />
