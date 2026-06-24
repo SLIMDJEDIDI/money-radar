@@ -28,28 +28,49 @@ const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note }:
 ));
 StatCard.displayName = 'StatCard';
 
-const ContactCard = memo(({ c, formatUSD, onEdit, onSelect }: any) => (
-  <div key={c.id} className="bg-neutral-900 border border-neutral-800 p-6 rounded-[32px] flex flex-col gap-5 hover:border-neutral-600 transition shadow-lg animate-fade-up">
-    <div className="flex justify-between items-start">
-      <div onClick={() => onSelect(c)} className="flex items-center gap-4 cursor-pointer group">
-        <span className="text-4xl p-2 bg-neutral-950 border border-neutral-800 rounded-2xl group-hover:scale-110 transition duration-300">{c.emoji}</span>
-        <div>
-          <p className="font-black text-white text-2xl uppercase tracking-tighter leading-none">{c.name}</p>
-          <p className="text-[11px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-2">{c.country || 'GLOBAL'}</p>
+const ContactCard = memo(({ c, formatUSD, onEdit, onSelect }: any) => {
+  const positive = c.netPositionUsd >= 0;
+  const hasActivity = Math.abs(c.netPositionUsd) > 0.01 || c.heldBalanceUsd > 0.01 || c.receivableBalanceUsd > 0.01 || c.payableBalanceUsd > 0.01;
+  return (
+  <div key={c.id} className={`bg-neutral-900 border p-6 rounded-[32px] flex flex-col gap-5 transition shadow-lg animate-fade-up ${hasActivity ? (positive ? 'border-emerald-500/20 hover:border-emerald-500/40' : 'border-rose-500/20 hover:border-rose-500/40') : 'border-neutral-800 hover:border-neutral-600'}`}>
+    <div className="flex justify-between items-start gap-3">
+      <div onClick={() => onSelect(c)} className="flex items-center gap-4 cursor-pointer group min-w-0 flex-1">
+        <span className="text-4xl p-2 bg-neutral-950 border border-neutral-800 rounded-2xl group-hover:scale-110 transition duration-300 shrink-0">{c.emoji}</span>
+        <div className="min-w-0">
+          <p className="font-black text-white text-2xl uppercase tracking-tighter leading-none truncate">{c.name}</p>
+          <p className="text-[11px] text-neutral-400 uppercase font-black tracking-[0.2em] mt-2 truncate">{c.country || 'GLOBAL'}</p>
         </div>
       </div>
-      <button onClick={(e) => onEdit(e, c)} className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 text-blue-400 active:scale-90 transition shadow-md hover:bg-blue-500/10">
-        <Edit className="h-5 w-5" />
-      </button>
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        <button onClick={(e) => onEdit(e, c)} className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 text-blue-400 active:scale-90 transition shadow-md hover:bg-blue-500/10">
+          <Edit className="h-5 w-5" />
+        </button>
+      </div>
     </div>
-    <div className="grid grid-cols-3 gap-2 border-t border-neutral-800 pt-5 text-[10px] text-center font-black uppercase tracking-tighter">
-      <div className="flex flex-col gap-1"><p className="text-neutral-500">Avoirs</p><p className="text-blue-400 font-black text-xs">{formatUSD(c.heldBalanceUsd)}</p></div>
-      <div className="flex flex-col gap-1"><p className="text-neutral-500">Créances</p><p className="text-emerald-400 font-black text-xs">{formatUSD(c.receivableBalanceUsd)}</p></div>
-      <div className="flex flex-col gap-1"><p className="text-neutral-500">Dettes</p><p className="text-rose-400 font-black text-xs">{formatUSD(c.payableBalanceUsd)}</p></div>
+    <div onClick={() => onSelect(c)} className="cursor-pointer flex flex-col gap-4">
+      <div className={`flex items-baseline justify-between rounded-2xl px-4 py-3 border ${positive ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}>
+        <span className="text-[10px] font-black uppercase tracking-widest text-neutral-300">Position Nette</span>
+        <span className={`text-xl font-black tracking-tighter ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-[10px] text-center font-black uppercase tracking-tighter">
+        <div className="flex flex-col gap-1"><p className="text-neutral-400">Avoirs</p><p className="text-blue-400 font-black text-xs">{formatUSD(c.heldBalanceUsd)}</p></div>
+        <div className="flex flex-col gap-1"><p className="text-neutral-400">Créances</p><p className="text-emerald-400 font-black text-xs">{formatUSD(c.receivableBalanceUsd)}</p></div>
+        <div className="flex flex-col gap-1"><p className="text-neutral-400">Dettes</p><p className="text-rose-400 font-black text-xs">{formatUSD(c.payableBalanceUsd)}</p></div>
+      </div>
     </div>
   </div>
-));
+  );
+});
 ContactCard.displayName = 'ContactCard';
+
+const EmptyState = memo(({ icon, title, subtitle }: any) => (
+  <div className="flex flex-col items-center justify-center text-center gap-4 py-20 px-6 animate-fade-up">
+    <div className="p-6 bg-neutral-900 border border-neutral-800 rounded-[32px] text-neutral-600 shadow-inner">{icon}</div>
+    <p className="text-sm font-black uppercase tracking-widest text-neutral-300">{title}</p>
+    <p className="text-xs font-bold text-neutral-500 max-w-xs leading-relaxed">{subtitle}</p>
+  </div>
+));
+EmptyState.displayName = 'EmptyState';
 
 export default function MoneyHubApp({
   initialContacts, initialActiveCurrencies, initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics, initialCategories
@@ -353,6 +374,9 @@ export default function MoneyHubApp({
 
         {activeSection === 'transactions' && (
           <div className="flex flex-col gap-3 pb-10">
+            {filteredMovements.length === 0 && (
+              <EmptyState icon={<ArrowLeftRight className="h-10 w-10" />} title="Aucune opération" subtitle="Les opérations enregistrées apparaîtront ici. Touchez « Nouvelle Opération » pour commencer." />
+            )}
             {filteredMovements.map((t: any) => (
               <div key={t.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex justify-between items-center shadow-lg hover:border-neutral-700 transition group">
                 <div className="flex items-center gap-4">
@@ -372,6 +396,9 @@ export default function MoneyHubApp({
           <div className="flex flex-col gap-4 pb-10">
             <h2 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] mb-2 px-1 flex items-center gap-2"> <History className="h-4 w-4" /> Journal de Traçabilité </h2>
             <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
+              {initialAuditTrails.length === 0 && (
+                <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Chaque action (création, modification, suppression, connexion) sera tracée ici de façon sécurisée." />
+              )}
               {initialAuditTrails.map((a: any) => (
                 <div key={a.id} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex flex-col gap-3 shadow-inner ring-1 ring-white/5">
                   <div className="flex justify-between items-start"><p className="text-[9px] font-black px-1.5 py-1 rounded-lg bg-neutral-950 text-neutral-400 uppercase tracking-widest border border-neutral-800">{a.entityType} : {a.action}</p><p className="text-[9px] text-neutral-500 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}</p></div>
