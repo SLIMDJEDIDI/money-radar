@@ -47,13 +47,33 @@ export async function getHubDashboardData(searchQuery: string = '') {
 
     const activeCurrencies = currencies.filter(c => c.isActive);
 
+    // Per-contact TND held breakdown (local currency kept separate from USD).
+    // Contact balances are stored only in USD, so we reconstruct the TND part
+    // from raw transactions.
+    const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
+    transactions.forEach(t => {
+      if (t.type !== 'HELD' || t.currencyCode !== 'TND') return;
+      const entry = tndHeldByContact[t.contactId] || { tnd: 0, usd: 0 };
+      entry.tnd += t.amount;
+      entry.usd += t.amountInUsd;
+      tndHeldByContact[t.contactId] = entry;
+    });
+
     // 2. Logic: Show partners with non-zero balances FIRST
     // Sort logic: 1. Non-zero absolute net position first. 2. Alphabetical secondary.
-    const formattedContacts = contacts.map(c => ({
-      id: c.id, name: c.name, emoji: c.emoji, country: c.country, isArchived: c.isArchived,
-      heldBalanceUsd: c.heldBalanceUsd, receivableBalanceUsd: c.receivableBalanceUsd,
-      payableBalanceUsd: c.payableBalanceUsd, netPositionUsd: c.netPositionUsd,
-    })).sort((a, b) => {
+    const formattedContacts = contacts.map(c => {
+      const tnd = tndHeldByContact[c.id] || { tnd: 0, usd: 0 };
+      const heldUsdOnly = c.heldBalanceUsd - tnd.usd; // exclude local TND from USD held
+      return {
+        id: c.id, name: c.name, emoji: c.emoji, country: c.country, isArchived: c.isArchived,
+        heldBalanceUsd: heldUsdOnly,
+        heldBalanceTnd: tnd.tnd,
+        receivableBalanceUsd: c.receivableBalanceUsd,
+        payableBalanceUsd: c.payableBalanceUsd,
+        // Net position in USD excludes local TND avoirs (consistent with dashboard)
+        netPositionUsd: heldUsdOnly + c.receivableBalanceUsd - c.payableBalanceUsd,
+      };
+    }).sort((a, b) => {
       const aHasMoney = Math.abs(a.netPositionUsd) > 0.01 || a.heldBalanceUsd > 0.01 || a.receivableBalanceUsd > 0.01 || a.payableBalanceUsd > 0.01;
       const bHasMoney = Math.abs(b.netPositionUsd) > 0.01 || b.heldBalanceUsd > 0.01 || b.receivableBalanceUsd > 0.01 || b.payableBalanceUsd > 0.01;
       
