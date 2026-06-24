@@ -144,7 +144,13 @@ export async function createContact(formData: FormData) {
     revalidatePath('/');
     return { success: true, contact: res };
   } catch (error: any) {
-    return { success: false, error: 'Ce nom existe déjà' };
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
+    if (error?.code === 'P2002') {
+      return { success: false, error: 'Ce nom existe déjà' };
+    }
+    return { success: false, error: 'Erreur lors de la création du partenaire' };
   }
 }
 
@@ -177,7 +183,10 @@ export async function updateContact(formData: FormData) {
 
     revalidatePath('/');
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
     return { success: false, error: 'Erreur modification contact' };
   }
 }
@@ -201,7 +210,10 @@ export async function deleteContact(id: string) {
 
     revalidatePath('/');
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
     return { success: false, error: 'Erreur: ce contact a des transactions' };
   }
 }
@@ -258,7 +270,10 @@ export async function createHubTransaction(formData: FormData) {
 
     revalidatePath('/');
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée. Veuillez vous reconnecter.', code: error.message };
+    }
     return { success: false, error: 'Erreur transaction' };
   }
 }

@@ -10,7 +10,7 @@ import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
   createReminder, toggleReminderCompleted, deleteReminder,
-  resetDatabaseToZero, loginUser, logoutUser
+  resetDatabaseToZero, loginUser, logoutUser, getCurrentUser
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
@@ -81,8 +81,24 @@ export default function MoneyHubApp({
   const [loginError, setLoginError] = useState('');
   
   useEffect(() => {
-    const saved = localStorage.getItem('hub_session_user');
-    if (saved) setCurrentUser(JSON.parse(saved));
+    // Validate the REAL server session (httpOnly cookie), not just the local cache.
+    // The localStorage cache can exist without a valid cookie (e.g. after the
+    // security migration or cookie expiry) which made mutations fail silently.
+    (async () => {
+      try {
+        const user = await getCurrentUser();
+        if (user) {
+          setCurrentUser(user);
+          localStorage.setItem('hub_session_user', JSON.stringify(user));
+        } else {
+          setCurrentUser(null);
+          localStorage.removeItem('hub_session_user');
+        }
+      } catch {
+        setCurrentUser(null);
+        localStorage.removeItem('hub_session_user');
+      }
+    })();
   }, []);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -161,8 +177,10 @@ export default function MoneyHubApp({
     startTransition(async () => {
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
       const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
-      const res = await createHubTransaction(data);
+      const res: any = await createHubTransaction(data);
       if (res.success) { setActiveModal(null); await refreshHubState(); }
+      else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') { handleSessionExpired(); }
+      else { alert(res.error || 'Erreur'); }
     });
   };
 
@@ -174,13 +192,29 @@ export default function MoneyHubApp({
 
   const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!contactForm.name.trim()) return;
     startTransition(async () => {
       addOptimisticContact({ id: 'temp', name: contactForm.name, emoji: contactForm.emoji, netPositionUsd: 0, heldBalanceUsd:0, receivableBalanceUsd:0, payableBalanceUsd:0 });
       const data = new FormData();
       Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
-      const res = await createContact(data);
-      if (res.success) { setActiveModal(null); await refreshHubState(); }
+      const res: any = await createContact(data);
+      if (res.success) {
+        setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
+        setActiveModal(null);
+        await refreshHubState();
+      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
+        handleSessionExpired();
+      } else {
+        alert(res.error || 'Erreur lors de la création');
+      }
     });
+  };
+
+  const handleSessionExpired = () => {
+    setActiveModal(null);
+    setCurrentUser(null);
+    localStorage.removeItem('hub_session_user');
+    alert('Votre session a expiré. Veuillez vous reconnecter.');
   };
 
   const handleUpdateContact = async (e: React.FormEvent) => {
