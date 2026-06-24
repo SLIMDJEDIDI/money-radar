@@ -138,7 +138,17 @@ export default function MoneyHubApp({
   const [confirmModal, setConfirmModal] = useState<any>({ isOpen: false });
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const [transactionForm, setTransactionForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' });
+  const [transactionForm, setTransactionForm] = useState({ 
+    contactId: '', 
+    amount: '', 
+    currencyCode: 'USD', 
+    type: 'HELD', 
+    category: 'Virement', 
+    note: '',
+    isPostponed: false,
+    dueDate: '',
+    reminderEmail: ''
+  });
   const [contactForm, setContactForm] = useState({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
   const [reminderForm, setReminderForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' });
   const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
@@ -187,13 +197,45 @@ export default function MoneyHubApp({
     e.preventDefault();
     const contact = contacts.find((c:any) => c.id === transactionForm.contactId);
     const amount = parseFloat(transactionForm.amount);
+    
     startTransition(async () => {
+      // If it's a postponed CRÉANCE (RECEIVABLE), create a reminder instead of a transaction
+      if (transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed) {
+        const data = new FormData();
+        data.append('contactId', transactionForm.contactId);
+        data.append('amount', transactionForm.amount);
+        data.append('currencyCode', transactionForm.currencyCode);
+        data.append('dueDate', transactionForm.dueDate);
+        data.append('note', transactionForm.note);
+        data.append('reminderEmail', transactionForm.reminderEmail);
+        
+        const res: any = await createReminder(data);
+        if (res.success) {
+          setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
+          setActiveModal(null);
+          await refreshHubState();
+        } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
+          handleSessionExpired();
+        } else {
+          alert(res.error || 'Erreur lors de la création du rappel');
+        }
+        return;
+      }
+
+      // Standard Transaction Path
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
-      const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
+      const data = new FormData();
+      Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
       const res: any = await createHubTransaction(data);
-      if (res.success) { setActiveModal(null); await refreshHubState(); }
-      else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') { handleSessionExpired(); }
-      else { alert(res.error || 'Erreur'); }
+      if (res.success) {
+        setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
+        setActiveModal(null);
+        await refreshHubState();
+      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
+        handleSessionExpired();
+      } else {
+        alert(res.error || 'Erreur');
+      }
     });
   };
 
@@ -418,7 +460,7 @@ export default function MoneyHubApp({
             </div>
           </div>
           <div className="flex gap-2 px-1">
-            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' }); setActiveModal('add_tx'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
+            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
             <button onClick={() => setActiveModal('add_contact')} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-white font-black uppercase text-xs rounded-2xl active:scale-[0.98] transition shadow-md"> <UserPlus className="h-5 w-5" /> </button>
           </div>
           <div className="relative px-1">
@@ -594,10 +636,33 @@ export default function MoneyHubApp({
               <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-emerald-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={transactionForm.amount} onChange={e => setTransactionForm(p=>({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-[20px] px-5 font-black text-white outline-none focus:border-neutral-600 shadow-inner" value={transactionForm.currencyCode} onChange={e => setTransactionForm(p=>({...p, currencyCode: e.target.value}))}>{initialActiveCurrencies.map((c:any) => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
               <div className="grid grid-cols-3 gap-2.5">
                 {['HELD', 'RECEIVABLE', 'PAYABLE'].map(type => (
-                  <button key={type} type="button" onClick={() => setTransactionForm(p=>({...p, type}))} className={`py-5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === type ? 'bg-white text-black border-white shadow-emerald-500/10' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{getTransactionTypeStyle(type).label}</span><span className="text-[7px] font-black opacity-50 tracking-tighter uppercase">{getTransactionTypeStyle(type).note}</span></button>
+                  <button key={type} type="button" onClick={() => setTransactionForm(p=>({...p, type, isPostponed: type === 'RECEIVABLE' ? p.isPostponed : false}))} className={`py-5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === type ? 'bg-white text-black border-white shadow-emerald-500/10' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{getTransactionTypeStyle(type).label}</span><span className="text-[7px] font-black opacity-50 tracking-tighter uppercase">{getTransactionTypeStyle(type).note}</span></button>
                 ))}
               </div>
-              <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{TYPE_EXPLAIN[transactionForm.type]}</p></div>
+
+              {transactionForm.type === 'RECEIVABLE' && (
+                <div className="flex flex-col gap-4 animate-in fade-in duration-300">
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: false}))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${!transactionForm.isPostponed ? 'bg-emerald-500 text-black border-emerald-500' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>Effet Immédiat</button>
+                    <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: true}))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${transactionForm.isPostponed ? 'bg-amber-500 text-black border-amber-500' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>Échéance Future</button>
+                  </div>
+                  
+                  {transactionForm.isPostponed && (
+                    <div className="flex flex-col gap-3 animate-in slide-in-from-top-2 duration-300">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date d'échéance</label>
+                        <input type="date" required={transactionForm.isPostponed} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Email pour le rappel</label>
+                        <input type="email" placeholder="votre@email.com" className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black outline-none focus:border-amber-500/50 shadow-inner" value={transactionForm.reminderEmail} onChange={e => setTransactionForm(p=>({...p, reminderEmail: e.target.value}))} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed ? "RAPPEL : Le montant ne sera pas ajouté aux soldes immédiatement. Vous serez notifié par email à l'échéance." : TYPE_EXPLAIN[transactionForm.type]}</p></div>
               <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white focus:border-neutral-600 outline-none shadow-inner" placeholder="Commentaire / Référence" value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
               <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-5 bg-emerald-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-emerald-500/30 active:scale-95 transition tracking-widest text-xs">Enregistrer</button></div>
             </form>
@@ -658,7 +723,7 @@ export default function MoneyHubApp({
         ];
         const activeExplain = drawerTypeFilter ? breakdown.find(b => b.key === drawerTypeFilter) : null;
         const startOpForPartner = () => {
-          setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '' });
+          setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
           setActiveModal('add_tx');
         };
         const closeDrawer = () => { setSelectedContact(null); setDrawerTypeFilter(null); };

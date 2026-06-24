@@ -66,17 +66,19 @@ model HubTransaction {
 }
 
 model HubReminder {
-  id           String     @id @default(cuid())
-  amount       Float
-  currencyCode String     @default("USD")
-  amountInUsd  Float
-  contactId    String
-  contact      HubContact @relation("ContactReminders", fields: [contactId], references: [id], onDelete: Cascade)
-  dueDate      DateTime
-  note         String?
-  isCompleted  Boolean    @default(false)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  amount        Float
+  currencyCode  String     @default("USD")
+  amountInUsd   Float
+  contactId     String
+  contact       HubContact @relation("ContactReminders", fields: [contactId], references: [id], onDelete: Cascade)
+  dueDate       DateTime
+  note          String?
+  reminderEmail String?
+  lastNotifiedAt DateTime?
+  isCompleted    Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@index([contactId])
   @@index([dueDate])

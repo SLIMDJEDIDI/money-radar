@@ -374,6 +374,7 @@ export async function createReminder(formData: FormData) {
   const cur = formData.get('currencyCode') as string;
   const due = new Date(formData.get('dueDate') as string);
   const note = formData.get('note') as string || '';
+  const reminderEmail = formData.get('reminderEmail') as string || '';
 
   // Proper USD conversion using the currency rate
   const currency = await prisma.hubCurrency.findUnique({ where: { code: cur } });
@@ -382,7 +383,7 @@ export async function createReminder(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const reminder = await tx.hubReminder.create({
-      data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd, dueDate: due, note }
+      data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd, dueDate: due, note, reminderEmail }
     });
     const contact = await tx.hubContact.findUnique({ where: { id: cid } });
     await logAudit(tx, {
