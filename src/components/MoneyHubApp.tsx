@@ -290,9 +290,48 @@ export default function MoneyHubApp({
     });
   };
 
-  const handleDeleteTndMovement = async (id: string) => {
-    if (!confirm('Supprimer ce mouvement de trésorerie ?')) return;
-    startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+  const handleDeleteTndMovement = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Supprimer ce mouvement ?',
+      description: 'Ce mouvement de trésorerie TND sera retiré du journal.',
+      confirmText: 'Supprimer',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+      },
+    });
+  };
+
+  const handleDeleteReminderLoc = (rid: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Supprimer ce rappel ?',
+      description: 'Le rappel sera définitivement retiré.',
+      confirmText: 'Supprimer',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        await deleteReminder(rid);
+        await refreshHubState();
+      },
+    });
+  };
+
+  const handleDeleteAssistantLoc = (uid: string, uname: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: `Retirer ${uname} ?`,
+      description: 'Cet assistant perdra immédiatement son accès à la plateforme.',
+      confirmText: 'Retirer',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        await deleteAssistantUser(uid);
+        await refreshHubState();
+      },
+    });
   };
 
   const handleInlineCreatePartner = () => {
@@ -590,12 +629,12 @@ export default function MoneyHubApp({
             <div className="flex flex-col gap-8">
               <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-rose-500 uppercase tracking-[0.2em] px-1 flex items-center gap-2 animate-pulse"><AlertTriangle className="h-4 w-4" /> En Retard</h3>
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) < new Date(new Date().toDateString())).map((r:any) => (
-                  <div key={r.id} className="relative p-5 rounded-[32px] border border-rose-900/50 bg-rose-950/10 flex items-center justify-between gap-4 overflow-hidden"><div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" /><div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest uppercase">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={async () => { if (confirm('Supprimer ce rappel ?')) { await deleteReminder(r.id); await refreshHubState(); } }} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                  <div key={r.id} className="relative p-5 rounded-[32px] border border-rose-900/50 bg-rose-950/10 flex items-center justify-between gap-4 overflow-hidden"><div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" /><div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest uppercase">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
                 ))}
               </div>
               <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] px-1">Prochaines Échéances</h3>
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) >= new Date(new Date().toDateString())).map((r:any) => (
-                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={async () => { if (confirm('Supprimer ce rappel ?')) { await deleteReminder(r.id); await refreshHubState(); } }} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
                 ))}
               </div>
             </div>
@@ -633,7 +672,7 @@ export default function MoneyHubApp({
               <h4 className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.25em] px-1 flex items-center gap-2"><Users className="h-4 w-4" /> Utilisateurs actifs</h4>
               <div className="flex flex-col gap-3">
                 {initialUsers.map((u: any) => (
-                  <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition"><div className="flex items-center gap-4"><div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div><div className="flex flex-col gap-1"><p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p></div></div>{u.role !== 'admin' && <button onClick={async () => { if (confirm(`Supprimer l'accès de ${u.username} ?`)) { await deleteAssistantUser(u.id); await refreshHubState(); } }} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition opacity-0 group-hover:opacity-100"><Trash2 className="h-5 w-5" /></button>}</div>
+                  <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition"><div className="flex items-center gap-4"><div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div><div className="flex flex-col gap-1"><p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p></div></div>{u.role !== 'admin' && <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition opacity-0 group-hover:opacity-100"><Trash2 className="h-5 w-5" /></button>}</div>
                 ))}
               </div>
             </div>
