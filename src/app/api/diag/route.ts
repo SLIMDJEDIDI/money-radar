@@ -42,5 +42,16 @@ export async function GET() {
     safe('HubTndMovement', () => prisma.hubTndMovement.count()),
   ]);
 
-  return NextResponse.json({ dbUrlPresent, dbUrlHost, dbUrlProjectRef, results });
+  // Also expose users (username + role only, no hashes) to audit RBAC config
+  let users: unknown = null;
+  try {
+    users = await prisma.hubUser.findMany({
+      select: { id: true, username: true, role: true, createdAt: true },
+      orderBy: { username: 'asc' },
+    });
+  } catch (e: any) {
+    users = { error: String(e?.message || e).slice(0, 200) };
+  }
+
+  return NextResponse.json({ dbUrlPresent, dbUrlHost, dbUrlProjectRef, users, results });
 }
