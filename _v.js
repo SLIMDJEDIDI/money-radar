@@ -1,0 +1,3 @@
+﻿const { PrismaClient } = require("@prisma/client");
+async function t(url,l){const p=new PrismaClient({datasources:{db:{url}}});try{const r=await p.$queryRawUnsafe('SELECT count(*)::int n FROM "HubContact"');const tx=await p.$queryRawUnsafe('SELECT count(*)::int n FROM "HubTransaction"');console.log(l,"OK -> contacts:",r[0].n,"transactions:",tx[0].n);}catch(e){console.log(l,"FAIL:",e.message.split("\n")[0]);}finally{await p.$disconnect();}}
+(async()=>{ await t("postgresql://postgres.dzhtkakwudqiosprvbzc:MoneyHub_Isolated_2026_%21@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?pgbouncer=true","money-hub-prod (KEEP)"); })();
