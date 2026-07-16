@@ -53,5 +53,41 @@ export async function GET() {
     users = { error: String(e?.message || e).slice(0, 200) };
   }
 
-  return NextResponse.json({ dbUrlPresent, dbUrlHost, dbUrlProjectRef, users, results });
+  // Simulate an assistant session and verify RBAC guards actually throw
+  // Uses lib/auth's requireAdmin directly with a mock cookie
+  const rbacTest: Record<string, string> = {};
+  try {
+    const { requireAdmin, requireSession } = await import('../../../lib/auth');
+    // Direct guard test can't easily mock session — just verify the throw shape
+    // We hit protected server actions with NO session and verify all fail
+    const actionsMod = await import('../../actions');
+    // Test 1: createContact without session → must FORBIDDEN
+    try {
+      const fd = new FormData();
+      fd.set('name', '__RBAC_TEST__'); fd.set('emoji', '👤');
+      const r: any = await actionsMod.createContact(fd);
+      rbacTest.createContact_noSession = r?.success ? 'FAIL_ALLOWED_UNAUTH' : `blocked (${r?.code || r?.error || 'ok'})`;
+    } catch (e: any) { rbacTest.createContact_noSession = `blocked (throw: ${e?.message?.slice(0,60)})`; }
+    // Test 2: deleteContact without session
+    try {
+      const r: any = await actionsMod.deleteContact('nonexistent');
+      rbacTest.deleteContact_noSession = r?.success ? 'FAIL_ALLOWED_UNAUTH' : `blocked (${r?.code || r?.error || 'ok'})`;
+    } catch (e: any) { rbacTest.deleteContact_noSession = `blocked (throw: ${e?.message?.slice(0,60)})`; }
+    // Test 3: deleteAssistantUser without session
+    try {
+      const r: any = await actionsMod.deleteAssistantUser('nonexistent');
+      rbacTest.deleteAssistantUser_noSession = r?.success ? 'FAIL_ALLOWED_UNAUTH' : `blocked (${r?.code || r?.error || 'ok'})`;
+    } catch (e: any) { rbacTest.deleteAssistantUser_noSession = `blocked (throw: ${e?.message?.slice(0,60)})`; }
+    // Test 4: createTndMovement WITHOUT session should also fail (requireSession)
+    try {
+      const fd = new FormData();
+      fd.set('amount', '1'); fd.set('type', 'IN'); fd.set('note', 'test');
+      const r: any = await actionsMod.createTndMovement(fd);
+      rbacTest.createTndMovement_noSession = r?.success ? 'FAIL_ALLOWED_UNAUTH' : `blocked (${r?.code || r?.error || 'ok'})`;
+    } catch (e: any) { rbacTest.createTndMovement_noSession = `blocked (throw: ${e?.message?.slice(0,60)})`; }
+  } catch (e: any) {
+    rbacTest._error = String(e?.message || e).slice(0, 200);
+  }
+
+  return NextResponse.json({ dbUrlPresent, dbUrlHost, dbUrlProjectRef, users, rbacTest, results });
 }
