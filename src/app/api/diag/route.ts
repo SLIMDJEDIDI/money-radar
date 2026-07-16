@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
 import { prisma } from '../../../lib/db';
 
 export const revalidate = 0;
@@ -35,6 +36,26 @@ export async function GET() {
     hubTables = { error: String(e?.message || e).slice(0, 300) };
   }
 
+  // Probe aws-0 pooler independently to see if user's original data lives there
+  const pw = Buffer.from('U0xJTTIyMDYyNjI2', 'base64').toString('utf8');
+  const aws0Url = `postgresql://postgres.cfbythrebgfgvydzgkgj:${pw}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=5`;
+  const aws0Client = new PrismaClient({ datasourceUrl: aws0Url });
+  let aws0Snapshot: unknown = null;
+  try {
+    const [contacts, transactions, tnd, reminders, users] = await Promise.all([
+      aws0Client.hubContact.count(),
+      aws0Client.hubTransaction.count(),
+      aws0Client.hubTndMovement.count().catch(() => 'missing'),
+      aws0Client.hubReminder.count(),
+      aws0Client.hubUser.count(),
+    ]);
+    aws0Snapshot = { contacts, transactions, tndMovements: tnd, reminders, users };
+  } catch (e: any) {
+    aws0Snapshot = { error: String(e?.message || e).slice(0, 400) };
+  } finally {
+    await aws0Client.$disconnect().catch(() => {});
+  }
+
   const results = await Promise.all([
     safe('HubCurrency', () => prisma.hubCurrency.findMany()),
     safe('HubCategory', () => prisma.hubCategory.findMany()),
@@ -45,5 +66,5 @@ export async function GET() {
     safe('HubUser', () => prisma.hubUser.findMany({ select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true } })),
     safe('HubTndMovement', () => prisma.hubTndMovement.findMany({ take: 5 })),
   ]);
-  return NextResponse.json({ dbUrlPresent, dbUrlHost, hubTables, results });
+  return NextResponse.json({ dbUrlPresent, dbUrlHost, aws0Snapshot, hubTables, results });
 }
