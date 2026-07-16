@@ -87,8 +87,32 @@ export async function GET() {
     safe('HubUser', () => prisma.hubUser.findMany({ select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true } })),
     safe('HubTndMovement', () => prisma.hubTndMovement.findMany({ take: 5 })),
   ]);
+  // One-shot table creation: create HubTndMovement if missing, on the CURRENT db (money-hub-prod).
+  // Non-destructive: CREATE TABLE IF NOT EXISTS. Idempotent.
+  let tndCreation: unknown = null;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubTndMovement" (
+        "id"          TEXT PRIMARY KEY,
+        "amount"      DOUBLE PRECISION NOT NULL,
+        "type"        TEXT NOT NULL,
+        "note"        TEXT NOT NULL,
+        "performedBy" TEXT NOT NULL,
+        "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubTndMovement_createdAt_idx" ON "HubTndMovement"("createdAt");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubTndMovement_type_idx" ON "HubTndMovement"("type");`);
+    // Verify
+    const rows = await prisma.hubTndMovement.count();
+    tndCreation = { created: true, currentRows: rows };
+  } catch (e: any) {
+    tndCreation = { created: false, error: String(e?.message || e).slice(0, 300) };
+  }
+
   return NextResponse.json({
     dbUrlPresent, dbUrlHost, dbUrlUser, dbUrlProjectRef, dbRelatedEnvKeys,
-    aws0Snapshot, hubTables, results
+    aws0Snapshot, hubTables, tndCreation, results
   });
 }
