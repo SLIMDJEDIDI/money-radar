@@ -75,6 +75,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
     const totalFlow = recentMovements.reduce((acc, m) => acc + (m.type === 'IN' ? m.amount : -m.amount), 0);
     const avgDailyFlow = totalFlow / 30;
     const tndForecast7Days = tndBalance + (avgDailyFlow * 7);
+    const tndForecast30Days = tndBalance + (avgDailyFlow * 30);
 
     // Per-contact TND held breakdown
     const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
@@ -150,7 +151,8 @@ export async function getHubDashboardData(searchQuery: string = '') {
       tndMovements,
       tndForecast: {
         avgDailyFlow,
-        forecast7Days: tndForecast7Days
+        forecast7Days: tndForecast7Days,
+        forecast30Days: tndForecast30Days,
       },
       metrics: {
         totalAvoirs: totalAvoirsUsd,

@@ -3,7 +3,7 @@
 import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, memo } from 'react';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink,
-  UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock,
+  UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
   Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock
 } from 'lucide-react';
 import {
@@ -111,6 +111,12 @@ export default function MoneyHubApp({
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury'>('dashboard');
+  // Assistants land directly on Treasury (only section they can access)
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'admin' && activeSection !== 'treasury' && activeSection !== 'settings') {
+      setActiveSection('treasury');
+    }
+  }, [currentUser, activeSection]);
 
   // --- DATA STATES ---
   const [contacts, setContacts] = useState(initialContacts);
@@ -152,6 +158,15 @@ export default function MoneyHubApp({
   const [inlinePartnerName, setInlinePartnerName] = useState('');
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
   const [tndForm, setTndForm] = useState({ amount: '', type: 'IN', note: '' });
+  // TND Treasury filters
+  const [tndSearch, setTndSearch] = useState('');
+  const [tndPeriod, setTndPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
+  const [tndUserFilter, setTndUserFilter] = useState<string>('all');
+  const [tndAmountMin, setTndAmountMin] = useState<string>('');
+  const [tndAmountMax, setTndAmountMax] = useState<string>('');
+  const [tndTypeFilter, setTndTypeFilter] = useState<'all' | 'IN' | 'OUT'>('all');
+  // Password management modal
+  const [pwdModal, setPwdModal] = useState<{ open: boolean; targetId?: string; targetName?: string; mode?: 'self' | 'admin_reset' }>({ open: false });
 
   // --- NAVIGATION ---
   const [navStack, setNavStack] = useState<string[]>(['dashboard']);
@@ -536,77 +551,133 @@ export default function MoneyHubApp({
           );
         })()}
 
-        {activeSection === 'treasury' && (
-          <div className="flex flex-col gap-6 pb-20">
-            <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-              <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
-              <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
-              <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
-                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
-                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
-                <div className="flex flex-col border-l border-white/10 pl-6 ml-auto"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
+        {activeSection === 'treasury' && (() => {
+          // Precompute running balance in O(n) — walk oldest→newest to build map
+          const balanceById: Record<string, number> = {};
+          {
+            const ordered = [...optimisticTndMovements].reverse(); // oldest first
+            let acc = 0;
+            for (const m of ordered) { acc += (m.type === 'IN' ? m.amount : -m.amount); balanceById[m.id] = acc; }
+          }
+          // Filter chain
+          const now = Date.now();
+          const periodMs = tndPeriod === 'today' ? 86400000 : tndPeriod === '7d' ? 7*86400000 : tndPeriod === '30d' ? 30*86400000 : 0;
+          const min = parseFloat(tndAmountMin || '');
+          const max = parseFloat(tndAmountMax || '');
+          const q = tndSearch.trim().toLowerCase();
+          const filtered = optimisticTndMovements.filter((m: any) => {
+            if (tndTypeFilter !== 'all' && m.type !== tndTypeFilter) return false;
+            if (tndUserFilter !== 'all' && m.performedBy !== tndUserFilter) return false;
+            if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
+            if (!isNaN(min) && m.amount < min) return false;
+            if (!isNaN(max) && m.amount > max) return false;
+            if (q) {
+              const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase();
+              if (!hay.includes(q)) return false;
+            }
+            return true;
+          });
+          const uniqueUsers: string[] = Array.from(new Set(optimisticTndMovements.map((m: any) => m.performedBy).filter(Boolean))) as string[];
+          const filteredIn = filtered.filter((m:any) => m.type === 'IN').reduce((s:number,m:any) => s+m.amount, 0);
+          const filteredOut = filtered.filter((m:any) => m.type === 'OUT').reduce((s:number,m:any) => s+m.amount, 0);
+          return (
+            <div className="flex flex-col gap-6 pb-20">
+              {/* HERO — balance + today + forecast */}
+              <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
+                <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
+                <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
+                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
+                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+30</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast30Days || metrics.tndBalance, 'TND')}</p></div>
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
-              <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
-            </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{optimisticTndMovements.length} mouvements</span></div>
-              {optimisticTndMovements.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title="Coffre-fort vide" subtitle="Enregistrez vos flux." />}
-              <div className="flex flex-col gap-3">
-                {optimisticTndMovements.map((m: any, idx: number) => {
-                  let running = metrics.tndBalance;
-                  for (let i=0; i<idx; i++) { const prev = optimisticTndMovements[i]; running += (prev.type === 'IN' ? -prev.amount : prev.amount); }
-                  return (
-                    <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
-                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
-                      <div className="flex flex-col gap-1.5 min-w-0 flex-1"><p className="text-sm font-bold text-neutral-200 leading-tight">{m.note}</p><div className="flex items-center gap-3"><p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p><p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p></div></div>
-                      <div className="text-right shrink-0 flex items-center gap-4"><p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>{currentUser?.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
 
-        {activeSection === 'treasury' && (
-          <div className="flex flex-col gap-6">
-            <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-              <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
-              <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
-              <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
-                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
-                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
-                <div className="flex flex-col border-l border-white/10 pl-6 ml-auto"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
+              {/* QUICK ACTIONS */}
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
+                <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
-              <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
-            </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{optimisticTndMovements.length} mouvements</span></div>
-              {optimisticTndMovements.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title="Coffre-fort vide" subtitle="Enregistrez vos flux." />}
-              <div className="flex flex-col gap-3">
-                {optimisticTndMovements.map((m: any, idx: number) => {
-                  let running = metrics.tndBalance;
-                  for (let i=0; i<idx; i++) { const prev = optimisticTndMovements[i]; running += (prev.type === 'IN' ? -prev.amount : prev.amount); }
-                  return (
-                    <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
-                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
-                      <div className="flex flex-col gap-1.5 min-w-0 flex-1"><p className="text-sm font-bold text-neutral-200 leading-tight">{m.note}</p><div className="flex items-center gap-3"><p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p><p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p></div></div>
-                      <div className="text-right shrink-0 flex items-center gap-4"><p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>{currentUser?.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}</div>
+
+              {/* SEARCH + FILTERS */}
+              <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
+                <div className="relative">
+                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" />
+                  <input value={tndSearch} onChange={e => setTndSearch(e.target.value)} placeholder="Rechercher note, montant, utilisateur…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-blue-500/40" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'today', label: "Aujourd'hui" },
+                    { id: '7d', label: '7 jours' },
+                    { id: '30d', label: '30 jours' },
+                    { id: 'all', label: 'Tout' },
+                  ].map(p => (
+                    <button key={p.id} onClick={() => setTndPeriod(p.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${tndPeriod === p.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{p.label}</button>
+                  ))}
+                  <span className="mx-1 border-l border-neutral-800" />
+                  {[
+                    { id: 'all', label: 'Tous types' },
+                    { id: 'IN', label: '+ Entrées' },
+                    { id: 'OUT', label: '- Sorties' },
+                  ].map(t => (
+                    <button key={t.id} onClick={() => setTndTypeFilter(t.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${tndTypeFilter === t.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{t.label}</button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <select value={tndUserFilter} onChange={e => setTndUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40">
+                    <option value="all">Tous utilisateurs</option>
+                    {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <input type="number" placeholder="Montant min" value={tndAmountMin} onChange={e => setTndAmountMin(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40" />
+                  <input type="number" placeholder="Montant max" value={tndAmountMax} onChange={e => setTndAmountMax(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40" />
+                </div>
+                {(tndSearch || tndPeriod !== 'all' || tndUserFilter !== 'all' || tndAmountMin || tndAmountMax || tndTypeFilter !== 'all') && (
+                  <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
+                    <div className="flex items-center gap-5 text-[10px] font-black uppercase tracking-widest">
+                      <span className="text-neutral-400">{filtered.length} rés.</span>
+                      <span className="text-emerald-400">+{formatRawCurrency(filteredIn, 'TND')}</span>
+                      <span className="text-rose-400">-{formatRawCurrency(filteredOut, 'TND')}</span>
                     </div>
-                  );
-                })}
+                    <button onClick={() => { setTndSearch(''); setTndPeriod('all'); setTndUserFilter('all'); setTndAmountMin(''); setTndAmountMax(''); setTndTypeFilter('all'); }} className="text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white transition">Réinitialiser</button>
+                  </div>
+                )}
+              </div>
+
+              {/* JOURNAL */}
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1">
+                  <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4>
+                  <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {optimisticTndMovements.length}</span>
+                </div>
+                {filtered.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title={optimisticTndMovements.length === 0 ? 'Coffre-fort vide' : 'Aucun résultat'} subtitle={optimisticTndMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
+                <div className="flex flex-col gap-3">
+                  {filtered.map((m: any) => {
+                    const running = balanceById[m.id] ?? 0;
+                    return (
+                      <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
+                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                          <p className="text-sm font-bold text-neutral-200 leading-tight break-words">{m.note}</p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
+                            {m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}
+                            <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 flex items-center gap-4">
+                          <p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                          <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {activeSection === 'transactions' && (
           <div className="flex flex-col gap-3">
@@ -659,24 +730,65 @@ export default function MoneyHubApp({
 
         {activeSection === 'settings' && (
           <div className="flex flex-col gap-8">
-            <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[48px] flex justify-between items-center shadow-2xl"><div><p className="text-sm font-black text-white uppercase tracking-tighter">{currentUser.username}</p><p className="text-[10px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-1.5">{currentUser.role === 'admin' ? '👑 Administrateur' : '👤 Assistant'}</p></div><button onClick={handleLogout} className="p-4 bg-rose-950/20 text-rose-400 rounded-3xl border border-rose-900/40 transition hover:bg-rose-900/40 shadow-xl"><LogOut className="h-6 w-6" /></button></div>
-            <div className="p-8 bg-neutral-900/40 border border-neutral-800 rounded-[40px] shadow-inner flex flex-col gap-6">
-              <div className="flex items-center gap-3 text-emerald-400 border-b border-neutral-800 pb-5"><UserPlus className="h-5 w-5" /><h3 className="text-[10px] font-black uppercase tracking-widest">Nouvel Accès Assistant</h3></div>
-              <form onSubmit={async (e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); const res: any = await createAssistantUser(fd); if (res.success) { e.currentTarget.reset(); await refreshHubState(); } else alert(res.error); }} className="flex flex-col gap-4">
-                <input name="username" required placeholder="NOM D'UTILISATEUR" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
-                <input name="password" type="password" required placeholder="MOT DE PASSE" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
-                <button type="submit" disabled={isPending} className="py-5 bg-white text-black font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl">Créer l'accès</button>
-              </form>
-            </div>
-            <div className="flex flex-col gap-4">
-              <h4 className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.25em] px-1 flex items-center gap-2"><Users className="h-4 w-4" /> Utilisateurs actifs</h4>
-              <div className="flex flex-col gap-3">
-                {initialUsers.map((u: any) => (
-                  <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition"><div className="flex items-center gap-4"><div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div><div className="flex flex-col gap-1"><p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p></div></div>{u.role !== 'admin' && <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition opacity-0 group-hover:opacity-100"><Trash2 className="h-5 w-5" /></button>}</div>
-                ))}
+            {/* CURRENT USER + LOGOUT + CHANGE OWN PASSWORD */}
+            <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[48px] flex justify-between items-center shadow-2xl">
+              <div>
+                <p className="text-sm font-black text-white uppercase tracking-tighter">{currentUser.username}</p>
+                <p className="text-[10px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-1.5">{currentUser.role === 'admin' ? '👑 Administrateur' : '👤 Assistant'}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setPwdModal({ open: true, mode: 'self', targetId: currentUser.id, targetName: currentUser.username })} className="p-4 bg-neutral-950 text-neutral-300 rounded-3xl border border-neutral-800 transition hover:border-neutral-700 shadow-xl" title="Changer mon mot de passe"><KeyRound className="h-5 w-5" /></button>
+                <button onClick={handleLogout} className="p-4 bg-rose-950/20 text-rose-400 rounded-3xl border border-rose-900/40 transition hover:bg-rose-900/40 shadow-xl"><LogOut className="h-6 w-6" /></button>
               </div>
             </div>
-            <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
+
+            {/* ADMIN-ONLY: user management */}
+            {currentUser.role === 'admin' && (
+              <>
+                <div className="p-8 bg-neutral-900/40 border border-neutral-800 rounded-[40px] shadow-inner flex flex-col gap-6">
+                  <div className="flex items-center gap-3 text-emerald-400 border-b border-neutral-800 pb-5"><UserPlus className="h-5 w-5" /><h3 className="text-[10px] font-black uppercase tracking-widest">Nouvel Accès Assistant</h3></div>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const fd = new FormData(form);
+                    const res: any = await createAssistantUser(fd);
+                    if (res.success) { form.reset(); await refreshHubState(); }
+                    else alert(res.error || 'Erreur');
+                  }} className="flex flex-col gap-4">
+                    <input name="username" required minLength={3} placeholder="NOM D'UTILISATEUR (min 3)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
+                    <input name="password" type="password" required minLength={6} placeholder="MOT DE PASSE (min 6)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
+                    <button type="submit" disabled={isPending} className="py-5 bg-white text-black font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl disabled:opacity-50">Créer l'accès</button>
+                  </form>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <h4 className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.25em] px-1 flex items-center gap-2"><Users className="h-4 w-4" /> Utilisateurs actifs ({initialUsers.length})</h4>
+                  <div className="flex flex-col gap-3">
+                    {initialUsers.map((u: any) => (
+                      <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition">
+                        <div className="flex items-center gap-4">
+                          <div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div>
+                          <div className="flex flex-col gap-1">
+                            <p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p>
+                            <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {u.id !== currentUser.id && (
+                            <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: u.username })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${u.username}`}><KeyRound className="h-5 w-5" /></button>
+                          )}
+                          {u.role !== 'admin' && (
+                            <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition"><Trash2 className="h-5 w-5" /></button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -861,6 +973,32 @@ export default function MoneyHubApp({
             <p className="text-xs font-bold text-neutral-400 leading-relaxed">Nouveau suivi pour <span className="text-white font-black">{postponeTarget.contact?.name}</span> · {formatRawCurrency(postponeTarget.amount, postponeTarget.currencyCode)}. Vous serez notifié à cette nouvelle date.</p>
             <input type="date" value={postponeDate} onChange={(e) => setPostponeDate(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" />
             <div className="flex gap-3"><button onClick={() => setPostponeTarget(null)} className="flex-1 py-4 bg-neutral-900 text-neutral-400 font-black rounded-[20px] uppercase active:scale-95 transition border border-neutral-800 tracking-widest text-[10px]">Annuler</button><button onClick={submitPostpone} disabled={!postponeDate} className="flex-[2] py-4 bg-amber-500 text-black font-black rounded-[20px] uppercase active:scale-95 transition shadow-xl tracking-widest text-[10px] disabled:opacity-40">Confirmer</button></div>
+          </div>
+        </div>
+      )}
+
+      {pwdModal.open && (
+        <div className="fixed inset-0 z-[210] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPwdModal({ open: false })}>
+          <div className="w-full max-w-md bg-[#0a0a0a] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-6 shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5">
+              <div className="flex items-center gap-3 text-blue-400"><KeyRound className="h-5 w-5" /><h3 className="text-[11px] font-black uppercase tracking-[0.2em]">{pwdModal.mode === 'self' ? 'Changer mon mot de passe' : `Réinitialiser: ${pwdModal.targetName}`}</h3></div>
+              <button onClick={() => setPwdModal({ open: false })} className="p-2.5 rounded-full bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800"><X className="h-4 w-4" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const fd = new FormData(form);
+              fd.set('userId', pwdModal.targetId || '');
+              const res: any = await changeUserPassword(fd);
+              if (res.success) { form.reset(); setPwdModal({ open: false }); await refreshHubState(); alert('Mot de passe mis à jour'); }
+              else alert(res.error || 'Erreur');
+            }} className="flex flex-col gap-4">
+              {pwdModal.mode === 'self' && (
+                <input name="oldPassword" type="password" required placeholder="ANCIEN MOT DE PASSE" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-blue-500/40" />
+              )}
+              <input name="newPassword" type="password" required minLength={6} placeholder="NOUVEAU MOT DE PASSE (min 6)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-blue-500/40" />
+              <button type="submit" disabled={isPending} className="py-5 bg-blue-500 text-white font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl disabled:opacity-50">{pwdModal.mode === 'self' ? 'Mettre à jour' : 'Réinitialiser'}</button>
+            </form>
           </div>
         </div>
       )}

@@ -138,7 +138,7 @@ export async function getCurrentUser() {
 // ----------------------------------------------------
 export async function createContact(formData: FormData) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const modifiedBy = session.username;
     const name = formData.get('name') as string;
     const emoji = formData.get('emoji') as string || '👤';
@@ -176,7 +176,7 @@ export async function createContact(formData: FormData) {
 
 export async function updateContact(formData: FormData) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const modifiedBy = session.username;
     const id = formData.get('contactId') as string;
     const name = formData.get('name') as string;
@@ -213,7 +213,7 @@ export async function updateContact(formData: FormData) {
 
 export async function deleteContact(id: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const modifiedBy = session.username;
     await prisma.$transaction(async (tx) => {
       const old = await tx.hubContact.findUnique({ where: { id } });
@@ -243,7 +243,7 @@ export async function deleteContact(id: string) {
 // ----------------------------------------------------
 export async function createHubTransaction(formData: FormData) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const modifiedBy = session.username;
     const contactId = formData.get('contactId') as string;
     const amount = parseFloat(formData.get('amount') as string);
@@ -302,7 +302,7 @@ export async function createHubTransaction(formData: FormData) {
 // Moves min(held, payable) from held -> reduces payable. Records an audit entry.
 export async function settleDebtFromAvoir(contactId: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     let settledUsd = 0;
     await prisma.$transaction(async (tx) => {
       const contact = await tx.hubContact.findUnique({ where: { id: contactId } });
@@ -384,7 +384,7 @@ export async function createTndMovement(formData: FormData) {
 
 export async function deleteTndMovement(id: string) {
   try {
-    const session = await requireAdmin();
+    const session = await requireSession();
     await prisma.$transaction(async (tx) => {
       const old = await tx.hubTndMovement.findUnique({ where: { id } });
       if (!old) return;
@@ -407,7 +407,7 @@ export async function deleteTndMovement(id: string) {
 
 export async function deleteHubTransaction(id: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const modifiedBy = session.username;
     await prisma.$transaction(async (tx) => {
       const t = await tx.hubTransaction.findUnique({ where: { id }, include: { contact: true } });
@@ -495,7 +495,7 @@ export async function resetDatabaseToZero(password: string) {
 
 // Additional missing wrappers for UI — all guarded by session
 export async function createReminder(formData: FormData) {
-  const session = await requireSession();
+    const session = await requireAdmin();
   const cid = formData.get('contactId') as string;
   const amt = parseFloat(formData.get('amount') as string);
   const cur = formData.get('currencyCode') as string;
@@ -524,7 +524,7 @@ export async function createReminder(formData: FormData) {
 }
 
 export async function toggleReminderCompleted(id: string, isCompleted: boolean) {
-  await requireSession();
+    await requireAdmin();
   await prisma.hubReminder.update({ where: { id }, data: { isCompleted } });
   revalidatePath('/');
   return { success: true };
@@ -533,7 +533,7 @@ export async function toggleReminderCompleted(id: string, isCompleted: boolean) 
 // Confirm a payment was received -> move it into the partner's AVOIR (HELD) balance
 export async function confirmReminderReceived(id: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     await prisma.$transaction(async (tx) => {
       const reminder = await tx.hubReminder.findUnique({ where: { id }, include: { contact: true } });
       if (!reminder) throw new Error('NOT_FOUND');
@@ -582,7 +582,7 @@ export async function confirmReminderReceived(id: string) {
 // Postpone a reminder to a new follow-up date
 export async function postponeReminder(id: string, newDate: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const due = new Date(newDate);
     await prisma.$transaction(async (tx) => {
       const reminder = await tx.hubReminder.findUnique({ where: { id }, include: { contact: true } });
@@ -605,7 +605,7 @@ export async function postponeReminder(id: string, newDate: string) {
 }
 
 export async function deleteReminder(id: string) {
-  await requireSession();
+  await requireAdmin();
   await prisma.hubReminder.delete({ where: { id } });
   revalidatePath('/');
   return { success: true };
@@ -626,7 +626,7 @@ export async function toggleCurrencyActive(id: string, isActive: boolean) {
 }
 
 export async function createCategory(name: string) {
-  await requireSession();
+  await requireAdmin();
   await prisma.hubCategory.create({ data: { name } });
   revalidatePath('/');
   return { success: true };
@@ -640,30 +640,79 @@ export async function deleteCategory(id: string) {
 }
 
 export async function createAssistantUser(formData: FormData) {
-  await requireAdmin();
-  const u = (formData.get('username') as string || '').toLowerCase().trim();
-  const p = formData.get('password') as string || '';
-  await prisma.hubUser.create({ data: { username: u, passwordHash: hashPassword(p), role: 'assistant' } });
-  revalidatePath('/');
-  return { success: true };
+  try {
+    const session = await requireAdmin();
+    const u = (formData.get('username') as string || '').toLowerCase().trim();
+    const p = formData.get('password') as string || '';
+    if (!u || u.length < 3) return { success: false, error: 'Nom trop court (min 3 caractères)' };
+    if (!p || p.length < 6) return { success: false, error: 'Mot de passe trop court (min 6 caractères)' };
+    const exists = await prisma.hubUser.findUnique({ where: { username: u } });
+    if (exists) return { success: false, error: 'Ce nom d’utilisateur existe déjà' };
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.hubUser.create({ data: { username: u, passwordHash: hashPassword(p), role: 'assistant' } });
+      await logAudit(tx, { entityType: 'USER', entityId: created.id, action: 'CREATE_ASSISTANT', details: `Assistant créé: ${u}`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur création utilisateur' };
+  }
 }
 
 export async function deleteAssistantUser(id: string) {
-  await requireAdmin();
-  await prisma.hubUser.delete({ where: { id } });
-  revalidatePath('/');
-  return { success: true };
+  try {
+    const session = await requireAdmin();
+    const target = await prisma.hubUser.findUnique({ where: { id } });
+    if (!target) return { success: false, error: 'Utilisateur introuvable' };
+    if (target.role === 'admin') return { success: false, error: 'Impossible de supprimer un administrateur' };
+    await prisma.$transaction(async (tx) => {
+      await tx.hubUser.delete({ where: { id } });
+      await logAudit(tx, { entityType: 'USER', entityId: id, action: 'DELETE_ASSISTANT', details: `Assistant supprimé: ${target.username}`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur suppression' };
+  }
 }
 
 export async function changeUserPassword(formData: FormData) {
-  const session = await requireSession();
-  const uid = formData.get('userId') as string;
-  const np = formData.get('newPassword') as string || '';
-  // Non-admins may only change their OWN password
-  if (session.role !== 'admin' && session.id !== uid) {
-    return { success: false, error: 'Action non autorisée' };
+  try {
+    const session = await requireSession();
+    const uid = formData.get('userId') as string;
+    const np = formData.get('newPassword') as string || '';
+    const oldPw = formData.get('oldPassword') as string || '';
+    if (!np || np.length < 6) return { success: false, error: 'Nouveau mot de passe trop court (min 6)' };
+
+    const target = await prisma.hubUser.findUnique({ where: { id: uid } });
+    if (!target) return { success: false, error: 'Utilisateur introuvable' };
+
+    const isSelf = session.id === uid;
+    const isAdminActing = session.role === 'admin' && !isSelf;
+    if (!isSelf && !isAdminActing) return { success: false, error: 'Action non autorisée' };
+
+    // Self-change (any role): verify old password. Admin resetting someone else's pw: no check.
+    if (isSelf) {
+      if (!verifyPassword(oldPw, target.passwordHash)) {
+        return { success: false, error: 'Ancien mot de passe incorrect' };
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.hubUser.update({ where: { id: uid }, data: { passwordHash: hashPassword(np) } });
+      await logAudit(tx, {
+        entityType: 'USER', entityId: uid,
+        action: isSelf ? 'PASSWORD_CHANGE_SELF' : 'PASSWORD_RESET_BY_ADMIN',
+        details: isSelf ? `${target.username} a changé son mot de passe` : `Admin ${session.username} a réinitialisé le mot de passe de ${target.username}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur changement mot de passe' };
   }
-  await prisma.hubUser.update({ where: { id: uid }, data: { passwordHash: hashPassword(np) } });
-  revalidatePath('/');
-  return { success: true };
 }
