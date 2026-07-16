@@ -16,6 +16,25 @@ async function safe<T>(label: string, fn: () => Promise<T>): Promise<{ label: st
 
 export async function GET() {
   const dbUrlPresent = !!process.env.DATABASE_URL;
+  // Redact credentials but expose host+path so we can tell which DB we hit.
+  let dbUrlHost: string | null = null;
+  try {
+    const u = new URL(process.env.DATABASE_URL || '');
+    dbUrlHost = `${u.hostname}:${u.port}${u.pathname}`;
+  } catch {}
+
+  let hubTables: unknown = null;
+  try {
+    hubTables = await prisma.$queryRawUnsafe(
+      `SELECT current_database() AS db, current_schema() AS schema,
+              (SELECT array_agg(table_name ORDER BY table_name)
+                 FROM information_schema.tables
+                WHERE table_schema='public' AND table_name LIKE 'Hub%') AS hub_tables`
+    );
+  } catch (e: any) {
+    hubTables = { error: String(e?.message || e).slice(0, 300) };
+  }
+
   const results = await Promise.all([
     safe('HubCurrency', () => prisma.hubCurrency.findMany()),
     safe('HubCategory', () => prisma.hubCategory.findMany()),
@@ -26,5 +45,5 @@ export async function GET() {
     safe('HubUser', () => prisma.hubUser.findMany({ select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true } })),
     safe('HubTndMovement', () => prisma.hubTndMovement.findMany({ take: 5 })),
   ]);
-  return NextResponse.json({ dbUrlPresent, results });
+  return NextResponse.json({ dbUrlPresent, dbUrlHost, hubTables, results });
 }
