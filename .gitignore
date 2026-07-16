@@ -36,3 +36,11 @@ next-env.d.ts
 dev.db
 dev.db-journal
 *.log
+
+# temp diag scripts (never commit)
+/*_diag.js
+/*_fix*.js
+/rotate_*.js
+/verify_*.js
+/create_*.js
+/.git-purge*.txt
