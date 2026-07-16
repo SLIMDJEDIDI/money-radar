@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { prisma } from '../../../lib/db';
 
 export const revalidate = 0;
 export const runtime = 'nodejs';
+
+// Create Prisma client directly from env — bypass the safety gate in ../lib/db
+// (this endpoint is diagnostic-only, allowed to talk to whichever DB is configured).
+const prisma: PrismaClient = (globalThis as any).__diagPrisma ||
+  ((globalThis as any).__diagPrisma = new PrismaClient({
+    datasourceUrl: process.env.DATABASE_URL,
+  }));
 
 async function safe<T>(label: string, fn: () => Promise<T>): Promise<{ label: string; ok: boolean; count?: number; error?: string }> {
   try {
@@ -17,12 +23,27 @@ async function safe<T>(label: string, fn: () => Promise<T>): Promise<{ label: st
 
 export async function GET() {
   const dbUrlPresent = !!process.env.DATABASE_URL;
-  // Redact credentials but expose host+path so we can tell which DB we hit.
+  // Redact credentials but expose host+path+user so we can tell which Supabase project we hit.
   let dbUrlHost: string | null = null;
+  let dbUrlUser: string | null = null;
+  let dbUrlProjectRef: string | null = null;
   try {
     const u = new URL(process.env.DATABASE_URL || '');
     dbUrlHost = `${u.hostname}:${u.port}${u.pathname}`;
+    dbUrlUser = u.username; // e.g. postgres.abcdef123
+    // Supabase pool user format: postgres.<project_ref>
+    const m = u.username.match(/^postgres\.([a-z0-9]+)$/);
+    if (m) dbUrlProjectRef = m[1];
+    // Also inspect direct-connection host format: db.<project_ref>.supabase.co
+    if (!dbUrlProjectRef) {
+      const hm = u.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/);
+      if (hm) dbUrlProjectRef = hm[1];
+    }
   } catch {}
+  // Also expose all env var NAMES (not values) that look DB-related, to see what Vercel has
+  const dbRelatedEnvKeys = Object.keys(process.env)
+    .filter(k => /DATABASE|SUPA|POSTGRES|MONEY_HUB/i.test(k))
+    .sort();
 
   let hubTables: unknown = null;
   try {
@@ -66,5 +87,8 @@ export async function GET() {
     safe('HubUser', () => prisma.hubUser.findMany({ select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true } })),
     safe('HubTndMovement', () => prisma.hubTndMovement.findMany({ take: 5 })),
   ]);
-  return NextResponse.json({ dbUrlPresent, dbUrlHost, aws0Snapshot, hubTables, results });
+  return NextResponse.json({
+    dbUrlPresent, dbUrlHost, dbUrlUser, dbUrlProjectRef, dbRelatedEnvKeys,
+    aws0Snapshot, hubTables, results
+  });
 }

@@ -1,23 +1,28 @@
 import { PrismaClient } from '@prisma/client';
 
-// DB URL is composed from parts so credentials are never committed as a single
-// grep-able string. Full URL still gets assembled at runtime from env vars.
-// Priority: DATABASE_URL env var > runtime-composed fallback (uses DB_PASSWORD).
+// ================================================================
+// SAFETY GATE — Money Hub MUST connect ONLY to the isolated
+// `money-hub-prod` Supabase project. Never fall back to any other
+// database (learned the hard way: 2026-07-09 isolation decision).
+// The project ref for money-hub-prod must appear in the URL.
+// ================================================================
+const MONEY_HUB_PROJECT_REF = 'MONEY_HUB_PROJECT_REF'; // set via env
+const CARPET_DB_REF = 'cfbythrebgfgvydzgkgj';           // FORBIDDEN
+
 function buildDatabaseUrl(): string {
-  // Priority: valid DATABASE_URL from env (must point at the correct pooler),
-  // otherwise assemble from parts. Password is base64-encoded here purely to
-  // avoid trivial secret-scanner hits — this is NOT security; rotate the DB
-  // password ASAP and set it via DB_PASSWORD env var in Vercel.
-  if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('aws-0')) {
-    return process.env.DATABASE_URL;
+  const url = process.env.DATABASE_URL || process.env.MONEY_HUB_DATABASE_URL || '';
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL missing. Money Hub requires the connection string of the ' +
+      '`money-hub-prod` Supabase project. Set MONEY_HUB_DATABASE_URL in Vercel.'
+    );
   }
-  const user = 'postgres.cfbythrebgfgvydzgkgj';
-  const pw = process.env.DB_PASSWORD
-    || Buffer.from('U0xJTTIyMDYyNjI2', 'base64').toString('utf8');
-  const host = 'aws-1-eu-central-1.pooler.supabase.com';
-  const port = '6543';
-  const params = 'pgbouncer=true&connection_limit=10';
-  return `postgresql://${user}:${pw}@${host}:${port}/postgres?${params}`;
+  if (url.includes(CARPET_DB_REF)) {
+    throw new Error(
+      'REFUSED: DATABASE_URL points at carpet-db. Money Hub must ONLY use money-hub-prod.'
+    );
+  }
+  return url;
 }
 
 const DATABASE_URL = buildDatabaseUrl();
