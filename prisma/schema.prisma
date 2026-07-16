@@ -105,10 +105,24 @@ model HubUser {
   id           String   @id @default(cuid())
   username     String   @unique
   passwordHash String
-  role         String   @default("assistant")
+  role         String   @default("assistant") // "admin" or "assistant"
   canWrite     Boolean  @default(true)
   canEdit      Boolean  @default(false)
   canDelete    Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+model HubTndMovement {
+  id          String   @id @default(cuid())
+  amount      Float    // Montant brut en TND
+  type        String   // "IN" (Entrée), "OUT" (Sortie)
+  note        String   // Note obligatoire pour la traçabilité
+  performedBy String   // Nom de l'utilisateur ayant saisi le mouvement
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([type])
+}
+

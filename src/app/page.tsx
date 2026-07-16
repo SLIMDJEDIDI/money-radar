@@ -19,6 +19,8 @@ export default async function Page() {
         initialAuditTrails={data.auditTrails}
         initialUsers={data.users}
         initialMetrics={data.metrics}
+        initialTndMovements={data.tndMovements}
+        initialTndForecast={data.tndForecast}
       />
     </main>
   );

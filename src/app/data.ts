@@ -2,10 +2,14 @@ import { prisma } from '../lib/db';
 
 export interface HubMetrics {
   totalAvoirs: number;
+  totalAvoirsTnd: number;
   totalReceivables: number;
   totalPayables: number;
   upcomingPayments: number;
   netPosition: number;
+  tndBalance: number;
+  tndTodayIn: number;
+  tndTodayOut: number;
 }
 
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
@@ -31,25 +35,48 @@ export async function getHubDashboardData(searchQuery: string = '') {
     }
 
     // Parallel fetch for speed
-    const [currencies, categories, contacts, transactions, reminders, auditTrails, users] = await Promise.all([
+    const [currencies, categories, contacts, transactions, reminders, auditTrails, users, tndMovements] = await Promise.all([
       prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } }),
       prisma.hubCategory.findMany({ orderBy: { name: 'asc' } }),
-      prisma.hubContact.findMany(), // Manual sorting below for complex logic
+      prisma.hubContact.findMany(), // Manual sorting below
       prisma.hubTransaction.findMany({ include: { contact: true }, orderBy: { createdAt: 'desc' } }),
       prisma.hubReminder.findMany({ include: { contact: true }, orderBy: { dueDate: 'asc' } }),
       prisma.hubAuditTrail.findMany({ orderBy: { createdAt: 'desc' }, take: 40 }),
-      // SECURITY: never expose passwordHash to the client
       prisma.hubUser.findMany({
         orderBy: { username: 'asc' },
         select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true },
-      })
+      }),
+      prisma.hubTndMovement.findMany({ orderBy: { createdAt: 'desc' } })
     ]);
 
     const activeCurrencies = currencies.filter(c => c.isActive);
 
-    // Per-contact TND held breakdown (local currency kept separate from USD).
-    // Contact balances are stored only in USD, so we reconstruct the TND part
-    // from raw transactions.
+    // TND Treasury Logic
+    let tndBalance = 0;
+    let tndTodayIn = 0;
+    let tndTodayOut = 0;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    tndMovements.forEach(m => {
+      if (m.type === 'IN') {
+        tndBalance += m.amount;
+        if (m.createdAt >= startOfToday) tndTodayIn += m.amount;
+      } else {
+        tndBalance -= m.amount;
+        if (m.createdAt >= startOfToday) tndTodayOut += m.amount;
+      }
+    });
+
+    // Simple Forecasting (TND)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentMovements = tndMovements.filter(m => m.createdAt >= thirtyDaysAgo);
+    const totalFlow = recentMovements.reduce((acc, m) => acc + (m.type === 'IN' ? m.amount : -m.amount), 0);
+    const avgDailyFlow = totalFlow / 30;
+    const tndForecast7Days = tndBalance + (avgDailyFlow * 7);
+
+    // Per-contact TND held breakdown
     const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
     transactions.forEach(t => {
       if (t.type !== 'HELD' || t.currencyCode !== 'TND') return;
@@ -59,24 +86,20 @@ export async function getHubDashboardData(searchQuery: string = '') {
       tndHeldByContact[t.contactId] = entry;
     });
 
-    // 2. Logic: Show partners with non-zero balances FIRST
-    // Sort logic: 1. Non-zero absolute net position first. 2. Alphabetical secondary.
     const formattedContacts = contacts.map(c => {
       const tnd = tndHeldByContact[c.id] || { tnd: 0, usd: 0 };
-      const heldUsdOnly = c.heldBalanceUsd - tnd.usd; // exclude local TND from USD held
+      const heldUsdOnly = c.heldBalanceUsd - tnd.usd;
       return {
         id: c.id, name: c.name, emoji: c.emoji, country: c.country, isArchived: c.isArchived,
         heldBalanceUsd: heldUsdOnly,
         heldBalanceTnd: tnd.tnd,
         receivableBalanceUsd: c.receivableBalanceUsd,
         payableBalanceUsd: c.payableBalanceUsd,
-        // Net position in USD excludes local TND avoirs (consistent with dashboard)
         netPositionUsd: heldUsdOnly + c.receivableBalanceUsd - c.payableBalanceUsd,
       };
     }).sort((a, b) => {
-      const aHasMoney = Math.abs(a.netPositionUsd) > 0.01 || a.heldBalanceUsd > 0.01 || a.receivableBalanceUsd > 0.01 || a.payableBalanceUsd > 0.01;
-      const bHasMoney = Math.abs(b.netPositionUsd) > 0.01 || b.heldBalanceUsd > 0.01 || b.receivableBalanceUsd > 0.01 || b.payableBalanceUsd > 0.01;
-      
+      const aHasMoney = Math.abs(a.netPositionUsd) > 0.01 || a.heldBalanceUsd > 0.01 || a.receivableBalanceUsd > 0.01 || a.payableBalanceUsd > 0.01 || (a.heldBalanceTnd || 0) > 0.01;
+      const bHasMoney = Math.abs(b.netPositionUsd) > 0.01 || b.heldBalanceUsd > 0.01 || b.receivableBalanceUsd > 0.01 || b.payableBalanceUsd > 0.01 || (b.heldBalanceTnd || 0) > 0.01;
       if (aHasMoney && !bHasMoney) return -1;
       if (!aHasMoney && bHasMoney) return 1;
       return a.name.localeCompare(b.name);
@@ -94,7 +117,6 @@ export async function getHubDashboardData(searchQuery: string = '') {
       return t.contact.name.toLowerCase().includes(q) || (t.note && t.note.toLowerCase().includes(q));
     });
 
-    // 3. Metrics Aggregation
     let totalAvoirs = 0, totalReceivables = 0, totalPayables = 0, upcomingPayments = 0;
     contacts.forEach(c => {
       if (c.isArchived) return;
@@ -104,17 +126,15 @@ export async function getHubDashboardData(searchQuery: string = '') {
     });
     reminders.forEach(r => { if (!r.isCompleted) upcomingPayments += r.amountInUsd; });
 
-    // TND is a LOCAL currency — keep "Avoirs" in TND separate, do NOT fold into USD total.
     const archivedContactIds = new Set(contacts.filter(c => c.isArchived).map(c => c.id));
-    let totalAvoirsTnd = 0;       // raw TND amount held
-    let totalAvoirsTndInUsd = 0;  // its USD equivalent (to subtract from USD total)
+    let totalAvoirsTnd = 0;
+    let totalAvoirsTndInUsd = 0;
     transactions.forEach(t => {
       if (t.type !== 'HELD' || t.currencyCode !== 'TND') return;
       if (archivedContactIds.has(t.contactId)) return;
       totalAvoirsTnd += t.amount;
       totalAvoirsTndInUsd += t.amountInUsd;
     });
-    // Remove the TND portion from the USD aggregate so it is not double counted
     const totalAvoirsUsd = totalAvoirs - totalAvoirsTndInUsd;
 
     return {
@@ -127,12 +147,19 @@ export async function getHubDashboardData(searchQuery: string = '') {
       reminders,
       auditTrails,
       users,
+      tndMovements,
+      tndForecast: {
+        avgDailyFlow,
+        forecast7Days: tndForecast7Days
+      },
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,
         totalReceivables, totalPayables, upcomingPayments,
-        // Net position stays in USD and excludes the local TND avoirs
-        netPosition: totalAvoirsUsd + totalReceivables - totalPayables
+        netPosition: totalAvoirsUsd + totalReceivables - totalPayables,
+        tndBalance,
+        tndTodayIn,
+        tndTodayOut
       },
     };
   } catch (error) {

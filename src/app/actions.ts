@@ -346,6 +346,65 @@ export async function settleDebtFromAvoir(contactId: string) {
   }
 }
 
+// ----------------------------------------------------
+// 5. TND TREASURY
+// ----------------------------------------------------
+export async function createTndMovement(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const amount = parseFloat(formData.get('amount') as string);
+    const type = formData.get('type') as string; // "IN" or "OUT"
+    const note = (formData.get('note') as string || '').trim();
+
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubTndMovement.create({
+        data: { amount, type, note, performedBy: session.username },
+      });
+
+      await logAudit(tx, {
+        entityType: 'TREASURY',
+        entityId: movement.id,
+        action: type === 'IN' ? 'TND_IN' : 'TND_OUT',
+        details: `${type === 'IN' ? 'Entrée' : 'Sortie'} de ${amount} TND: ${note}`,
+        modifiedBy: session.username,
+      });
+    });
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
+      return { success: false, error: 'Session expirée', code: error.message };
+    }
+    return { success: false, error: 'Erreur lors de l\'enregistrement' };
+  }
+}
+
+export async function deleteTndMovement(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      const old = await tx.hubTndMovement.findUnique({ where: { id } });
+      if (!old) return;
+      await tx.hubTndMovement.delete({ where: { id } });
+      await logAudit(tx, {
+        entityType: 'TREASURY',
+        entityId: id,
+        action: 'TND_DELETE',
+        oldValue: JSON.stringify(old),
+        details: `Suppression mouvement TND: ${old.amount} (${old.type})`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: 'Action non autorisée' };
+  }
+}
+
 export async function deleteHubTransaction(id: string) {
   try {
     const session = await requireSession();

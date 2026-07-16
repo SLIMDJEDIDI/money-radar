@@ -11,7 +11,9 @@ import {
   createHubTransaction, deleteHubTransaction,
   createReminder, toggleReminderCompleted, deleteReminder,
   confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
-  resetDatabaseToZero, loginUser, logoutUser, getCurrentUser
+  resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
+  changeUserPassword, createAssistantUser, deleteAssistantUser,
+  createTndMovement, deleteTndMovement
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
@@ -22,14 +24,14 @@ const TYPE_EXPLAIN: Record<string, string> = {
   PAYABLE: "DETTE : tu lui dois de l'argent. C'est un montant que tu dois lui payer.",
 };
 
-// --- HELPER COMPONENTS (MEMOIZED FOR SPEED) ---
+// --- HELPER COMPONENTS ---
 const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note, extra }: any) => (
   <div 
     onClick={onClick}
     className={`bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer transition-all active:scale-[0.97] hover:border-${style}-500/40 ${activeFilter === type ? `ring-2 ring-${style}-500/50 border-${style}-500/50` : ''}`}
   >
     <p className="text-[10px] font-black text-neutral-300 uppercase tracking-wider">{label}</p>
-    <p className={`text-2xl font-black text-${style}-400 mt-2 tracking-tighter break-all`}>{val}</p>
+    <p className={`text-2xl font-black text-${style}-400 mt-2 tracking-tighter break-all leading-none`}>{val}</p>
     {extra && <p className="text-xs font-black text-amber-400 mt-1 tracking-tighter break-all">{extra}</p>}
     <p className={`text-[10px] text-${style}-300 font-black italic uppercase mt-1.5 tracking-tighter`}>{note}</p>
   </div>
@@ -82,7 +84,8 @@ const EmptyState = memo(({ icon, title, subtitle }: any) => (
 EmptyState.displayName = 'EmptyState';
 
 export default function MoneyHubApp({
-  initialContacts, initialActiveCurrencies, initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics, initialCategories
+  initialContacts, initialActiveCurrencies, initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics, initialCategories,
+  initialTndMovements, initialTndForecast
 }: any) {
   // --- AUTH & THEME ---
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -90,76 +93,57 @@ export default function MoneyHubApp({
   const [loginError, setLoginError] = useState('');
   
   useEffect(() => {
-    // Validate the REAL server session (httpOnly cookie), not just the local cache.
-    // The localStorage cache can exist without a valid cookie (e.g. after the
-    // security migration or cookie expiry) which made mutations fail silently.
     (async () => {
-      // Optimistically restore from cache so a slow/cold server never flashes
-      // the login screen mid-session.
       const cached = localStorage.getItem('hub_session_user');
       if (cached) { try { setCurrentUser(JSON.parse(cached)); } catch {} }
-
       try {
         const res: any = await getCurrentUser();
         if (res?.authenticated && res.user) {
-          // Confirmed valid session
           setCurrentUser(res.user);
           localStorage.setItem('hub_session_user', JSON.stringify(res.user));
         } else if (res?.authenticated === false) {
-          // Genuinely logged out (no/expired cookie)
           setCurrentUser(null);
           localStorage.removeItem('hub_session_user');
         }
-        // any other shape (network/transient) -> keep whatever we have
-      } catch {
-        // Network error: DO NOT log out — keep the cached session
-      }
+      } catch {}
     })();
   }, []);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings'>('dashboard');
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury'>('dashboard');
 
   // --- DATA STATES ---
   const [contacts, setContacts] = useState(initialContacts);
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
   const [metrics, setMetrics] = useState(initialMetrics);
   const [reminders, setReminders] = useState(initialReminders.map((r:any) => ({...r, dueDate: new Date(r.dueDate)})));
+  const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt)})) || []);
+  const [tndForecast, setTndForecast] = useState(initialTndForecast);
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
   );
-
   const [optimisticContacts, addOptimisticContact] = useOptimistic(contacts, (state: any, newContact: any) => 
     newContact.action === 'delete' ? state.filter((c:any) => c.id !== newContact.id) : [...state, newContact]
+  );
+  const [optimisticTndMovements, addOptimisticTndMovement] = useOptimistic(tndMovements, (state: any, newM: any) => 
+    newM.action === 'delete' ? state.filter((m:any) => m.id !== newM.id) : [newM, ...state]
   );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, setIsRefreshing] = useState(false);
-
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedContact, setSelectedContact] = useState<any>(null);
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [contactFilterType, setContactFilterType] = useState<'ALL' | 'HELD' | 'RECEIVABLE' | 'PAYABLE'>('ALL');
   const [confirmModal, setConfirmModal] = useState<any>({ isOpen: false });
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const [transactionForm, setTransactionForm] = useState({ 
-    contactId: '', 
-    amount: '', 
-    currencyCode: 'USD', 
-    type: 'HELD', 
-    category: 'Virement', 
-    note: '',
-    isPostponed: false,
-    dueDate: '',
-    reminderEmail: ''
+    contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '',
+    isPostponed: false, dueDate: '', reminderEmail: ''
   });
   const [contactForm, setContactForm] = useState({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
-  const [reminderForm, setReminderForm] = useState({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' });
-  const [editingHolderId, setEditingHolderId] = useState<string | null>(null);
-  const [editFormData, setEditFormData] = useState({ name: '', emoji: '', color: 'blue' });
   const [postponeTarget, setPostponeTarget] = useState<any>(null);
   const [postponeDate, setPostponeDate] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
@@ -167,18 +151,17 @@ export default function MoneyHubApp({
   const [inlineNewPartner, setInlineNewPartner] = useState(false);
   const [inlinePartnerName, setInlinePartnerName] = useState('');
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
+  const [tndForm, setTndForm] = useState({ amount: '', type: 'IN', note: '' });
 
-  // --- NAVIGATION HISTORY (back / forward through sections) ---
+  // --- NAVIGATION ---
   const [navStack, setNavStack] = useState<string[]>(['dashboard']);
   const [navPos, setNavPos] = useState(0);
   const canGoBack = navPos > 0;
   const canGoForward = navPos < navStack.length - 1;
 
-  // Navigate to a section and record it in history
   const navigateTo = useCallback((section: string) => {
     setActiveSection(section as any);
     setNavStack(prev => {
-      // if same as current, do nothing
       if (prev[navPos] === section) return prev;
       const truncated = prev.slice(0, navPos + 1);
       truncated.push(section);
@@ -187,7 +170,6 @@ export default function MoneyHubApp({
     });
   }, [navPos]);
 
-  // Close the top-most open overlay (modal / drawer / notifications). Returns true if something closed.
   const closeTopOverlay = useCallback(() => {
     if (postponeTarget) { setPostponeTarget(null); return true; }
     if (confirmModal.isOpen) { setConfirmModal({ isOpen: false }); return true; }
@@ -216,14 +198,8 @@ export default function MoneyHubApp({
     });
   }, [navStack]);
 
-  // Browser / mobile hardware back button support
   useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      e.preventDefault?.();
-      goBack();
-      // keep a state entry so the next back press is captured again
-      window.history.pushState({ hub: true }, '');
-    };
+    const onPop = (e: any) => { e.preventDefault(); goBack(); window.history.pushState({ hub: true }, ''); };
     window.history.pushState({ hub: true }, '');
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -232,10 +208,8 @@ export default function MoneyHubApp({
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
     const symbol = CURRENCY_SYMBOLS[curr] || curr;
-    return `${symbol} ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(val)}`;
+    return `${symbol} ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val)}`;
   }, []);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setTransactionForm(p => ({ ...p, photo: e.target.files![0] })); };
 
   const refreshHubState = async () => {
     setIsRefreshing(true);
@@ -243,19 +217,18 @@ export default function MoneyHubApp({
       const res = await fetch(`/api/dashboard-data?t=${Date.now()}`);
       if (res.ok) {
         const data = await res.json();
-        setContacts(data.contacts); setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
-        setMetrics(data.metrics); setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
+        setContacts(data.contacts);
+        setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
+        setMetrics(data.metrics);
+        setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
+        setTndMovements(data.tndMovements?.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })) || []);
+        setTndForecast(data.tndForecast);
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   };
 
-  const handleLogout = async () => {
-    try { await logoutUser(); } catch {}
-    setCurrentUser(null);
-    localStorage.removeItem('hub_session_user');
-  };
-
+  const handleLogout = async () => { try { await logoutUser(); } catch {} setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const data = new FormData(); data.append('username', loginForm.username); data.append('password', loginForm.password);
@@ -264,278 +237,117 @@ export default function MoneyHubApp({
     else setLoginError('Identifiants invalides');
   };
 
+  const handleSessionExpired = () => { setActiveModal(null); setCurrentUser(null); localStorage.removeItem('hub_session_user'); alert('Session expirée. Veuillez vous reconnecter.'); };
+
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     const contact = contacts.find((c:any) => c.id === transactionForm.contactId);
     const amount = parseFloat(transactionForm.amount);
-    
     startTransition(async () => {
-      // If it's a postponed CRÉANCE (RECEIVABLE), create a reminder instead of a transaction
       if (transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed) {
         const data = new FormData();
-        data.append('contactId', transactionForm.contactId);
-        data.append('amount', transactionForm.amount);
-        data.append('currencyCode', transactionForm.currencyCode);
-        data.append('dueDate', transactionForm.dueDate);
-        data.append('note', transactionForm.note);
-        data.append('reminderEmail', transactionForm.reminderEmail);
-        
+        Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
         const res: any = await createReminder(data);
-        if (res.success) {
-          setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
-          setActiveModal(null);
-          await refreshHubState();
-        } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
-          handleSessionExpired();
-        } else {
-          alert(res.error || 'Erreur lors de la création du rappel');
-        }
+        if (res.success) { setTransactionForm({ ...transactionForm, amount: '', note: '', isPostponed: false }); setActiveModal(null); await refreshHubState(); }
+        else if (res.code) handleSessionExpired(); else alert(res.error);
         return;
       }
-
-      // Standard Transaction Path
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
-      const data = new FormData();
-      Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
+      const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
       const opType = transactionForm.type;
       const opContactId = transactionForm.contactId;
       const res: any = await createHubTransaction(data);
-      if (res.success) {
-        setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
-        setActiveModal(null);
-        await refreshHubState();
-        // SMART: if we just added an AVOIR to a partner we OWE money to, offer to settle the debt
+      if (res.success) { 
+        setTransactionForm({ ...transactionForm, amount: '', note: '' }); setActiveModal(null); await refreshHubState(); 
         if (opType === 'HELD') maybePromptSettleDebt(opContactId);
-      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
-        handleSessionExpired();
-      } else {
-        alert(res.error || 'Erreur');
-      }
+      } else if (res.code) handleSessionExpired(); else alert(res.error);
     });
   };
 
-  const handleDeleteTx = (id: string) => {
-    setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => {
-      startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); });
-    }});
+  const maybePromptSettleDebt = async (contactId: string) => {
+    const c = contacts.find((x: any) => x.id === contactId);
+    if (c && c.payableBalanceUsd > 0.01 && c.heldBalanceUsd > 0.01) {
+      const settle = Math.min(c.heldBalanceUsd, c.payableBalanceUsd);
+      setConfirmModal({
+        isOpen: true, title: '💸 Régler la dette ?',
+        description: `Tu dois ${formatUSD(c.payableBalanceUsd)} à ${c.name} et tu détiens ${formatUSD(c.heldBalanceUsd)} en Avoir chez lui. Veux-tu utiliser cet Avoir pour régler la dette (${formatUSD(settle)}) ?`,
+        confirmText: 'Régler maintenant',
+        onConfirm: async () => { startTransition(async () => { const res: any = await settleDebtFromAvoir(contactId); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); }
+      });
+    }
+  };
+
+  const handleAddTndMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tndForm.amount || !tndForm.note.trim()) return;
+    startTransition(async () => {
+      const amount = parseFloat(tndForm.amount);
+      addOptimisticTndMovement({ id: 'temp', amount, type: tndForm.type, note: tndForm.note, performedBy: currentUser.username, createdAt: new Date() });
+      const data = new FormData(); data.append('amount', tndForm.amount); data.append('type', tndForm.type); data.append('note', tndForm.note);
+      const res: any = await createTndMovement(data);
+      if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleDeleteTndMovement = async (id: string) => {
+    if (!confirm('Supprimer ce mouvement de trésorerie ?')) return;
+    startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+  };
+
+  const handleInlineCreatePartner = () => {
+    if (!inlinePartnerName.trim()) return;
+    startTransition(async () => {
+      const data = new FormData(); data.append('name', inlinePartnerName.trim()); data.append('emoji', '👤'); data.append('country', inlinePartnerCountry.trim());
+      const res: any = await createContact(data);
+      if (res.success && res.contact) { await refreshHubState(); setTransactionForm(p => ({ ...p, contactId: res.contact.id })); setInlineNewPartner(false); }
+      else if (res.code) handleSessionExpired(); else alert(res.error);
+    });
   };
 
   const handleAddContact = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!contactForm.name.trim()) return;
+    e.preventDefault(); if (!contactForm.name.trim()) return;
     startTransition(async () => {
-      addOptimisticContact({ id: 'temp', name: contactForm.name, emoji: contactForm.emoji, netPositionUsd: 0, heldBalanceUsd:0, receivableBalanceUsd:0, payableBalanceUsd:0 });
-      const data = new FormData();
-      Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
+      const data = new FormData(); Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
       const res: any = await createContact(data);
-      if (res.success) {
-        setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
-        setActiveModal(null);
-        await refreshHubState();
-      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
-        handleSessionExpired();
-      } else {
-        alert(res.error || 'Erreur lors de la création');
-      }
-    });
-  };
-
-  const handleSessionExpired = () => {
-    setActiveModal(null);
-    setCurrentUser(null);
-    localStorage.removeItem('hub_session_user');
-    alert('Votre session a expiré. Veuillez vous reconnecter.');
-  };
-
-  // Reset inline partner creation whenever the operation modal is not open
-  useEffect(() => {
-    if (activeModal !== 'add_tx') {
-      setInlineNewPartner(false);
-      setInlinePartnerName('');
-      setInlinePartnerCountry('');
-    }
-  }, [activeModal]);
-
-  // Create a partner inline (from the operation dropdown) and auto-select it
-  const handleInlineCreatePartner = () => {
-    const name = inlinePartnerName.trim();
-    if (!name) return;
-    startTransition(async () => {
-      const data = new FormData();
-      data.append('name', name);
-      data.append('emoji', '👤');
-      data.append('country', inlinePartnerCountry.trim());
-      const res: any = await createContact(data);
-      if (res.success && res.contact) {
-        await refreshHubState();
-        setTransactionForm(p => ({ ...p, contactId: res.contact.id }));
-        setInlineNewPartner(false);
-        setInlinePartnerName('');
-        setInlinePartnerCountry('');
-      } else if (res.code === 'UNAUTHORIZED' || res.code === 'FORBIDDEN') {
-        handleSessionExpired();
-      } else {
-        alert(res.error || 'Erreur lors de la création du partenaire');
-      }
+      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error);
     });
   };
 
   const handleUpdateContact = async (e: React.FormEvent) => {
     e.preventDefault(); if (!contactForm.id || !contactForm.name) return;
     const data = new FormData(); data.append('contactId', contactForm.id); data.append('name', contactForm.name); data.append('emoji', contactForm.emoji); data.append('country', contactForm.country); data.append('isArchived', contactForm.isArchived ? 'true' : 'false');
-    startTransition(async () => {
-      const res = await updateContact(data);
-      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
-      else alert(res.error);
-    });
+    startTransition(async () => { const res: any = await updateContact(data); if (res.success) { setActiveModal(null); await refreshHubState(); } else if (res.code) handleSessionExpired(); else alert(res.error); });
   };
 
-  // After recharging an AVOIR: if we owe this partner money (DEBT), alert and offer to settle it.
-  const maybePromptSettleDebt = async (contactId: string) => {
-    try {
-      const r = await fetch(`/api/dashboard-data?t=${Date.now()}`);
-      if (!r.ok) return;
-      const data = await r.json();
-      const c = data.contacts.find((x: any) => x.id === contactId) || data.allContacts?.find((x: any) => x.id === contactId);
-      if (!c) return;
-      const held = c.heldBalanceUsd || 0;
-      const debt = c.payableBalanceUsd || 0;
-      if (debt > 0.01 && held > 0.01) {
-        const settle = Math.min(held, debt);
-        setConfirmModal({
-          isOpen: true,
-          title: '💸 Régler la dette ?',
-          description: `Tu dois ${formatUSD(debt)} à ${c.name} et tu détiens ${formatUSD(held)} en Avoir chez lui. Veux-tu utiliser cet Avoir pour régler la dette (${formatUSD(settle)}) ?`,
-          confirmText: 'Régler maintenant',
-          onConfirm: async () => {
-            startTransition(async () => {
-              const res: any = await settleDebtFromAvoir(contactId);
-              if (res.success) await refreshHubState();
-              else if (res.code) handleSessionExpired();
-              else alert(res.error || 'Erreur');
-            });
-          }
-        });
-      }
-    } catch { /* silent */ }
-  };
-
-  const handleToggleReminder = async (id: string, isDone: boolean) => { 
-    startTransition(async () => { 
-      await toggleReminderCompleted(id, isDone); 
-      await refreshHubState(); 
-    }); 
-  };
-
-  // Confirm payment received -> moves amount into AVOIR balance
   const handleConfirmReceived = (r: any) => {
     setConfirmModal({
-      isOpen: true,
-      title: '✅ Paiement reçu ?',
+      isOpen: true, title: '✅ Paiement reçu ?',
       description: `Confirmer la réception de ${formatRawCurrency(r.amount, r.currencyCode)} de ${r.contact?.name} ? Le montant sera ajouté à ses Avoirs.`,
       confirmText: 'Confirmer',
-      onConfirm: async () => {
-        startTransition(async () => {
-          const res: any = await confirmReminderReceived(r.id);
-          if (res.success) await refreshHubState();
-          else if (res.code) handleSessionExpired();
-          else alert(res.error || 'Erreur');
-        });
-      }
+      onConfirm: async () => { startTransition(async () => { const res: any = await confirmReminderReceived(r.id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); }
     });
   };
 
-  // Postpone reminder to a new follow-up date
-  const handlePostpone = (r: any) => {
-    setPostponeTarget(r);
-    setPostponeDate('');
-  };
-
+  const handlePostpone = (r: any) => { setPostponeTarget(r); setPostponeDate(''); };
   const submitPostpone = async () => {
     if (!postponeTarget || !postponeDate) return;
-    const target = postponeTarget;
-    setPostponeTarget(null);
-    startTransition(async () => {
-      const res: any = await postponeReminder(target.id, postponeDate);
-      if (res.success) await refreshHubState();
-      else if (res.code) handleSessionExpired();
-      else alert(res.error || 'Erreur');
-    });
-  };
-
-  const handleDeleteReminder = (id: string) => {
-    setConfirmModal({
-      isOpen: true, title: 'Supprimer ?', description: 'Supprimer ce rappel ?', confirmText: 'Supprimer', isDanger: true,
-      onConfirm: async () => {
-        startTransition(async () => {
-          await deleteReminder(id);
-          await refreshHubState();
-        });
-      }
-    });
-  };
-
-  const handleCreateReminderSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!reminderForm.contactId || !reminderForm.amount || !reminderForm.dueDate) return;
-    const data = new FormData(); data.append('contactId', reminderForm.contactId); data.append('amount', reminderForm.amount); data.append('currencyCode', reminderForm.currencyCode); data.append('dueDate', reminderForm.dueDate); data.append('note', reminderForm.note);
-    startTransition(async () => {
-      const res = await createReminder(data);
-      if (res.success) { setReminderForm({ contactId: '', amount: '', currencyCode: 'USD', dueDate: '', note: '' }); setActiveModal(null); await refreshHubState(); }
-    });
-  };
-
-  const handleOpenEditContact = useCallback((e: React.MouseEvent, c: any) => {
-    e.preventDefault(); e.stopPropagation();
-    setContactForm({ id: c.id, name: c.name, emoji: c.emoji, country: c.country || '', isArchived: !!c.isArchived });
-    setActiveModal('edit_contact');
-  }, []);
-
-  const handleMasterWipeToZero = () => {
-    setConfirmModal({ isOpen: true, title: '⚠️ WIPE GLOBAL ?', description: 'Action irréversible. Mot de passe :', confirmText: 'Wipe', isDanger: true, requirePassword: true, onConfirm: async (p: any) => {
-      startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); });
-    }});
-  };
-
-  const handleStartInlineEdit = (contact: any) => { setEditingHolderId(contact.id); setEditFormData({ name: contact.name, emoji: contact.emoji, color: 'blue' }); };
-  const handleSaveInlineEdit = async (e: React.FormEvent, id: string) => {
-    e.preventDefault(); const data = new FormData(); data.append('contactId', id); data.append('name', editFormData.name); data.append('emoji', editFormData.emoji); data.append('country', ''); data.append('isArchived', 'false');
-    startTransition(async () => { const res = await updateContact(data); if (res.success) { setEditingHolderId(null); await refreshHubState(); } else alert(res.error); });
-  };
-
-  const handleEraseAccount = (id: string, name: string) => {
-    setConfirmModal({ isOpen: true, title: '🗑️ SUPPRIMER CONTACT', description: `Supprimer définitivement ${name} ?`, confirmText: 'Supprimer', cancelText: 'Annuler', isDanger: true, onConfirm: async () => {
-      startTransition(async () => { addOptimisticContact({ id, action: 'delete' }); await deleteContact(id); await refreshHubState(); });
-    }});
-  };
-
-  const handleSelectContact = (c: any) => setSelectedContact(c);
-
-  const getTransactionTypeStyle = (type: string) => {
-    switch (type) {
-      case 'HELD': return { label: 'Avoir', style: 'blue', note: 'Mon argent chez lui' };
-      case 'RECEIVABLE': return { label: 'Créance', style: 'emerald', note: 'Il me doit de l\'argent' };
-      case 'PAYABLE': return { label: 'Dette', style: 'rose', note: 'Je lui dois de l\'argent' };
-      default: return { label: '?', style: 'neutral', note: '' };
-    }
+    const target = postponeTarget; setPostponeTarget(null);
+    startTransition(async () => { const res: any = await postponeReminder(target.id, postponeDate); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); });
   };
 
   const filteredContacts = useMemo(() => {
     let result = [...optimisticContacts];
-    // SMART SORT: 
-    // 1. Partners with highest absolute balance (importance) first
-    // 2. Then alphabetical
     result.sort((a, b) => {
-      const aVolume = Math.max(Math.abs(a.heldBalanceUsd), Math.abs(a.receivableBalanceUsd), Math.abs(a.payableBalanceUsd));
-      const bVolume = Math.max(Math.abs(b.heldBalanceUsd), Math.abs(b.receivableBalanceUsd), Math.abs(b.payableBalanceUsd));
-      
-      if (bVolume !== aVolume) return bVolume - aVolume;
+      const aVol = Math.max(Math.abs(a.netPositionUsd), Math.abs(a.heldBalanceUsd), Math.abs(a.receivableBalanceUsd), Math.abs(a.payableBalanceUsd), (a.heldBalanceTnd || 0));
+      const bVol = Math.max(Math.abs(b.netPositionUsd), Math.abs(b.heldBalanceUsd), Math.abs(b.receivableBalanceUsd), Math.abs(b.payableBalanceUsd), (b.heldBalanceTnd || 0));
+      if (bVol !== aVol) return bVol - aVol;
       return a.name.localeCompare(b.name);
     });
-
-    if (contactFilterType === 'HELD') result = result.filter((c:any) => c.heldBalanceUsd > 0);
+    if (contactFilterType === 'HELD') result = result.filter((c:any) => c.heldBalanceUsd > 0 || (c.heldBalanceTnd || 0) > 0);
     else if (contactFilterType === 'RECEIVABLE') result = result.filter((c:any) => c.receivableBalanceUsd > 0);
     else if (contactFilterType === 'PAYABLE') result = result.filter((c:any) => c.payableBalanceUsd > 0);
-    
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter((c:any) => c.name.toLowerCase().includes(q) || (c.country && c.country.toLowerCase().includes(q)));
@@ -543,62 +355,74 @@ export default function MoneyHubApp({
     return result;
   }, [optimisticContacts, contactFilterType, searchQuery]);
 
-  const filteredMovements = useMemo(() => 
+  const filteredMovements = useMemo(() =>
     optimisticTransactions.filter((t:any) => !searchQuery || t.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.note?.toLowerCase().includes(searchQuery.toLowerCase())),
     [optimisticTransactions, searchQuery]
   );
 
-  // Reminders due today or overdue (the ones needing attention/notification)
+  const getTransactionTypeStyle = (type: string) => {
+    switch (type) {
+      case 'HELD': return { label: 'AVOIR', note: 'Mon argent chez lui', style: 'blue' };
+      case 'RECEIVABLE': return { label: 'CRÉANCE', note: 'Il me doit', style: 'emerald' };
+      case 'PAYABLE': return { label: 'DETTE', note: 'Je lui dois', style: 'rose' };
+      default: return { label: type, note: '', style: 'neutral' };
+    }
+  };
+
   const dueReminders = useMemo(() => {
-    const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
-    return reminders
-      .filter((r:any) => !r.isCompleted && new Date(r.dueDate) <= endOfToday)
-      .sort((a:any, b:any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+    return reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) <= end).sort((a:any, b:any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
   }, [reminders]);
 
-  // Auto-surface the notification center once per session when payments are due
   useEffect(() => {
     if (!currentUser || dueReminders.length === 0) return;
     const today = new Date().toDateString();
-    const seen = sessionStorage.getItem('hub_notif_seen');
-    if (seen !== today) {
-      setShowNotifications(true);
-      sessionStorage.setItem('hub_notif_seen', today);
-    }
+    if (sessionStorage.getItem('hub_notif_seen') !== today) { setShowNotifications(true); sessionStorage.setItem('hub_notif_seen', today); }
   }, [currentUser, dueReminders.length]);
 
+  // Reset inline partner creation whenever the operation modal is not open
+  useEffect(() => { if (activeModal !== 'add_tx') { setInlineNewPartner(false); setInlinePartnerName(''); setInlinePartnerCountry(''); } }, [activeModal]);
+
+  const handleDeleteTxLoc = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); }); } }); };
+
+  const handleOpenEditContact = (e: any, c: any) => { e.stopPropagation(); setContactForm(c); setActiveModal('edit_contact'); };
+
   if (!currentUser) return (
-    <div className="min-h-screen bg-[#020202] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm glass-panel border border-neutral-800 rounded-[40px] p-10 text-center shadow-2xl animate-scale-in">
-        <span className="inline-flex p-4 bg-neutral-900 border border-neutral-800 text-emerald-400 rounded-3xl mb-4"><Lock className="h-7 w-7" /></span>
-        <h1 className="text-3xl font-black tracking-tighter uppercase mb-8">MONEY HUB</h1>
+    <div className="min-h-screen bg-black flex items-center justify-center p-6">
+      <div className="w-full max-w-sm bg-neutral-900/40 border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-8 shadow-2xl animate-in zoom-in-95 duration-500 ring-1 ring-white/10">
+        <div className="text-center flex flex-col items-center gap-3">
+          <div className="h-16 w-16 rounded-[24px] bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-4xl shadow-xl shadow-emerald-500/10">M</div>
+          <h1 className="text-2xl font-black tracking-tighter uppercase text-white mt-2">MONEY HUB</h1>
+          <p className="text-[10px] text-neutral-500 font-black uppercase tracking-[0.3em]">Accès Contrôlé</p>
+        </div>
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
-          <input type="text" required placeholder="Identifiant" value={loginForm.username} onChange={(e) => setLoginForm(p => ({ ...p, username: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm focus:border-emerald-500/50 outline-none text-white transition-all" />
-          <input type="password" required placeholder="Mot de passe" value={loginForm.password} onChange={(e) => setLoginForm(p => ({ ...p, password: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm focus:border-emerald-500/50 outline-none text-white transition-all" />
-          {loginError && <p className="text-rose-400 text-xs font-black uppercase tracking-widest">{loginError}</p>}
-          <button type="submit" className="w-full py-4 bg-emerald-500 text-black font-black uppercase rounded-2xl active:scale-95 transition shadow-lg shadow-emerald-500/20 mt-4">Accéder au Hub</button>
+          <input type="text" placeholder="UTILISATEUR" required className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50 shadow-inner" value={loginForm.username} onChange={e => setLoginForm(p=>({...p, username: e.target.value}))} />
+          <input type="password" placeholder="MOT DE PASSE" required className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50 shadow-inner" value={loginForm.password} onChange={e => setLoginForm(p=>({...p, password: e.target.value}))} />
+          <button type="submit" className="py-5 bg-white text-black font-black rounded-2xl uppercase text-xs tracking-[0.2em] active:scale-95 transition shadow-2xl mt-2">Se Connecter</button>
+          {loginError && <p className="text-rose-500 text-[10px] font-black uppercase text-center tracking-widest animate-pulse">{loginError}</p>}
         </form>
       </div>
     </div>
   );
 
   return (
-    <div className={`min-h-screen pb-32 ambient-bg ${theme === 'light' ? 'bg-neutral-50 text-black' : 'bg-[#050505] text-white'}`}>
-      <header className="sticky top-0 z-40 bg-[#050505]/90 backdrop-blur-2xl border-b border-neutral-900/50 p-4 pt-6">
+    <div className={`min-h-screen bg-black text-white font-sans selection:bg-emerald-500/30 ${theme}`}>
+      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-2xl border-b border-neutral-900/50 p-4 pt-6">
         <div className="max-w-4xl mx-auto flex flex-col gap-4">
           <div className="flex justify-between items-center px-1">
             <div className="flex items-center gap-2.5">
               <div className="flex gap-1.5">
-                <button onClick={goBack} disabled={!canGoBack && !selectedContact && !activeModal && !showNotifications && !confirmModal.isOpen && !postponeTarget} title="Précédent" className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft className="h-4 w-4" /></button>
-                <button onClick={goForward} disabled={!canGoForward} title="Suivant" className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight className="h-4 w-4" /></button>
+                <button onClick={goBack} disabled={!canGoBack} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+                <button onClick={goForward} disabled={!canGoForward} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
               </div>
-              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-emerald-500/10 cursor-pointer" onClick={() => navigateTo('dashboard')}>M</div>
+              <div onClick={() => navigateTo('dashboard')} className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-xl cursor-pointer shadow-lg shadow-emerald-500/10">M</div>
               <div className="hidden sm:block"><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowNotifications(true)} className="relative p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><Bell className={`h-4 w-4 ${dueReminders.length > 0 ? 'text-amber-400' : ''}`} />{dueReminders.length > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black">{dueReminders.length}</span>}</button>
               <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
-              <button onClick={refreshHubState} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 shadow-lg"><RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} /></button>
+              <button onClick={refreshHubState} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} /></button>
+              <button onClick={handleLogout} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 text-rose-500 transition active:scale-90"><LogOut className="h-4 w-4" /></button>
             </div>
           </div>
           <div className="flex gap-2 px-1">
@@ -612,7 +436,7 @@ export default function MoneyHubApp({
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up">
+      <main className="max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up pb-32">
         {activeSection === 'dashboard' && (
           <div className="flex flex-col gap-5">
             <div className={`bg-gradient-to-br from-neutral-900 to-black border p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5 ${metrics.netPosition >= 0 ? 'border-emerald-500/20' : 'border-rose-500/20'}`}>
@@ -633,166 +457,187 @@ export default function MoneyHubApp({
               <StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} />
               <StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => navigateTo('reminders')} />
             </div>
-            <div className="flex justify-between items-center mt-2 px-1">
-              <h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Partenaires Actifs</h3>
-              <button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filteredContacts.map((c: any) => {
-                const hasTnd = (c.heldBalanceTnd || 0) > 0.01;
-                const hasUsd = Math.abs(c.netPositionUsd) > 0.01;
-                return (
-                <div key={c.id} onClick={() => handleSelectContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md">
-                  <div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div>
-                  <div className="text-right flex flex-col items-end">
-                    {(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}
-                    {hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}
-                  </div>
-                </div>
-                );
-              })}
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-center px-1">
+                <div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires Actifs</h3></div>
+                <button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {filteredContacts.map((c: any) => {
+                  const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01;
+                  return (
+                    <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md">
+                      <div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div>
+                      <div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
         {activeSection === 'contacts' && (() => {
-          const filterMeta: Record<string, { label: string; type: string; color: string; cta: string }> = {
-            HELD: { label: 'Avoirs', type: 'HELD', color: 'blue', cta: 'Enregistrer un avoir' },
-            RECEIVABLE: { label: 'À recevoir', type: 'RECEIVABLE', color: 'emerald', cta: 'Ajouter une somme à recevoir' },
-            PAYABLE: { label: 'À payer', type: 'PAYABLE', color: 'rose', cta: 'Ajouter une dette' },
-          };
+          const filterMeta: any = { HELD: { label: 'Avoirs', type: 'HELD', color: 'blue', cta: 'Enregistrer un avoir' }, RECEIVABLE: { label: 'À recevoir', type: 'RECEIVABLE', color: 'emerald', cta: 'Ajouter une somme à recevoir' }, PAYABLE: { label: 'À payer', type: 'PAYABLE', color: 'rose', cta: 'Ajouter une dette' } };
           const meta = contactFilterType !== 'ALL' ? filterMeta[contactFilterType] : null;
-          const startOpWithType = (type: string) => {
-            setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type, category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
-            setActiveModal('add_tx');
-          };
+          const startOp = (type: string) => { setTransactionForm({ ...transactionForm, type, contactId: '' }); setActiveModal('add_tx'); };
           return (
-          <div className="flex flex-col gap-4 pb-10">
-            {meta && (
-              <div className={`flex items-center justify-between gap-3 p-4 rounded-2xl border bg-${meta.color}-500/5 border-${meta.color}-500/20`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className={`text-[10px] font-black uppercase tracking-widest text-${meta.color}-400`}>Filtre : {meta.label}</span>
-                  <span className="text-[10px] font-black text-neutral-500">· {filteredContacts.length} partenaire(s)</span>
+            <div className="flex flex-col gap-4">
+              {meta && <div className={`flex items-center justify-between p-4 rounded-2xl border bg-${meta.color}-500/5 border-${meta.color}-500/20`}><div className="flex items-center gap-2.5 min-w-0"><span className={`text-[10px] font-black uppercase text-${meta.color}-400`}>Filtre: {meta.label}</span><span className="text-[10px] font-black text-neutral-500">· {filteredContacts.length} partenaire(s)</span></div><button onClick={() => setContactFilterType('ALL')} className="text-[10px] font-black text-neutral-400 uppercase">Tout voir ✕</button></div>}
+              {meta && filteredContacts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center gap-5 py-16 animate-fade-up"><div className={`p-6 bg-${meta.color}-500/5 border border-${meta.color}-500/20 rounded-[32px] text-${meta.color}-400 shadow-inner`}><DollarSign className="h-10 w-10" /></div><p className="text-sm font-black uppercase text-neutral-200">Aucun montant « {meta.label} »</p><button onClick={() => startOp(meta.type)} className={`px-6 py-4 bg-${meta.color}-500 text-black font-black uppercase text-[11px] rounded-2xl shadow-xl active:scale-95 transition tracking-widest`}>+ {meta.cta}</button></div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {!meta && <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 bg-neutral-900/10 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-neutral-900/30 transition shadow-inner group"><div className="p-4 bg-emerald-500/10 rounded-3xl group-hover:scale-110 transition"><Plus className="h-8 w-8 text-emerald-500" /></div><p className="text-xs font-black uppercase tracking-widest text-neutral-400">Ajouter un Partenaire</p></div>}
+                  {meta && <div onClick={() => startOp(meta.type)} className={`border border-dashed border-${meta.color}-500/30 bg-${meta.color}-500/5 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-${meta.color}-500/10 transition group`}><div className={`p-4 bg-${meta.color}-500/10 rounded-3xl group-hover:scale-110 transition`}><Plus className={`h-8 w-8 text-${meta.color}-400`} /></div><p className="text-xs font-black uppercase tracking-widest text-neutral-300">{meta.cta}</p></div>}
+                  {filteredContacts.map((c: any) => <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} />)}
                 </div>
-                <button onClick={() => setContactFilterType('ALL')} className="text-[10px] font-black text-neutral-400 uppercase tracking-wider flex items-center gap-1 shrink-0 hover:text-white transition">Tout voir <X className="h-3 w-3" /></button>
-              </div>
-            )}
-
-            {/* SMART EMPTY STATE when a filter yields no partners */}
-            {meta && filteredContacts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center gap-5 py-16 px-6 animate-fade-up">
-                <div className={`p-6 bg-${meta.color}-500/5 border border-${meta.color}-500/20 rounded-[32px] text-${meta.color}-400 shadow-inner`}><DollarSign className="h-10 w-10" /></div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-black uppercase tracking-widest text-neutral-200">Aucun montant « {meta.label} »</p>
-                  <p className="text-xs font-bold text-neutral-500 max-w-xs leading-relaxed">Choisis un partenaire existant et indique le montant — l'opération sera créée automatiquement.</p>
-                </div>
-                <button onClick={() => startOpWithType(meta.type)} className={`px-6 py-4 bg-${meta.color}-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl active:scale-[0.97] transition tracking-widest`}><Plus className="h-4 w-4 stroke-[3]" /> {meta.cta}</button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {!meta && (
-                  <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 bg-neutral-900/10 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-neutral-900/30 transition-all active:scale-95 group">
-                    <div className="p-4 bg-emerald-500/10 rounded-3xl group-hover:scale-110 transition"><Plus className="h-8 w-8 text-emerald-500" /></div>
-                    <p className="text-xs font-black uppercase tracking-widest text-neutral-400">Ajouter un Partenaire</p>
-                  </div>
-                )}
-                {/* When filtering, offer a quick "add this type of operation" card too */}
-                {meta && (
-                  <div onClick={() => startOpWithType(meta.type)} className={`border border-dashed border-${meta.color}-500/30 bg-${meta.color}-500/5 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-${meta.color}-500/10 transition-all active:scale-95 group`}>
-                    <div className={`p-4 bg-${meta.color}-500/10 rounded-3xl group-hover:scale-110 transition`}><Plus className={`h-8 w-8 text-${meta.color}-400`} /></div>
-                    <p className="text-xs font-black uppercase tracking-widest text-neutral-300 text-center">{meta.cta}</p>
-                  </div>
-                )}
-                {filteredContacts.map((c: any) => (
-                  <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} />
-                ))}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
           );
         })()}
 
-        {activeSection === 'transactions' && (
-          <div className="flex flex-col gap-3 pb-10">
-            {filteredMovements.length === 0 && (
-              <EmptyState icon={<ArrowLeftRight className="h-10 w-10" />} title="Aucune opération" subtitle="Les opérations enregistrées apparaîtront ici. Touchez « Nouvelle Opération » pour commencer." />
-            )}
-            {filteredMovements.map((t: any) => (
-              <div key={t.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex justify-between items-center shadow-lg hover:border-neutral-700 transition group">
-                <div className="flex items-center gap-4">
-                  <span className="text-2xl p-2.5 bg-neutral-950 border border-neutral-800 rounded-2xl shadow-inner group-hover:scale-110 transition duration-300">{t.contact?.emoji}</span>
-                  <div><p className="text-base font-black text-white uppercase tracking-tight">{t.contact?.name}</p><p className={`text-[10px] font-black uppercase tracking-widest mt-1 ${getTransactionTypeStyle(t.type).style === 'blue' ? 'text-blue-500' : getTransactionTypeStyle(t.type).style === 'emerald' ? 'text-emerald-500' : 'text-rose-500'}`}>{t.category} · {getTransactionTypeStyle(t.type).label}</p></div>
-                </div>
-                <div className="text-right flex items-center gap-4">
-                  <div className="flex flex-col gap-0.5"><p className="text-lg font-black text-white tracking-tighter">{formatUSD(t.amountInUsd)}</p><p className="text-[10px] text-neutral-600 font-black uppercase">{t.createdAt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p></div>
-                  <button onClick={() => handleDeleteTx(t.id)} className="p-2.5 text-rose-500/40 hover:text-rose-500 active:scale-90 transition hover:bg-rose-500/10 rounded-xl"><Trash2 className="h-5 w-5" /></button>
-                </div>
+        {activeSection === 'treasury' && (
+          <div className="flex flex-col gap-6 pb-20">
+            <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+              <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
+              <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
+              <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
+                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
+                <div className="flex flex-col border-l border-white/10 pl-6 ml-auto"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
               </div>
-            ))}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
+              <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-center border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{optimisticTndMovements.length} mouvements</span></div>
+              {optimisticTndMovements.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title="Coffre-fort vide" subtitle="Enregistrez vos flux." />}
+              <div className="flex flex-col gap-3">
+                {optimisticTndMovements.map((m: any, idx: number) => {
+                  let running = metrics.tndBalance;
+                  for (let i=0; i<idx; i++) { const prev = optimisticTndMovements[i]; running += (prev.type === 'IN' ? -prev.amount : prev.amount); }
+                  return (
+                    <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
+                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                      <div className="flex flex-col gap-1.5 min-w-0 flex-1"><p className="text-sm font-bold text-neutral-200 leading-tight">{m.note}</p><div className="flex items-center gap-3"><p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p><p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p></div></div>
+                      <div className="text-right shrink-0 flex items-center gap-4"><p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>{currentUser?.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeSection === 'treasury' && (
+          <div className="flex flex-col gap-6">
+            <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+              <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
+              <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
+              <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
+                <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
+                <div className="flex flex-col border-l border-white/10 pl-6 ml-auto"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
+              <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{optimisticTndMovements.length} mouvements</span></div>
+              {optimisticTndMovements.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title="Coffre-fort vide" subtitle="Enregistrez vos flux." />}
+              <div className="flex flex-col gap-3">
+                {optimisticTndMovements.map((m: any, idx: number) => {
+                  let running = metrics.tndBalance;
+                  for (let i=0; i<idx; i++) { const prev = optimisticTndMovements[i]; running += (prev.type === 'IN' ? -prev.amount : prev.amount); }
+                  return (
+                    <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
+                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                      <div className="flex flex-col gap-1.5 min-w-0 flex-1"><p className="text-sm font-bold text-neutral-200 leading-tight">{m.note}</p><div className="flex items-center gap-3"><p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p><p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p></div></div>
+                      <div className="text-right shrink-0 flex items-center gap-4"><p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>{currentUser?.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeSection === 'transactions' && (
+          <div className="flex flex-col gap-3">
+            {filteredMovements.length === 0 && <EmptyState icon={<ArrowLeftRight className="h-10 w-10" />} title="Aucune opération" subtitle="Utilisez « Nouvelle Opération »." />}
+            {filteredMovements.map((t: any) => {
+              const st = getTransactionTypeStyle(t.type);
+              return (
+              <div key={t.id} className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl flex justify-between items-center shadow-lg hover:border-neutral-700 transition group">
+                <div className="flex items-center gap-4"><span className="text-2xl p-2.5 bg-neutral-950 border border-neutral-800 rounded-2xl">{t.contact?.emoji}</span><div><p className="text-base font-black text-white uppercase tracking-tight">{t.contact?.name}</p><p className={`text-[10px] font-black uppercase tracking-widest mt-1 text-${st.style}-400`}>{t.category} · {st.label}</p></div></div>
+                <div className="text-right flex items-center gap-4"><div className="flex flex-col gap-0.5"><p className="text-lg font-black text-white tracking-tighter">{formatUSD(t.amountInUsd)}</p><p className="text-[10px] text-neutral-600 font-black uppercase">{t.createdAt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</p></div><button onClick={() => handleDeleteTxLoc(t.id)} className="p-2.5 text-rose-500/40 hover:text-rose-500 active:scale-90 transition rounded-xl"><Trash2 className="h-5 w-5" /></button></div>
+              </div>
+              );
+            })}
+          </div>
+        )}
+
+        {activeSection === 'reminders' && (
+          <div className="flex flex-col gap-8 pb-20">
+            <div className="flex justify-between items-center px-1"><div className="flex flex-col gap-1.5"><h2 className="text-2xl font-black text-white uppercase tracking-tighter">Échéancier</h2><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Suivi des paiements attendus</p></div><button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'RECEIVABLE', category: 'Virement', note: '', isPostponed: true, dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); }} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 transition active:scale-90"><Calendar className="h-6 w-6" /></button></div>
+            <div className="flex flex-col gap-8">
+              <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-rose-500 uppercase tracking-[0.2em] px-1 flex items-center gap-2 animate-pulse"><AlertTriangle className="h-4 w-4" /> En Retard</h3>
+                {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) < new Date(new Date().toDateString())).map((r:any) => (
+                  <div key={r.id} className="relative p-5 rounded-[32px] border border-rose-900/50 bg-rose-950/10 flex items-center justify-between gap-4 overflow-hidden"><div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" /><div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest uppercase">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={async () => { if (confirm('Supprimer ce rappel ?')) { await deleteReminder(r.id); await refreshHubState(); } }} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                ))}
+              </div>
+              <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] px-1">Prochaines Échéances</h3>
+                {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) >= new Date(new Date().toDateString())).map((r:any) => (
+                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={async () => { if (confirm('Supprimer ce rappel ?')) { await deleteReminder(r.id); await refreshHubState(); } }} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
         {activeSection === 'history' && (
-          <div className="flex flex-col gap-4 pb-10">
-            <h2 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] mb-2 px-1 flex items-center gap-2"> <History className="h-4 w-4" /> Journal de Traçabilité </h2>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-neutral-900 pb-4 px-1"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Journal d'audit</h3><button onClick={() => refreshHubState()} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Actualiser</button></div>
             <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
-              {initialAuditTrails.length === 0 && (
-                <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Chaque action (création, modification, suppression, connexion) sera tracée ici de façon sécurisée." />
-              )}
+              {initialAuditTrails.length === 0 && <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Actions tracées ici." />}
               {initialAuditTrails.map((a: any) => (
-                <div key={a.id} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex flex-col gap-3 shadow-inner ring-1 ring-white/5">
-                  <div className="flex justify-between items-start"><p className="text-[9px] font-black px-1.5 py-1 rounded-lg bg-neutral-950 text-neutral-400 uppercase tracking-widest border border-neutral-800">{a.entityType} : {a.action}</p><p className="text-[9px] text-neutral-500 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}</p></div>
-                  <p className="text-[13px] font-bold text-neutral-200 leading-relaxed">{a.details}</p>
-                  <p className="text-[9px] text-neutral-600 font-black uppercase tracking-widest mt-1 italic">Signature : <span className="text-emerald-500/80 underline decoration-emerald-500/20">{a.modifiedBy}</span></p>
+                <div key={a.id} className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-3xl flex flex-col gap-2.5 shadow-sm">
+                  <div className="flex justify-between items-center"><div className="flex items-center gap-2"><span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${a.action === 'DELETE' || a.action === 'WIPE' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>{a.action}</span><span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">· {a.entityType}</span></div><p className="text-[9px] text-neutral-700 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div>
+                  <p className="text-[11px] font-bold text-neutral-300 leading-relaxed px-1">{a.details}</p>
+                  <p className="text-[9px] text-neutral-600 font-black uppercase px-1 tracking-wider italic text-right">Signature: {a.modifiedBy}</p>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {activeSection === 'reminders' && (
-          <div className="flex flex-col gap-7 pb-10">
-            <button onClick={() => setActiveModal('add_reminder')} className="w-full py-5 bg-amber-600 text-white font-black uppercase rounded-[28px] shadow-2xl shadow-amber-900/20 active:scale-[0.98] transition">+ Nouvel Échéancier</button>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-rose-500 uppercase tracking-[0.2em] px-1 flex items-center gap-2 animate-pulse"><AlertTriangle className="h-4 w-4" /> Retards Critiques</h3>
-                {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) < new Date()).map((r:any) => (
-                  <div key={r.id} className="p-5 rounded-[32px] border border-rose-950 bg-rose-950/20 flex justify-between items-center shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" />
-                    <div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p>
-                    <div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminder(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 hover:bg-rose-500/10 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] px-1">Prochaines Échéances</h3>
-                {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) >= new Date()).map((r:any) => (
-                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3">
-                    <div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p>
-                    <div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminder(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 hover:bg-rose-500/10 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {activeSection === 'settings' && (
-          <div className="flex flex-col gap-7 pb-10 animate-fade-up">
-            <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[48px] flex justify-between items-center shadow-2xl ring-1 ring-white/5"><div><p className="text-sm font-black text-white uppercase tracking-tighter">{currentUser.username}</p><p className="text-[10px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-1.5">{currentUser.role}</p></div><button onClick={handleLogout} className="p-4 bg-rose-950/20 text-rose-400 rounded-3xl border border-rose-900/40 transition active:scale-90 hover:bg-rose-900/40 shadow-xl shadow-rose-900/10"><LogOut className="h-6 w-6" /></button></div>
-            <div className="bg-neutral-900 border border-neutral-800 p-7 rounded-[40px] flex flex-col gap-6 shadow-2xl">
-              <div className="flex justify-between items-center border-b border-neutral-800 pb-5 px-1"><h3 className="text-xs font-black uppercase text-neutral-500 tracking-[0.2em] flex items-center gap-2"><Settings className="h-4 w-4" /> Répertoire & Équipiers</h3> <button onClick={() => setActiveModal('add_contact')} className="py-2.5 px-6 rounded-2xl bg-emerald-500 text-black font-black text-[11px] uppercase transition active:scale-95 shadow-xl shadow-emerald-500/10">+ Nouveau</button></div>
-              <div className="flex flex-col gap-2.5 max-h-[450px] overflow-y-auto pr-1">
-                {contacts.map((c:any) => (
-                  <div key={c.id} className="p-4 rounded-3xl bg-neutral-950 border border-neutral-800 flex justify-between items-center hover:border-neutral-700 transition-all group shadow-sm">
-                    <div className="flex items-center gap-3"><span className="text-xl group-hover:rotate-12 transition duration-300">{c.emoji}</span><p className="text-sm font-black text-neutral-100 uppercase tracking-tight">{c.name}</p></div>
-                    <div className="flex gap-2.5">
-                      <button onClick={(e) => handleOpenEditContact(e, c)} className="p-3 text-blue-400 active:scale-90 transition hover:bg-neutral-900 rounded-2xl border border-transparent hover:border-neutral-800 shadow-md" title="Renommer"><Edit className="h-4.5 w-4.5" /></button>
-                      <button onClick={() => handleEraseAccount(c.id, c.name)} className="p-3 text-rose-400 active:scale-90 transition hover:bg-neutral-900 rounded-2xl border border-transparent hover:border-neutral-800 shadow-md" title="Supprimer"><Trash2 className="h-4.5 w-4.5" /></button>
-                    </div>
-                  </div>
+          <div className="flex flex-col gap-8">
+            <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[48px] flex justify-between items-center shadow-2xl"><div><p className="text-sm font-black text-white uppercase tracking-tighter">{currentUser.username}</p><p className="text-[10px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-1.5">{currentUser.role === 'admin' ? '👑 Administrateur' : '👤 Assistant'}</p></div><button onClick={handleLogout} className="p-4 bg-rose-950/20 text-rose-400 rounded-3xl border border-rose-900/40 transition hover:bg-rose-900/40 shadow-xl"><LogOut className="h-6 w-6" /></button></div>
+            <div className="p-8 bg-neutral-900/40 border border-neutral-800 rounded-[40px] shadow-inner flex flex-col gap-6">
+              <div className="flex items-center gap-3 text-emerald-400 border-b border-neutral-800 pb-5"><UserPlus className="h-5 w-5" /><h3 className="text-[10px] font-black uppercase tracking-widest">Nouvel Accès Assistant</h3></div>
+              <form onSubmit={async (e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); const res: any = await createAssistantUser(fd); if (res.success) { e.currentTarget.reset(); await refreshHubState(); } else alert(res.error); }} className="flex flex-col gap-4">
+                <input name="username" required placeholder="NOM D'UTILISATEUR" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
+                <input name="password" type="password" required placeholder="MOT DE PASSE" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
+                <button type="submit" disabled={isPending} className="py-5 bg-white text-black font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl">Créer l'accès</button>
+              </form>
+            </div>
+            <div className="flex flex-col gap-4">
+              <h4 className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.25em] px-1 flex items-center gap-2"><Users className="h-4 w-4" /> Utilisateurs actifs</h4>
+              <div className="flex flex-col gap-3">
+                {initialUsers.map((u: any) => (
+                  <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition"><div className="flex items-center gap-4"><div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div><div className="flex flex-col gap-1"><p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p></div></div>{u.role !== 'admin' && <button onClick={async () => { if (confirm(`Supprimer l'accès de ${u.username} ?`)) { await deleteAssistantUser(u.id); await refreshHubState(); } }} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition opacity-0 group-hover:opacity-100"><Trash2 className="h-5 w-5" /></button>}</div>
                 ))}
               </div>
             </div>
-            {currentUser.role === 'admin' && ( <button onClick={handleMasterWipeToZero} className="w-full py-6 bg-rose-600/10 border border-rose-600/30 text-rose-500 font-black uppercase rounded-[40px] transition hover:bg-rose-600 hover:text-white shadow-2xl active:scale-[0.98] tracking-widest text-xs">⚠️ Réinitialiser Tout le Système</button> )}
+            <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
           </div>
         )}
       </main>
@@ -800,12 +645,12 @@ export default function MoneyHubApp({
       <nav className="fixed bottom-4 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
         <div className="glass-panel border border-neutral-800 rounded-[36px] p-2.5 shadow-2xl flex items-center gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl scale-110 sm:scale-100">
           {[
-            { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-5 w-5" /> },
-            { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5" /> },
-            { id: 'transactions', label: 'Ops', icon: <ArrowLeftRight className="h-5 w-5" /> },
-            { id: 'reminders', label: 'Rappels', icon: <Calendar className="h-5 w-5" /> },
-            { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5" /> },
-          ].map(s => (
+            { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-5 w-5" />, adminOnly: true },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5" />, adminOnly: true },
+            { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-5 w-5" />, adminOnly: false },
+            { id: 'history', label: 'Audit', icon: <History className="h-5 w-5" />, adminOnly: true },
+            { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5" />, adminOnly: true },
+          ].filter(s => !s.adminOnly || currentUser?.role === 'admin').map(s => (
             <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-col items-center gap-1.5 px-5 py-3.5 rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
               {s.icon} <span className="text-[9px] font-black uppercase tracking-tighter">{s.label}</span>
             </button>
@@ -839,32 +684,36 @@ export default function MoneyHubApp({
                   <button key={type} type="button" onClick={() => setTransactionForm(p=>({...p, type, isPostponed: type === 'RECEIVABLE' ? p.isPostponed : false}))} className={`py-5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === type ? 'bg-white text-black border-white shadow-emerald-500/10' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{getTransactionTypeStyle(type).label}</span><span className="text-[7px] font-black opacity-50 tracking-tighter uppercase">{getTransactionTypeStyle(type).note}</span></button>
                 ))}
               </div>
-
               {transactionForm.type === 'RECEIVABLE' && (
                 <div className="flex flex-col gap-4 animate-in fade-in duration-300">
                   <div className="flex gap-2">
                     <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: false}))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${!transactionForm.isPostponed ? 'bg-emerald-500 text-black border-emerald-500' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>Effet Immédiat</button>
                     <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: true}))} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${transactionForm.isPostponed ? 'bg-amber-500 text-black border-amber-500' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>Échéance Future</button>
                   </div>
-                  
                   {transactionForm.isPostponed && (
                     <div className="flex flex-col gap-3 animate-in slide-in-from-top-2 duration-300">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date d'échéance</label>
-                        <input type="date" required={transactionForm.isPostponed} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Email pour le rappel</label>
-                        <input type="email" placeholder="votre@email.com" className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black outline-none focus:border-amber-500/50 shadow-inner" value={transactionForm.reminderEmail} onChange={e => setTransactionForm(p=>({...p, reminderEmail: e.target.value}))} />
-                      </div>
+                      <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date d'échéance</label><input type="date" required={transactionForm.isPostponed} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} /></div>
+                      <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Email pour le rappel</label><input type="email" placeholder="votre@email.com" className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" value={transactionForm.reminderEmail} onChange={e => setTransactionForm(p=>({...p, reminderEmail: e.target.value}))} /></div>
                     </div>
                   )}
                 </div>
               )}
-
               <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed ? "RAPPEL : Le montant ne sera pas ajouté aux soldes immédiatement. Vous serez notifié par email à l'échéance." : TYPE_EXPLAIN[transactionForm.type]}</p></div>
-              <input type="text" className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white focus:border-neutral-600 outline-none shadow-inner" placeholder="Commentaire / Référence" value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
-              <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-5 bg-emerald-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-emerald-500/30 active:scale-95 transition tracking-widest text-xs">Enregistrer</button></div>
+              <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white focus:border-emerald-500/40 outline-none shadow-inner" placeholder="NOTE OBLIGATOIRE (TRACABILITÉ)" value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
+              <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !transactionForm.note.trim()} className="flex-[2] py-5 bg-emerald-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-emerald-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'add_tnd' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-blue-500/40 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-blue-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{tndForm.type === 'IN' ? 'Encaisser TND' : 'Décaissement TND'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleAddTndMovement} className="flex flex-col gap-5">
+              <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div></div>
+              <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-blue-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={tndForm.note} onChange={e => setTndForm(p=>({...p, note: e.target.value}))} />
+              <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Confirmer</button></div>
             </form>
           </div>
         </div>
@@ -897,20 +746,6 @@ export default function MoneyHubApp({
         </div>
       )}
 
-      {activeModal === 'add_reminder' && (
-        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
-          <div className="w-full max-w-sm bg-[#080808] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl shadow-amber-500/5 ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-500 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">Planifier Rappel</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
-            <form onSubmit={handleCreateReminderSubmit} className="flex flex-col gap-5">
-              <select required className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black outline-none focus:border-amber-500/40 appearance-none shadow-inner" value={reminderForm.contactId} onChange={(e) => setReminderForm(p => ({...p, contactId: e.target.value}))}><option value="">Partenaire</option>{contacts.map((c:any) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select>
-              <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-2xl font-black text-white outline-none focus:border-amber-500/40 shadow-inner tracking-tighter" placeholder="0.00" value={reminderForm.amount} onChange={(e) => setReminderForm(p => ({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-[20px] px-5 font-black text-white outline-none focus:border-neutral-600 shadow-inner" value={reminderForm.currencyCode} onChange={(e) => setReminderForm(p => ({...p, currencyCode: e.target.value}))}>{Object.keys(CURRENCY_SYMBOLS).map(code => <option key={code} value={code}>{code}</option>)}</select></div>
-              <input type="date" required className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black outline-none focus:border-neutral-600 shadow-inner" value={reminderForm.dueDate} onChange={(e) => setReminderForm(p => ({...p, dueDate: e.target.value}))} />
-              <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending} className="flex-[2] py-5 bg-amber-600 text-white font-black rounded-[24px] uppercase transition active:scale-95 shadow-lg shadow-amber-500/30 active:scale-95 transition tracking-widest text-xs">Enregistrer</button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {selectedContact && (() => {
         const partnerTx = transactions.filter((t:any) => t.contactId === selectedContact.id);
         const txCount = partnerTx.length;
@@ -922,102 +757,40 @@ export default function MoneyHubApp({
           { key: 'PAYABLE', label: 'Dettes', val: selectedContact.payableBalanceUsd, tnd: 0, style: 'rose', icon: <ArrowUpRight className="h-4 w-4 rotate-180" />, note: 'Je lui dois', explain: 'DETTE = tu lui dois de l\'argent. C\'est un montant que tu dois lui payer.' },
         ];
         const activeExplain = drawerTypeFilter ? breakdown.find(b => b.key === drawerTypeFilter) : null;
-        const startOpForPartner = () => {
-          setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' });
-          setActiveModal('add_tx');
-        };
+        const startOpForPartner = () => { setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); };
         const closeDrawer = () => { setSelectedContact(null); setDrawerTypeFilter(null); };
         return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={closeDrawer}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-400 shadow-2xl shadow-emerald-500/5" onClick={e => e.stopPropagation()}>
-
-            {/* HERO HEADER — colored by net position */}
             <div className={`relative overflow-hidden px-7 pt-7 pb-8 border-b border-white/5 ${positive ? 'bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent' : 'bg-gradient-to-br from-rose-500/10 via-transparent to-transparent'}`}>
               <div className={`absolute -top-8 -right-6 opacity-[0.07] pointer-events-none ${positive ? 'text-emerald-400' : 'text-rose-400'}`}><Coins className="h-40 w-40" /></div>
               <div className="flex justify-between items-start relative">
-                <div className="flex items-center gap-4 min-w-0">
-                  <span className="text-5xl p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-3xl shadow-xl shrink-0">{selectedContact.emoji}</span>
-                  <div className="min-w-0">
-                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none truncate">{selectedContact.name}</h3>
-                    <p className="text-[10px] text-neutral-400 uppercase font-black tracking-[0.25em] mt-2 truncate">{selectedContact.country || 'GLOBAL'}</p>
-                  </div>
-                </div>
+                <div className="flex items-center gap-4 min-w-0"><span className="text-5xl p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-3xl shadow-xl shrink-0">{selectedContact.emoji}</span><div className="min-w-0"><h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none truncate">{selectedContact.name}</h3><p className="text-[10px] text-neutral-400 uppercase font-black tracking-[0.25em] mt-2 truncate">{selectedContact.country || 'GLOBAL'}</p></div></div>
                 <button onClick={closeDrawer} className="p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90 shadow-lg shrink-0"><X className="h-5 w-5" /></button>
               </div>
-              <div className="relative mt-7">
-                <p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.25em] mb-1">Position Nette</p>
-                <p className={`font-black tracking-tighter leading-none break-words text-4xl ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p>
-                {tnd > 0.01 && <p className="text-amber-400 font-black text-sm tracking-tighter mt-1.5">+ {formatRawCurrency(tnd, 'TND')} <span className="text-neutral-500 text-[10px]">(local)</span></p>}
-              </div>
+              <div className="relative mt-7"><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.25em] mb-1">Position Nette</p><p className={`font-black tracking-tighter leading-none break-words text-4xl ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p>{tnd > 0.01 && <p className="text-amber-400 font-black text-sm tracking-tighter mt-1.5">+ {formatRawCurrency(tnd, 'TND')} <span className="text-neutral-500 text-[10px]">(local)</span></p>}</div>
             </div>
-
-            {/* QUICK ACTIONS */}
-            <div className="px-7 pt-6 flex gap-3">
-              <button onClick={startOpForPartner} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 active:scale-[0.97] transition tracking-widest"><Plus className="h-4 w-4 stroke-[3]" /> Opération</button>
-              <button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button>
-            </div>
-
-            {/* BREAKDOWN — clickable pills that filter the timeline + explain the term */}
+            <div className="px-7 pt-6 flex gap-3"><button onClick={startOpForPartner} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 active:scale-[0.97] transition tracking-widest"><Plus className="h-4 w-4 stroke-[3]" /> Opération</button><button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button></div>
             <div className="px-7 pt-6 grid grid-cols-3 gap-2.5">
               {breakdown.map(b => {
-                const showUsd = b.key !== 'HELD' || b.val > 0.01 || b.tnd <= 0.01;
-                const active = drawerTypeFilter === b.key;
+                const showUsd = b.key !== 'HELD' || b.val > 0.01 || b.tnd <= 0.01; const active = drawerTypeFilter === b.key;
                 return (
-                <button key={b.key} onClick={() => setDrawerTypeFilter(active ? null : b.key)} className={`text-left p-3.5 rounded-2xl border bg-${b.style}-500/5 flex flex-col gap-2 active:scale-[0.97] transition cursor-pointer ${active ? `border-${b.style}-500/60 ring-2 ring-${b.style}-500/40` : `border-${b.style}-500/20 hover:border-${b.style}-500/40`}`}>
-                  <span className={`text-${b.style}-400 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider`}>{b.icon}{b.label}</span>
-                  {showUsd && <p className={`text-${b.style}-400 font-black text-base tracking-tighter break-words leading-none`}>{formatUSD(b.val)}</p>}
-                  {b.key === 'HELD' && b.tnd > 0.01 && <p className={`text-amber-400 font-black tracking-tighter break-words leading-none ${showUsd ? 'text-[11px]' : 'text-base'}`}>{formatRawCurrency(b.tnd, 'TND')}</p>}
-                  <span className={`text-[8px] font-black uppercase tracking-wider ${active ? `text-${b.style}-400` : 'text-neutral-500'}`}>{b.note}</span>
-                </button>
+                <button key={b.key} onClick={() => setDrawerTypeFilter(active ? null : b.key)} className={`text-left p-3.5 rounded-2xl border bg-${b.style}-500/5 flex flex-col gap-2 active:scale-[0.97] transition cursor-pointer ${active ? `border-${b.style}-500/60 ring-2 ring-${b.style}-500/40` : `border-${b.style}-500/20 hover:border-${b.style}-500/40`}`}><span className={`text-${b.style}-400 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider`}>{b.icon}{b.label}</span>{showUsd && <p className={`text-${b.style}-400 font-black text-base tracking-tighter break-words leading-none`}>{formatUSD(b.val)}</p>}{b.key === 'HELD' && b.tnd > 0.01 && <p className={`text-amber-400 font-black tracking-tighter break-words leading-none ${showUsd ? 'text-[11px]' : 'text-base'}`}>{formatRawCurrency(b.tnd, 'TND')}</p>}<span className={`text-[8px] font-black uppercase tracking-wider ${active ? `text-${b.style}-400` : 'text-neutral-500'}`}>{b.note}</span></button>
                 );
               })}
             </div>
-
-            {/* EXPLANATION BANNER — appears when a pill is selected */}
-            {activeExplain && (
-              <div className={`mx-7 mt-4 p-4 rounded-2xl border bg-${activeExplain.style}-500/5 border-${activeExplain.style}-500/20 flex items-start gap-3 animate-in fade-in duration-200`}>
-                <span className={`text-${activeExplain.style}-400 shrink-0 mt-0.5`}>{activeExplain.icon}</span>
-                <p className="text-[11px] font-bold text-neutral-300 leading-relaxed">{activeExplain.explain}</p>
-              </div>
-            )}
-
-            {/* TIMELINE */}
+            {activeExplain && <div className={`mx-7 mt-4 p-4 rounded-2xl border bg-${activeExplain.style}-500/5 border-${activeExplain.style}-500/20 flex items-start gap-3 animate-in fade-in duration-200`}><span className={`text-${activeExplain.style}-400 shrink-0 mt-0.5`}>{activeExplain.icon}</span><p className="text-[11px] font-bold text-neutral-300 leading-relaxed">{activeExplain.explain}</p></div>}
             <div className="px-7 pt-8 pb-10 flex flex-col gap-4">
-              <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
-                <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique{drawerTypeFilter && <span className="text-neutral-500">· {breakdown.find(b=>b.key===drawerTypeFilter)?.label}</span>}</h4>
-                {drawerTypeFilter
-                  ? <button onClick={() => setDrawerTypeFilter(null)} className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1">Tout voir <X className="h-3 w-3" /></button>
-                  : <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>}
-              </div>
+              <div className="flex items-center justify-between border-b border-neutral-900 pb-3"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique{drawerTypeFilter && <span className="text-neutral-500">· {breakdown.find(b=>b.key===drawerTypeFilter)?.label}</span>}</h4>{drawerTypeFilter ? <button onClick={() => setDrawerTypeFilter(null)} className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1">Tout voir <X className="h-3 w-3" /></button> : <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>}</div>
               {(() => {
                 const shown = drawerTypeFilter ? partnerTx.filter((t:any) => t.type === drawerTypeFilter) : partnerTx;
-                if (shown.length === 0) return (
-                <EmptyState icon={<ArrowLeftRight className="h-8 w-8" />} title="Aucune opération" subtitle={drawerTypeFilter ? "Aucune opération de ce type pour ce partenaire." : "Touchez « Opération » ci-dessus pour enregistrer la première transaction de ce partenaire."} />
-                );
-                return (
-              <div className="flex flex-col gap-3">
-                {shown.slice(0,30).map((t:any) => {
-                  const st = getTransactionTypeStyle(t.type);
-                  const dotColor = st.style === 'blue' ? 'bg-blue-500' : st.style === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
-                  const txtColor = st.style === 'blue' ? 'text-blue-400' : st.style === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
+                if (shown.length === 0) return <EmptyState icon={<ArrowLeftRight className="h-8 w-8" />} title="Aucune opération" subtitle={drawerTypeFilter ? "Aucune opération de ce type." : "Touchez « Opération » pour commencer."} />;
+                return <div className="flex flex-col gap-3">{shown.slice(0,30).map((t:any) => {
+                  const st = getTransactionTypeStyle(t.type); const dotColor = st.style === 'blue' ? 'bg-blue-500' : st.style === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500'; const txtColor = st.style === 'blue' ? 'text-blue-400' : st.style === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
                   return (
-                  <div key={t.id} className="group relative p-4 pl-5 bg-neutral-900/30 border border-neutral-800 rounded-3xl flex justify-between items-center gap-3 hover:border-neutral-700 hover:bg-neutral-900/50 transition">
-                    <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${dotColor}`} />
-                    <div className="flex flex-col gap-1 min-w-0">
-                      <p className="text-sm font-black text-neutral-100 uppercase tracking-tight truncate">{t.category}</p>
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${txtColor}`}>{st.label}</p>
-                      <p className="text-[10px] text-neutral-600 font-black uppercase mt-0.5">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                    </div>
-                    <div className="text-right flex flex-col gap-0.5 shrink-0">
-                      <p className="text-base font-black text-white tracking-tighter leading-none break-words">{formatRawCurrency(t.amount, t.currencyCode)}</p>
-                      {t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}
-                    </div>
-                    <button onClick={() => handleDeleteTx(t.id)} className="p-2 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl active:scale-90 transition shrink-0" title="Supprimer"><Trash2 className="h-4 w-4" /></button>
-                  </div>
+                    <div key={t.id} className="group relative p-4 pl-5 bg-neutral-900/30 border border-neutral-800 rounded-3xl flex justify-between items-center gap-3 hover:border-neutral-700 hover:bg-neutral-900/50 transition"><span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${dotColor}`} /><div className="flex flex-col gap-1 min-w-0"><p className="text-sm font-black text-neutral-100 uppercase tracking-tight truncate">{t.category}</p><p className={`text-[10px] font-black uppercase tracking-widest ${txtColor}`}>{st.label}</p><p className="text-[10px] text-neutral-600 font-black uppercase mt-0.5">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div><div className="text-right flex flex-col gap-0.5 shrink-0"><p className="text-base font-black text-white tracking-tighter leading-none break-words">{formatRawCurrency(t.amount, t.currencyCode)}</p>{t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}</div><button onClick={() => handleDeleteTxLoc(t.id)} className="p-2 text-rose-500/30 hover:text-rose-500 active:scale-90 transition shrink-0"><Trash2 className="h-4 w-4" /></button></div>
                   );
-                })}
-              </div>
-                );
+                })}</div>;
               })()}
             </div>
           </div>
@@ -1025,37 +798,16 @@ export default function MoneyHubApp({
         );
       })()}
 
-      {/* NOTIFICATION CENTER */}
       {showNotifications && (
         <div className="fixed inset-0 z-[210] bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setShowNotifications(false)}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-300 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10">
-              <div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{dueReminders.length > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length}</span>}</div>
-              <button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button>
-            </div>
+            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10"><div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{dueReminders.length > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length}</span>}</div><button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
             <div className="px-7 py-6 flex flex-col gap-4">
-              {dueReminders.length === 0 && (
-                <EmptyState icon={<CheckCircle className="h-8 w-8" />} title="Tout est à jour" subtitle="Aucun paiement attendu aujourd'hui. Les échéances arrivées à terme apparaîtront ici." />
-              )}
+              {dueReminders.length === 0 && <EmptyState icon={<CheckCircle className="h-8 w-8" />} title="Tout est à jour" subtitle="Aucun paiement attendu aujourd'hui." />}
               {dueReminders.map((r:any) => {
                 const overdue = new Date(r.dueDate) < new Date(new Date().toDateString());
                 return (
-                <div key={r.id} className={`p-5 rounded-[28px] border flex flex-col gap-4 shadow-lg ${overdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}>
-                  <div className="flex justify-between items-start gap-3">
-                    <div className="min-w-0">
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${overdue ? 'text-rose-400' : 'text-amber-400'}`}>{overdue ? '⚠ En retard' : '🔔 Échéance aujourd\'hui'}</p>
-                      <p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{r.contact?.name}</p>
-                      <p className="text-2xl font-black text-white tracking-tighter mt-1 break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p>
-                      {r.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black">≈ {formatUSD(r.amountInUsd)}</p>}
-                      <p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {new Date(r.dueDate).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })}</p>
-                      {r.note && <p className="text-[11px] text-neutral-500 font-bold mt-1 italic">{r.note}</p>}
-                    </div>
-                  </div>
-                  <div className="flex gap-2.5">
-                    <button onClick={() => handleConfirmReceived(r)} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Reçu</button>
-                    <button onClick={() => handlePostpone(r)} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Reporter</button>
-                  </div>
-                </div>
+                <div key={r.id} className={`p-5 rounded-[28px] border flex flex-col gap-4 shadow-lg ${overdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}><div className="flex justify-between items-start gap-3"><div className="min-w-0"><p className={`text-[10px] font-black uppercase tracking-widest ${overdue ? 'text-rose-400' : 'text-amber-400'}`}>{overdue ? '⚠ En retard' : '🔔 Échéance aujourd\'hui'}</p><p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{r.contact?.name}</p><p className="text-2xl font-black text-white tracking-tighter mt-1 break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p>{r.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black">≈ {formatUSD(r.amountInUsd)}</p>}<p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {new Date(r.dueDate).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })}</p>{r.note && <p className="text-[11px] text-neutral-500 font-bold mt-1 italic">{r.note}</p>}</div></div><div className="flex gap-2.5"><button onClick={() => handleConfirmReceived(r)} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Reçu</button><button onClick={() => handlePostpone(r)} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Reporter</button></div></div>
                 );
               })}
             </div>
@@ -1063,7 +815,6 @@ export default function MoneyHubApp({
         </div>
       )}
 
-      {/* POSTPONE MODAL */}
       {postponeTarget && (
         <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPostponeTarget(null)}>
           <div className="w-full max-w-sm bg-[#080808] border border-amber-500/40 rounded-[40px] p-8 flex flex-col gap-6 ring-1 ring-amber-500/10" onClick={e => e.stopPropagation()}>
@@ -1084,19 +835,6 @@ export default function MoneyHubApp({
           </div>
         </div>
       )}
-
-      {lightboxImage && (
-        <div className="fixed inset-0 z-[230] bg-black/98 flex items-center justify-center p-4 cursor-pointer animate-in fade-in duration-500 shadow-2xl" onClick={() => setLightboxImage(null)}>
-          <button className="absolute top-10 right-10 p-4 bg-neutral-900 border border-neutral-800 text-white rounded-full shadow-2xl transition active:scale-90 hover:bg-neutral-800 border-2 border-white/5"><X className="h-8 w-8" /></button>
-          <img src={lightboxImage} alt="Pièce Jointe" className="max-w-full max-h-[85vh] rounded-[64px] object-contain border-8 border-neutral-900 shadow-2xl shadow-emerald-500/10 ring-1 ring-white/10" />
-        </div>
-      )}
     </div>
   );
-
-  function handleContactFormDeleteClick(id: string) {
-    const contact = contacts.find((c:any) => c.id === id);
-    if (!contact) return;
-    handleEraseAccount(id, contact.name);
-  }
 }
