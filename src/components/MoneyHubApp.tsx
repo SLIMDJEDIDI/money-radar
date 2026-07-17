@@ -762,7 +762,7 @@ export default function MoneyHubApp({
                           {isPending && currentUser.role === 'admin' && (
                             <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Confirmer l'encaissement">✓</button>
                           )}
-                          <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>
+                          {currentUser.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
                         </div>
                       </div>
                     );

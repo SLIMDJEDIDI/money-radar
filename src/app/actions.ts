@@ -425,7 +425,7 @@ export async function settleTndMovement(id: string) {
 
 export async function deleteTndMovement(id: string) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     await prisma.$transaction(async (tx) => {
       const old = await tx.hubTndMovement.findUnique({ where: { id } });
       if (!old) return;
