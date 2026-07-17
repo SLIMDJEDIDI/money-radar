@@ -13,7 +13,7 @@ import {
   confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
-  createTndMovement, deleteTndMovement
+  createTndMovement, deleteTndMovement, settleTndMovement
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
@@ -85,7 +85,7 @@ EmptyState.displayName = 'EmptyState';
 
 export default function MoneyHubApp({
   initialContacts, initialActiveCurrencies, initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics, initialCategories,
-  initialTndMovements, initialTndForecast
+  initialTndMovements, initialTndForecast, initialTndUpcoming, initialTndDueSoon, initialTndOverdue
 }: any) {
   // --- AUTH & THEME ---
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -123,8 +123,11 @@ export default function MoneyHubApp({
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
   const [metrics, setMetrics] = useState(initialMetrics);
   const [reminders, setReminders] = useState(initialReminders.map((r:any) => ({...r, dueDate: new Date(r.dueDate)})));
-  const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt)})) || []);
+  const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })) || []);
   const [tndForecast, setTndForecast] = useState(initialTndForecast);
+  const [tndUpcoming, setTndUpcoming] = useState<any[]>((initialTndUpcoming || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
+  const [tndDueSoon, setTndDueSoon] = useState<any[]>((initialTndDueSoon || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
+  const [tndOverdue, setTndOverdue] = useState<any[]>((initialTndOverdue || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
@@ -157,7 +160,7 @@ export default function MoneyHubApp({
   const [inlineNewPartner, setInlineNewPartner] = useState(false);
   const [inlinePartnerName, setInlinePartnerName] = useState('');
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
-  const [tndForm, setTndForm] = useState({ amount: '', type: 'IN', note: '' });
+  const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   // TND Treasury filters
   const [tndSearch, setTndSearch] = useState('');
   const [tndPeriod, setTndPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
@@ -236,8 +239,12 @@ export default function MoneyHubApp({
         setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
         setMetrics(data.metrics);
         setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
-        setTndMovements(data.tndMovements?.map((m: any) => ({ ...m, createdAt: new Date(m.createdAt) })) || []);
+        const hydrateTnd = (m: any) => ({ ...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null });
+        setTndMovements((data.tndMovements || []).map(hydrateTnd));
         setTndForecast(data.tndForecast);
+        setTndUpcoming((data.tndUpcoming || []).map(hydrateTnd));
+        setTndDueSoon((data.tndDueSoon || []).map(hydrateTnd));
+        setTndOverdue((data.tndOverdue || []).map(hydrateTnd));
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
@@ -297,11 +304,31 @@ export default function MoneyHubApp({
     if (!tndForm.amount || !tndForm.note.trim()) return;
     startTransition(async () => {
       const amount = parseFloat(tndForm.amount);
-      addOptimisticTndMovement({ id: 'temp', amount, type: tndForm.type, note: tndForm.note, performedBy: currentUser.username, createdAt: new Date() });
-      const data = new FormData(); data.append('amount', tndForm.amount); data.append('type', tndForm.type); data.append('note', tndForm.note);
+      const scheduled = (tndForm as any).scheduledFor as string | undefined;
+      const isPlanned = !!scheduled;
+      // Optimistic entry — planned ones show up as unsettled so they don't inflate the balance
+      addOptimisticTndMovement({ id: 'temp-' + Date.now(), amount, type: tndForm.type, note: tndForm.note, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled!) : null, isSettled: !isPlanned });
+      const data = new FormData();
+      data.append('amount', tndForm.amount);
+      data.append('type', tndForm.type);
+      data.append('note', tndForm.note);
+      if (isPlanned) data.append('scheduledFor', scheduled!);
       const res: any = await createTndMovement(data);
-      if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleSettleTndMovement = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Confirmer l\'encaissement ?',
+      description: 'Ce mouvement sera marqué comme réglé et impactera immédiatement le solde de trésorerie.',
+      confirmText: 'Confirmer',
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        startTransition(async () => { await settleTndMovement(id); await refreshHubState(); });
+      },
     });
   };
 
@@ -429,10 +456,12 @@ export default function MoneyHubApp({
   }, [reminders]);
 
   useEffect(() => {
-    if (!currentUser || dueReminders.length === 0) return;
+    if (!currentUser) return;
+    const tndAlertsCount = currentUser.role === 'admin' ? (tndDueSoon.length + tndOverdue.length) : 0;
+    if (dueReminders.length === 0 && tndAlertsCount === 0) return;
     const today = new Date().toDateString();
     if (sessionStorage.getItem('hub_notif_seen') !== today) { setShowNotifications(true); sessionStorage.setItem('hub_notif_seen', today); }
-  }, [currentUser, dueReminders.length]);
+  }, [currentUser, dueReminders.length, tndDueSoon.length, tndOverdue.length]);
 
   // Reset inline partner creation whenever the operation modal is not open
   useEffect(() => { if (activeModal !== 'add_tx') { setInlineNewPartner(false); setInlinePartnerName(''); setInlinePartnerCountry(''); } }, [activeModal]);
@@ -475,9 +504,12 @@ export default function MoneyHubApp({
               <div className="hidden sm:block"><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
             </div>
             <div className="flex gap-2">
-              {currentUser.role === 'admin' && (
-                <button onClick={() => setShowNotifications(true)} className="relative p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><Bell className={`h-4 w-4 ${dueReminders.length > 0 ? 'text-amber-400' : ''}`} />{dueReminders.length > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black">{dueReminders.length}</span>}</button>
-              )}
+              {currentUser.role === 'admin' && (() => {
+                const totalAlerts = dueReminders.length + tndDueSoon.length + tndOverdue.length;
+                return (
+                  <button onClick={() => setShowNotifications(true)} className="relative p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><Bell className={`h-4 w-4 ${totalAlerts > 0 ? 'text-amber-400' : ''}`} />{totalAlerts > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black">{totalAlerts}</span>}</button>
+                );
+              })()}
               <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90">{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button>
               <button onClick={refreshHubState} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90"><RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} /></button>
               <button onClick={handleLogout} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 text-rose-500 transition active:scale-90"><LogOut className="h-4 w-4" /></button>
@@ -565,7 +597,7 @@ export default function MoneyHubApp({
           {
             const ordered = [...optimisticTndMovements].reverse(); // oldest first
             let acc = 0;
-            for (const m of ordered) { acc += (m.type === 'IN' ? m.amount : -m.amount); balanceById[m.id] = acc; }
+            for (const m of ordered) { if (m.isSettled !== false) { acc += (m.type === 'IN' ? m.amount : -m.amount); } balanceById[m.id] = acc; }
           }
           // Filter chain
           const now = Date.now();
@@ -590,6 +622,49 @@ export default function MoneyHubApp({
           const filteredOut = filtered.filter((m:any) => m.type === 'OUT').reduce((s:number,m:any) => s+m.amount, 0);
           return (
             <div className="flex flex-col gap-6 pb-20">
+              {/* SCHEDULED ALERT BANNER — admin only, appears from J-1 or overdue */}
+              {currentUser.role === 'admin' && (tndDueSoon.length > 0 || tndOverdue.length > 0) && (
+                <div className="relative overflow-hidden bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-orange-500/10 border-2 border-amber-500/40 rounded-[36px] p-6 shadow-2xl shadow-amber-500/10 animate-in slide-in-from-top duration-300">
+                  <div className="absolute -top-12 -right-12 opacity-10 pointer-events-none text-amber-400"><Bell className="h-40 w-40" /></div>
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="p-3 bg-amber-500/20 rounded-2xl ring-1 ring-amber-500/40 animate-pulse"><Bell className="h-5 w-5 text-amber-300" /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.25em]">Rappel Trésorerie</p>
+                      <h3 className="text-xl font-black text-white leading-tight mt-1">
+                        {tndOverdue.length > 0 ? `${tndOverdue.length} mouvement${tndOverdue.length>1?'s':''} en retard` : `${tndDueSoon.length} mouvement${tndDueSoon.length>1?'s':''} prévu${tndDueSoon.length>1?'s':''} sous 24h`}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {[...tndOverdue, ...tndDueSoon.filter(m => !tndOverdue.some(o => o.id === m.id))].slice(0, 4).map((m: any) => {
+                      const isOverdue = m.scheduledFor && new Date(m.scheduledFor).getTime() < Date.now();
+                      return (
+                        <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-amber-500/20 rounded-2xl">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center ${m.type === 'IN' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                              {m.type === 'IN' ? <Plus className="h-4 w-4 stroke-[3]" /> : <ArrowUpRight className="h-4 w-4 stroke-[3] rotate-90" />}
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <p className="text-sm font-black text-white truncate">{m.note}</p>
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-300' : 'text-amber-300'}`}>
+                                {isOverdue ? '⚠ En retard depuis' : '📅 Prévu'} {m.scheduledFor ? new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <p className={`text-base font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                            <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95">Confirmer</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(tndDueSoon.length + tndOverdue.length) > 4 && (
+                      <p className="text-center text-[10px] font-black text-amber-300 uppercase tracking-widest pt-2">+ {(tndDueSoon.length + tndOverdue.length) - 4} autre{(tndDueSoon.length + tndOverdue.length) - 4 > 1 ? 's' : ''} — voir le journal</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* HERO — balance + today + forecast */}
               <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
                 <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
@@ -663,19 +738,30 @@ export default function MoneyHubApp({
                 <div className="flex flex-col gap-3">
                   {filtered.map((m: any) => {
                     const running = balanceById[m.id] ?? 0;
+                    const isPending = m.isSettled === false;
                     return (
-                      <div key={m.id} className="group relative p-5 pl-6 bg-neutral-900/40 border border-neutral-800 rounded-[32px] flex justify-between items-center gap-4 transition hover:border-neutral-700">
-                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
+                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-                          <p className="text-sm font-bold text-neutral-200 leading-tight break-words">{m.note}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}
+                            <p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p>
+                          </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
+                            {isPending && m.scheduledFor ? (
+                              <p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>
+                            ) : (
+                              <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
+                            )}
                             {m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}
-                            <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>
+                            {!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}
                           </div>
                         </div>
-                        <div className="text-right shrink-0 flex items-center gap-4">
-                          <p className={`text-lg font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                        <div className="text-right shrink-0 flex items-center gap-3">
+                          <p className={`text-lg font-black tracking-tighter ${isPending ? 'text-amber-300' : m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                          {isPending && currentUser.role === 'admin' && (
+                            <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Confirmer l'encaissement">✓</button>
+                          )}
                           <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>
                         </div>
                       </div>
@@ -870,9 +956,22 @@ export default function MoneyHubApp({
           <div className="w-full max-w-sm bg-[#080808] border border-blue-500/40 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-blue-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{tndForm.type === 'IN' ? 'Encaisser TND' : 'Décaissement TND'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleAddTndMovement} className="flex flex-col gap-5">
-              <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div></div>
+              <div className="flex gap-3 w-full">
+                <input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} />
+                <div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div>
+              </div>
               <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-blue-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={tndForm.note} onChange={e => setTndForm(p=>({...p, note: e.target.value}))} />
-              <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Confirmer</button></div>
+              <div className="flex flex-col gap-2">
+                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label>
+                <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={(tndForm as any).scheduledFor || ''} onChange={e => setTndForm(p=>({...(p as any), scheduledFor: e.target.value}))} />
+                {(tndForm as any).scheduledFor && (
+                  <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>
+                )}
+              </div>
+              <div className="flex gap-4 mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
+                <button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{(tndForm as any).scheduledFor ? 'Planifier' : 'Confirmer'}</button>
+              </div>
             </form>
           </div>
         </div>
@@ -960,9 +1059,36 @@ export default function MoneyHubApp({
       {showNotifications && (
         <div className="fixed inset-0 z-[210] bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setShowNotifications(false)}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-300 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10"><div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{dueReminders.length > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length}</span>}</div><button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
+            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10"><div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{(dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)) > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)}</span>}</div><button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
             <div className="px-7 py-6 flex flex-col gap-4">
-              {dueReminders.length === 0 && <EmptyState icon={<CheckCircle className="h-8 w-8" />} title="Tout est à jour" subtitle="Aucun paiement attendu aujourd'hui." />}
+              {/* TND scheduled movements — admin only */}
+              {currentUser.role === 'admin' && (tndDueSoon.length > 0 || tndOverdue.length > 0) && (
+                <div className="flex flex-col gap-3 mb-2">
+                  <div className="flex items-center gap-2 px-1"><Coins className="h-4 w-4 text-blue-400" /><h4 className="text-[10px] font-black text-blue-300 uppercase tracking-[0.25em]">Trésorerie TND</h4></div>
+                  {[...tndOverdue, ...tndDueSoon.filter(m => !tndOverdue.some(o => o.id === m.id))].map((m: any) => {
+                    const isOverdue = m.scheduledFor && new Date(m.scheduledFor).getTime() < Date.now();
+                    return (
+                      <div key={m.id} className={`p-5 rounded-[28px] border flex flex-col gap-3 shadow-lg ${isOverdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}>
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>{isOverdue ? '⚠ En retard' : '🔔 Prévu sous 24h'} · {m.type === 'IN' ? 'Encaissement' : 'Décaissement'}</p>
+                            <p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{m.note}</p>
+                            <p className={`text-2xl font-black tracking-tighter mt-1 break-words ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                            <p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {m.scheduledFor ? new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}</p>
+                            <p className="text-[10px] text-neutral-500 font-black mt-1">par {m.performedBy}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2.5">
+                          <button onClick={() => { setShowNotifications(false); handleSettleTndMovement(m.id); }} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Confirmer</button>
+                          <button onClick={() => { setShowNotifications(false); setActiveSection('treasury'); }} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Coins className="h-4 w-4" /> Voir</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {dueReminders.length > 0 && <div className="mt-2 mb-1 border-t border-neutral-900" />}
+                </div>
+              )}
+              {dueReminders.length === 0 && (currentUser.role !== 'admin' || (tndDueSoon.length === 0 && tndOverdue.length === 0)) && <EmptyState icon={<CheckCircle className="h-8 w-8" />} title="Tout est à jour" subtitle="Aucun paiement attendu aujourd'hui." />}
               {dueReminders.map((r:any) => {
                 const overdue = new Date(r.dueDate) < new Date(new Date().toDateString());
                 return (

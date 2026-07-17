@@ -21,6 +21,9 @@ export default async function Page() {
         initialMetrics={data.metrics}
         initialTndMovements={data.tndMovements}
         initialTndForecast={data.tndForecast}
+        initialTndUpcoming={data.tndUpcoming}
+        initialTndDueSoon={data.tndDueSoon}
+        initialTndOverdue={data.tndOverdue}
       />
     </main>
   );

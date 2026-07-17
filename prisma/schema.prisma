@@ -119,10 +119,14 @@ model HubTndMovement {
   type        String   // "IN" (Entrée), "OUT" (Sortie)
   note        String   // Note obligatoire pour la traçabilité
   performedBy String   // Nom de l'utilisateur ayant saisi le mouvement
+  scheduledFor DateTime? // Si défini : mouvement PLANIFIÉ pour une date future
+  isSettled   Boolean  @default(true) // false = en attente (pas encore dans le solde)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([createdAt])
   @@index([type])
+  @@index([scheduledFor])
+  @@index([isSettled])
 }
 

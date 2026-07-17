@@ -41,5 +41,19 @@ export async function GET() {
     safe('HubTndMovement', () => prisma.hubTndMovement.count()),
   ]);
 
-  return NextResponse.json({ dbUrlPresent, dbUrlProjectRef, results });
+  // ONE-SHOT MIGRATION — safe idempotent ALTER TABLE (adds scheduled/settled columns to TND)
+  // Non-destructive: ADD COLUMN IF NOT EXISTS, DEFAULT preserves existing rows.
+  let migration: unknown = null;
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "HubTndMovement" ADD COLUMN IF NOT EXISTS "scheduledFor" TIMESTAMP(3);`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "HubTndMovement" ADD COLUMN IF NOT EXISTS "isSettled" BOOLEAN NOT NULL DEFAULT true;`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubTndMovement_scheduledFor_idx" ON "HubTndMovement"("scheduledFor");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubTndMovement_isSettled_idx" ON "HubTndMovement"("isSettled");`);
+    const cols = await prisma.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_name = 'HubTndMovement' ORDER BY column_name;`);
+    migration = { ok: true, columns: cols };
+  } catch (e: any) {
+    migration = { ok: false, error: String(e?.message || e).slice(0, 300) };
+  }
+
+  return NextResponse.json({ dbUrlPresent, dbUrlProjectRef, migration, results });
 }

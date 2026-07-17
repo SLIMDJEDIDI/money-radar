@@ -355,19 +355,37 @@ export async function createTndMovement(formData: FormData) {
     const amount = parseFloat(formData.get('amount') as string);
     const type = formData.get('type') as string; // "IN" or "OUT"
     const note = (formData.get('note') as string || '').trim();
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
 
     if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+
+    // Parse scheduled date if provided; a future date makes the movement UNSETTLED (pending).
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const d = new Date(scheduledForRaw);
+      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      // Only future dates create a pending movement; past/today dates settle immediately
+      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+      if (d.getTime() > startOfToday.getTime()) {
+        scheduledFor = d;
+        isSettled = false;
+      }
+    }
 
     await prisma.$transaction(async (tx) => {
       const movement = await tx.hubTndMovement.create({
-        data: { amount, type, note, performedBy: session.username },
+        data: { amount, type, note, performedBy: session.username, scheduledFor, isSettled },
       });
 
       await logAudit(tx, {
         entityType: 'TREASURY',
         entityId: movement.id,
-        action: type === 'IN' ? 'TND_IN' : 'TND_OUT',
-        details: `${type === 'IN' ? 'Entrée' : 'Sortie'} de ${amount} TND: ${note}`,
+        action: !isSettled ? (type === 'IN' ? 'TND_IN_SCHEDULED' : 'TND_OUT_SCHEDULED') : (type === 'IN' ? 'TND_IN' : 'TND_OUT'),
+        details: !isSettled
+          ? `${type === 'IN' ? 'Entrée' : 'Sortie'} PLANIFIÉE ${amount} TND pour ${scheduledFor!.toLocaleDateString('fr-FR')}: ${note}`
+          : `${type === 'IN' ? 'Entrée' : 'Sortie'} de ${amount} TND: ${note}`,
         modifiedBy: session.username,
       });
     });
@@ -379,6 +397,29 @@ export async function createTndMovement(formData: FormData) {
       return { success: false, error: 'Session expirée', code: error.message };
     }
     return { success: false, error: 'Erreur lors de l\'enregistrement' };
+  }
+}
+
+export async function settleTndMovement(id: string) {
+  try {
+    const session = await requireSession();
+    await prisma.$transaction(async (tx) => {
+      const m = await tx.hubTndMovement.findUnique({ where: { id } });
+      if (!m) return;
+      if (m.isSettled) return;
+      await tx.hubTndMovement.update({ where: { id }, data: { isSettled: true } });
+      await logAudit(tx, {
+        entityType: 'TREASURY',
+        entityId: id,
+        action: 'TND_SETTLE',
+        details: `Mouvement TND confirmé encaissé (${m.amount} ${m.type})`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: 'Action non autorisée' };
   }
 }
 
