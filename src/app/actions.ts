@@ -710,12 +710,18 @@ export async function createAssistantUser(formData: FormData) {
   }
 }
 
+// Owner accounts — permanent, cannot be deleted or have password reset by others.
+const PROTECTED_USERNAMES = new Set(['ff', 'ss']);
+
 export async function deleteAssistantUser(id: string) {
   try {
     const session = await requireAdmin();
     const target = await prisma.hubUser.findUnique({ where: { id } });
     if (!target) return { success: false, error: 'Utilisateur introuvable' };
     if (target.id === session.id) return { success: false, error: 'Impossible de supprimer votre propre compte' };
+    if (PROTECTED_USERNAMES.has(target.username.toLowerCase())) {
+      return { success: false, error: 'Ce compte propriétaire est protégé et ne peut pas être supprimé' };
+    }
     // Prevent deleting the very last admin (would lock everyone out)
     if (target.role === 'admin') {
       const adminCount = await prisma.hubUser.count({ where: { role: 'admin' } });
@@ -752,6 +758,11 @@ export async function changeUserPassword(formData: FormData) {
     const isSelf = session.id === uid;
     const isAdminActing = session.role === 'admin' && !isSelf;
     if (!isSelf && !isAdminActing) return { success: false, error: 'Action non autorisée' };
+
+    // Protected owner accounts can only change their OWN password
+    if (!isSelf && PROTECTED_USERNAMES.has(target.username.toLowerCase())) {
+      return { success: false, error: 'Ce compte propriétaire ne peut être modifié que par lui-même' };
+    }
 
     // Self-change (any role): verify old password. Admin resetting someone else's pw: no check.
     if (isSelf) {

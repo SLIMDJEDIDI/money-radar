@@ -886,12 +886,19 @@ export default function MoneyHubApp({
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {u.id !== currentUser.id && (
-                            <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: u.username })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${u.username}`}><KeyRound className="h-5 w-5" /></button>
-                          )}
-                          {u.id !== currentUser.id && (
-                            <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition" title={`Supprimer ${u.username}`}><Trash2 className="h-5 w-5" /></button>
-                          )}
+                          {(() => {
+                            const isProtected = ['ff','ss'].includes(u.username.toLowerCase());
+                            const isSelf = u.id === currentUser.id;
+                            return <>
+                              {isProtected && <span className="px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[8px] font-black uppercase tracking-widest" title="Compte propriétaire — protégé">🔒 Owner</span>}
+                              {!isSelf && !isProtected && (
+                                <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: u.username })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${u.username}`}><KeyRound className="h-5 w-5" /></button>
+                              )}
+                              {!isSelf && !isProtected && (
+                                <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition" title={`Supprimer ${u.username}`}><Trash2 className="h-5 w-5" /></button>
+                              )}
+                            </>;
+                          })()}
                         </div>
                       </div>
                     ))}
