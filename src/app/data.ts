@@ -81,14 +81,9 @@ export async function getHubDashboardData(searchQuery: string = '') {
     const pendingInflow = upcomingPending.filter(m => m.type === 'IN').reduce((s, m) => s + m.amount, 0);
     const pendingOutflow = upcomingPending.filter(m => m.type === 'OUT').reduce((s, m) => s + m.amount, 0);
 
-    // Simple Forecasting (TND) — historical flow (settled only) + net scheduled
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const recentMovements = tndMovements.filter(m => m.isSettled && m.createdAt >= thirtyDaysAgo);
-    const totalFlow = recentMovements.reduce((acc, m) => acc + (m.type === 'IN' ? m.amount : -m.amount), 0);
-    const avgDailyFlow = totalFlow / 30;
-    const tndForecast7Days = tndBalance + (avgDailyFlow * 7) + (pendingInflow - pendingOutflow);
-    const tndForecast30Days = tndBalance + (avgDailyFlow * 30) + (pendingInflow - pendingOutflow);
+    // Projected balance = current balance + net of USER-SCHEDULED movements only.
+    // No auto-extrapolation (historical averages give false precision).
+    const tndProjectedBalance = tndBalance + pendingInflow - pendingOutflow;
 
     // Per-contact TND held breakdown
     const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
@@ -166,11 +161,10 @@ export async function getHubDashboardData(searchQuery: string = '') {
       tndDueSoon: dueNowOrSoon,
       tndOverdue: overdue,
       tndForecast: {
-        avgDailyFlow,
-        forecast7Days: tndForecast7Days,
-        forecast30Days: tndForecast30Days,
+        projectedBalance: tndProjectedBalance,
         pendingInflow,
         pendingOutflow,
+        pendingCount: upcomingPending.length,
       },
       metrics: {
         totalAvoirs: totalAvoirsUsd,

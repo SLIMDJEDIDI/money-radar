@@ -673,8 +673,13 @@ export default function MoneyHubApp({
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
                   <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
                   <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.tndTodayOut, 'TND')}</p></div>
-                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+7</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast7Days || metrics.tndBalance, 'TND')}</p></div>
-                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Prévision J+30</p><p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(tndForecast?.forecast30Days || metrics.tndBalance, 'TND')}</p></div>
+                  {(tndUpcoming.length > 0) && (
+                    <div className="flex flex-col border-l border-white/10 pl-6">
+                      <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Solde Projeté</p>
+                      <p className="text-blue-300 font-black text-base tracking-tighter">{formatRawCurrency(metrics.tndBalance + (metrics.tndPendingIn || 0) - (metrics.tndPendingOut || 0), 'TND')}</p>
+                      <p className="text-[9px] text-neutral-500 font-black uppercase tracking-widest mt-0.5">{tndUpcoming.length} planifié{tndUpcoming.length>1?'s':''}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
