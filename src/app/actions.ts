@@ -685,13 +685,22 @@ export async function createAssistantUser(formData: FormData) {
     const session = await requireAdmin();
     const u = (formData.get('username') as string || '').toLowerCase().trim();
     const p = formData.get('password') as string || '';
-    if (!u || u.length < 3) return { success: false, error: 'Nom trop court (min 3 caractères)' };
-    if (!p || p.length < 6) return { success: false, error: 'Mot de passe trop court (min 6 caractères)' };
+    // Optional role — defaults to assistant for backward compat. Only admins can create admins.
+    const requestedRole = (formData.get('role') as string || 'assistant').toLowerCase();
+    const role = requestedRole === 'admin' ? 'admin' : 'assistant';
+    if (!u || u.length < 2) return { success: false, error: 'Nom trop court (min 2 caractères)' };
+    if (!p || p.length < 4) return { success: false, error: 'Mot de passe trop court (min 4 caractères)' };
     const exists = await prisma.hubUser.findUnique({ where: { username: u } });
     if (exists) return { success: false, error: 'Ce nom d’utilisateur existe déjà' };
     await prisma.$transaction(async (tx) => {
-      const created = await tx.hubUser.create({ data: { username: u, passwordHash: hashPassword(p), role: 'assistant' } });
-      await logAudit(tx, { entityType: 'USER', entityId: created.id, action: 'CREATE_ASSISTANT', details: `Assistant créé: ${u}`, modifiedBy: session.username });
+      const created = await tx.hubUser.create({ data: { username: u, passwordHash: hashPassword(p), role } });
+      await logAudit(tx, {
+        entityType: 'USER',
+        entityId: created.id,
+        action: role === 'admin' ? 'CREATE_ADMIN' : 'CREATE_ASSISTANT',
+        details: `${role === 'admin' ? 'Administrateur' : 'Assistant'} créé: ${u}`,
+        modifiedBy: session.username,
+      });
     });
     revalidatePath('/');
     return { success: true };
@@ -706,10 +715,20 @@ export async function deleteAssistantUser(id: string) {
     const session = await requireAdmin();
     const target = await prisma.hubUser.findUnique({ where: { id } });
     if (!target) return { success: false, error: 'Utilisateur introuvable' };
-    if (target.role === 'admin') return { success: false, error: 'Impossible de supprimer un administrateur' };
+    if (target.id === session.id) return { success: false, error: 'Impossible de supprimer votre propre compte' };
+    // Prevent deleting the very last admin (would lock everyone out)
+    if (target.role === 'admin') {
+      const adminCount = await prisma.hubUser.count({ where: { role: 'admin' } });
+      if (adminCount <= 1) return { success: false, error: 'Impossible de supprimer le dernier administrateur' };
+    }
     await prisma.$transaction(async (tx) => {
       await tx.hubUser.delete({ where: { id } });
-      await logAudit(tx, { entityType: 'USER', entityId: id, action: 'DELETE_ASSISTANT', details: `Assistant supprimé: ${target.username}`, modifiedBy: session.username });
+      await logAudit(tx, {
+        entityType: 'USER', entityId: id,
+        action: target.role === 'admin' ? 'DELETE_ADMIN' : 'DELETE_ASSISTANT',
+        details: `${target.role === 'admin' ? 'Administrateur' : 'Assistant'} supprimé: ${target.username}`,
+        modifiedBy: session.username,
+      });
     });
     revalidatePath('/');
     return { success: true };

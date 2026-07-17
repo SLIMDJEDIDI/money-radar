@@ -840,7 +840,7 @@ export default function MoneyHubApp({
             {currentUser.role === 'admin' && (
               <>
                 <div className="p-8 bg-neutral-900/40 border border-neutral-800 rounded-[40px] shadow-inner flex flex-col gap-6">
-                  <div className="flex items-center gap-3 text-emerald-400 border-b border-neutral-800 pb-5"><UserPlus className="h-5 w-5" /><h3 className="text-[10px] font-black uppercase tracking-widest">Nouvel Accès Assistant</h3></div>
+                  <div className="flex items-center gap-3 text-emerald-400 border-b border-neutral-800 pb-5"><UserPlus className="h-5 w-5" /><h3 className="text-[10px] font-black uppercase tracking-widest">Nouvel Utilisateur</h3></div>
                   <form onSubmit={async (e) => {
                     e.preventDefault();
                     const form = e.currentTarget;
@@ -849,9 +849,27 @@ export default function MoneyHubApp({
                     if (res.success) { form.reset(); await refreshHubState(); }
                     else alert(res.error || 'Erreur');
                   }} className="flex flex-col gap-4">
-                    <input name="username" required minLength={3} placeholder="NOM D'UTILISATEUR (min 3)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
-                    <input name="password" type="password" required minLength={6} placeholder="MOT DE PASSE (min 6)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
-                    <button type="submit" disabled={isPending} className="py-5 bg-white text-black font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl disabled:opacity-50">Créer l'accès</button>
+                    <input name="username" required minLength={2} placeholder="NOM D'UTILISATEUR" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
+                    <input name="password" type="password" required minLength={4} placeholder="MOT DE PASSE" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
+                    <div className="grid grid-cols-2 gap-3 p-1">
+                      <label className="cursor-pointer">
+                        <input type="radio" name="role" value="assistant" defaultChecked className="peer sr-only" />
+                        <div className="p-4 rounded-2xl border-2 border-neutral-800 bg-neutral-950 text-center transition peer-checked:border-emerald-500 peer-checked:bg-emerald-500/10 peer-checked:text-emerald-300">
+                          <p className="text-2xl mb-1">👤</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest">Assistant</p>
+                          <p className="text-[9px] text-neutral-500 mt-1">Trésorerie seule</p>
+                        </div>
+                      </label>
+                      <label className="cursor-pointer">
+                        <input type="radio" name="role" value="admin" className="peer sr-only" />
+                        <div className="p-4 rounded-2xl border-2 border-neutral-800 bg-neutral-950 text-center transition peer-checked:border-amber-500 peer-checked:bg-amber-500/10 peer-checked:text-amber-300">
+                          <p className="text-2xl mb-1">👑</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest">Admin</p>
+                          <p className="text-[9px] text-neutral-500 mt-1">Accès total</p>
+                        </div>
+                      </label>
+                    </div>
+                    <button type="submit" disabled={isPending} className="py-5 bg-white text-black font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl disabled:opacity-50">Créer l'utilisateur</button>
                   </form>
                 </div>
 
@@ -871,8 +889,8 @@ export default function MoneyHubApp({
                           {u.id !== currentUser.id && (
                             <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: u.username })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${u.username}`}><KeyRound className="h-5 w-5" /></button>
                           )}
-                          {u.role !== 'admin' && (
-                            <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition"><Trash2 className="h-5 w-5" /></button>
+                          {u.id !== currentUser.id && (
+                            <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition" title={`Supprimer ${u.username}`}><Trash2 className="h-5 w-5" /></button>
                           )}
                         </div>
                       </div>
