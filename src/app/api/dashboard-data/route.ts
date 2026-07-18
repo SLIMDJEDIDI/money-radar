@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getHubDashboardData } from '../../data';
-import { getSession } from '../../../lib/auth';
+import { getSession, getPanicLockState } from '../../../lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // SECURITY: require a valid signed session — this endpoint exposes all data
-    const session = await getSession();
-    if (!session) {
+    // SECURITY: require normal session AND reject all data access during Panic Lock.
+    const [session, panic] = await Promise.all([getSession(), getPanicLockState()]);
+    if (!session || session.role === 'emergency') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (panic.isLocked) {
+      return NextResponse.json({ error: 'Panic Lock active' }, { status: 423 });
     }
 
     const data = await getHubDashboardData();

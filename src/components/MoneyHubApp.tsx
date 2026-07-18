@@ -4,7 +4,7 @@ import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useC
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
@@ -13,7 +13,8 @@ import {
   confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
-  createTndMovement, deleteTndMovement, settleTndMovement
+  createTndMovement, deleteTndMovement, settleTndMovement,
+  activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
@@ -84,13 +85,18 @@ const EmptyState = memo(({ icon, title, subtitle }: any) => (
 EmptyState.displayName = 'EmptyState';
 
 export default function MoneyHubApp({
-  initialContacts, initialActiveCurrencies, initialTransactions, initialReminders, initialAuditTrails, initialUsers, initialMetrics, initialCategories,
-  initialTndMovements, initialTndForecast, initialTndUpcoming, initialTndDueSoon, initialTndOverdue
+  initialContacts = [], initialActiveCurrencies = [], initialTransactions = [], initialReminders = [], initialAuditTrails = [], initialUsers = [], initialMetrics = {}, initialCategories = [],
+  initialTndMovements = [], initialTndForecast = null, initialTndUpcoming = [], initialTndDueSoon = [], initialTndOverdue = [], initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
 }: any) {
   // --- AUTH & THEME ---
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [panicActivationOpen, setPanicActivationOpen] = useState(false);
+  const [panicForm, setPanicForm] = useState({ currentPassword: '', emergencyUsername: '', emergencyPassword: '', emergencyPasswordConfirm: '' });
+  const [panicError, setPanicError] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [unlockError, setUnlockError] = useState('');
   
   useEffect(() => {
     (async () => {
@@ -256,10 +262,36 @@ export default function MoneyHubApp({
     const data = new FormData(); data.append('username', loginForm.username); data.append('password', loginForm.password);
     const res = await loginUser(data);
     if (res.success && res.user) { setCurrentUser(res.user); localStorage.setItem('hub_session_user', JSON.stringify(res.user)); }
-    else setLoginError('Identifiants invalides');
+    else setLoginError(res.error || 'Identifiants invalides');
   };
 
   const handleSessionExpired = () => { setActiveModal(null); setCurrentUser(null); localStorage.removeItem('hub_session_user'); alert('Session expirée. Veuillez vous reconnecter.'); };
+
+  const handleActivatePanicLock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPanicError('');
+    const fd = new FormData();
+    fd.set('currentPassword', panicForm.currentPassword);
+    fd.set('emergencyUsername', panicForm.emergencyUsername);
+    fd.set('emergencyPassword', panicForm.emergencyPassword);
+    fd.set('emergencyPasswordConfirm', panicForm.emergencyPasswordConfirm);
+    const res: any = await activatePanicLock(fd);
+    if (!res.success) { setPanicError(res.error || 'Activation impossible'); return; }
+    // The server already invalidated this very session; purge local identity and load zero-data lock screen.
+    localStorage.removeItem('hub_session_user');
+    setCurrentUser(null);
+    window.location.reload();
+  };
+
+  const handleUnlockPanicLock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUnlockError('');
+    const fd = new FormData(); fd.set('emergencyPassword', unlockPassword);
+    const res: any = await unlockPanicLock(fd);
+    if (!res.success) { setUnlockError(res.error || 'Déverrouillage impossible'); return; }
+    localStorage.removeItem('hub_session_user');
+    window.location.reload();
+  };
 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -469,6 +501,43 @@ export default function MoneyHubApp({
   const handleDeleteTxLoc = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); }); } }); };
 
   const handleOpenEditContact = (e: any, c: any) => { e.stopPropagation(); setContactForm(c); setActiveModal('edit_contact'); };
+
+  // Panic Lock is a separate, zero-data application state. No normal shell, nav, or props render here.
+  if (initialPanicState.isLocked) {
+    const isEmergency = currentUser?.role === 'emergency';
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-6 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 50% 15%, rgba(220,38,38,.24), transparent 36%), radial-gradient(circle at 85% 85%, rgba(127,29,29,.2), transparent 40%)' }} />
+        <div className="relative w-full max-w-md bg-neutral-950/90 border border-rose-500/30 rounded-[52px] p-10 flex flex-col gap-8 shadow-2xl shadow-rose-950/40 ring-1 ring-rose-500/10 animate-in zoom-in-95 duration-500">
+          <div className="text-center flex flex-col items-center gap-4">
+            <div className="h-20 w-20 rounded-[28px] bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-rose-400 shadow-xl shadow-rose-900/30 animate-pulse"><Siren className="h-10 w-10" /></div>
+            <div><h1 className="text-2xl font-black uppercase tracking-tight text-white">Panic Lock Actif</h1><p className="text-[10px] text-rose-300 font-black uppercase tracking-[0.22em] mt-2">Accès global suspendu</p></div>
+          </div>
+          {!isEmergency ? (
+            <>
+              <div className="p-5 bg-rose-500/5 border border-rose-500/20 rounded-3xl text-center"><p className="text-xs text-neutral-300 font-bold leading-relaxed">Tous les comptes, sessions et accès opérationnels sont bloqués. Seuls les identifiants d’urgence peuvent ouvrir la console de sécurité.</p></div>
+              <form onSubmit={handleLogin} className="flex flex-col gap-4">
+                <input type="text" placeholder="IDENTIFIANT D’URGENCE" required autoComplete="username" className="bg-black border border-rose-900/50 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-rose-500 shadow-inner" value={loginForm.username} onChange={e => setLoginForm(p=>({...p, username: e.target.value}))} />
+                <input type="password" placeholder="MOT DE PASSE D’URGENCE" required autoComplete="current-password" className="bg-black border border-rose-900/50 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-rose-500 shadow-inner" value={loginForm.password} onChange={e => setLoginForm(p=>({...p, password: e.target.value}))} />
+                <button type="submit" className="py-5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-2xl uppercase text-xs tracking-[0.2em] active:scale-95 transition shadow-xl shadow-rose-900/30">Ouvrir la console</button>
+                {(loginError || '') && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-widest animate-pulse">{loginError || 'Identifiants d’urgence incorrects'}</p>}
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="p-5 bg-amber-500/5 border border-amber-500/25 rounded-3xl text-center flex flex-col gap-2"><ShieldAlert className="h-6 w-6 text-amber-400 mx-auto" /><p className="text-xs text-amber-100 font-bold leading-relaxed">Console d’urgence uniquement. Déverrouiller réactive la plateforme, mais tous les utilisateurs devront se reconnecter.</p></div>
+              <form onSubmit={handleUnlockPanicLock} className="flex flex-col gap-4">
+                <input type="password" placeholder="CONFIRMER LE MOT DE PASSE D’URGENCE" required autoFocus className="bg-black border border-amber-700/50 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-amber-400 shadow-inner" value={unlockPassword} onChange={e => setUnlockPassword(e.target.value)} />
+                <button type="submit" className="py-5 bg-amber-400 hover:bg-amber-300 text-black font-black rounded-2xl uppercase text-xs tracking-[0.2em] active:scale-95 transition shadow-xl shadow-amber-900/20"><ShieldCheck className="inline h-4 w-4 mr-2" /> Désactiver Panic Lock</button>
+                {unlockError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-widest animate-pulse">{unlockError}</p>}
+              </form>
+              <button onClick={handleLogout} className="text-[10px] font-black uppercase tracking-widest text-neutral-600 hover:text-neutral-300">Quitter la console</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) return (
     <div className="min-h-screen bg-black flex items-center justify-center p-6">
@@ -910,6 +979,11 @@ export default function MoneyHubApp({
                   </div>
                 </div>
 
+                <div className="p-8 border-2 border-rose-500/30 bg-gradient-to-br from-rose-500/10 to-red-950/10 rounded-[40px] flex flex-col gap-6 mt-4 shadow-2xl shadow-rose-950/10">
+                  <div className="flex items-center justify-between gap-4"><div className="flex items-center gap-3 text-rose-400"><Siren className="h-6 w-6" /><h3 className="text-xs font-black uppercase tracking-widest">Panic Lock</h3></div><span className="text-[8px] font-black text-rose-300 uppercase tracking-widest border border-rose-500/30 bg-rose-500/10 px-2 py-1 rounded-md">Urgence</span></div>
+                  <p className="text-[11px] font-bold text-neutral-300 leading-relaxed">Bloque instantanément tous les comptes, sessions et accès aux données — y compris les administrateurs. Seuls les identifiants d’urgence créés maintenant pourront ouvrir la console de déverrouillage.</p>
+                  <button onClick={() => { setPanicForm({ currentPassword: '', emergencyUsername: '', emergencyPassword: '', emergencyPasswordConfirm: '' }); setPanicError(''); setPanicActivationOpen(true); }} className="py-5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-2xl uppercase text-[11px] tracking-[0.18em] active:scale-95 transition shadow-2xl shadow-rose-900/30 flex items-center justify-center gap-2"><Siren className="h-4 w-4" /> Activer Panic Lock</button>
+                </div>
                 <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
               </>
             )}
@@ -1162,6 +1236,23 @@ export default function MoneyHubApp({
               )}
               <input name="newPassword" type="password" required minLength={6} placeholder="NOUVEAU MOT DE PASSE (min 6)" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-blue-500/40" />
               <button type="submit" disabled={isPending} className="py-5 bg-blue-500 text-white font-black rounded-2xl uppercase text-[11px] tracking-[0.2em] active:scale-95 transition shadow-2xl disabled:opacity-50">{pwdModal.mode === 'self' ? 'Mettre à jour' : 'Réinitialiser'}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {panicActivationOpen && (
+        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPanicActivationOpen(false)}>
+          <div className="w-full max-w-lg bg-[#0a0a0a] border border-rose-500/30 rounded-[52px] p-9 sm:p-11 flex flex-col gap-7 shadow-2xl shadow-rose-950/40 ring-1 ring-rose-500/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start gap-5 border-b border-rose-500/15 pb-6"><div className="flex items-center gap-4"><div className="p-3.5 bg-rose-500/15 rounded-2xl border border-rose-500/30 text-rose-400"><Siren className="h-7 w-7" /></div><div><h3 className="text-lg font-black uppercase text-white tracking-tight">Activer Panic Lock</h3><p className="text-[9px] font-black text-rose-300 uppercase tracking-[0.16em] mt-1">Verrouillage global immédiat</p></div></div><button onClick={() => setPanicActivationOpen(false)} className="p-2.5 rounded-full bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800"><X className="h-4 w-4" /></button></div>
+            <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-2xl"><p className="text-[11px] text-neutral-300 font-bold leading-relaxed">Après confirmation, tous les utilisateurs — y compris toi — seront immédiatement déconnectés. Tu pourras revenir uniquement avec les nouveaux identifiants d’urgence ci-dessous.</p></div>
+            <form onSubmit={handleActivatePanicLock} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1">Ton mot de passe actuel</label><input type="password" required autoFocus value={panicForm.currentPassword} onChange={e => setPanicForm(p => ({ ...p, currentPassword: e.target.value }))} placeholder="CONFIRMER TON IDENTITÉ" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-black outline-none focus:border-rose-500/50" /></div>
+              <div className="h-px bg-neutral-900 my-1" />
+              <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-amber-300 uppercase tracking-widest px-1">Identifiant d’urgence temporaire</label><input type="text" required minLength={3} maxLength={32} value={panicForm.emergencyUsername} onChange={e => setPanicForm(p => ({ ...p, emergencyUsername: e.target.value.toLowerCase().replace(/\s/g, '') }))} placeholder="ex. emergency-july" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" /></div>
+              <div className="grid sm:grid-cols-2 gap-3"><div className="flex flex-col gap-2"><label className="text-[9px] font-black text-amber-300 uppercase tracking-widest px-1">Mot de passe d’urgence</label><input type="password" required minLength={12} value={panicForm.emergencyPassword} onChange={e => setPanicForm(p => ({ ...p, emergencyPassword: e.target.value }))} placeholder="12+ caractères" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" /></div><div className="flex flex-col gap-2"><label className="text-[9px] font-black text-amber-300 uppercase tracking-widest px-1">Confirmer</label><input type="password" required minLength={12} value={panicForm.emergencyPasswordConfirm} onChange={e => setPanicForm(p => ({ ...p, emergencyPasswordConfirm: e.target.value }))} placeholder="Répéter" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" /></div></div>
+              {panicError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-widest">{panicError}</p>}
+              <button type="submit" disabled={isPending} className="mt-2 py-5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-2xl uppercase text-[11px] tracking-[0.18em] active:scale-95 transition shadow-xl shadow-rose-900/30 disabled:opacity-50 flex items-center justify-center gap-2"><Siren className="h-4 w-4" /> Verrouiller tout maintenant</button>
             </form>
           </div>
         </div>

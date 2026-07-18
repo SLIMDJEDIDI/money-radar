@@ -4,7 +4,7 @@ import { prisma } from '../lib/db';
 import { revalidatePath } from 'next/cache';
 import {
   verifyPassword, hashPassword, needsUpgrade,
-  setSessionCookie, clearSessionCookie, requireSession, requireAdmin, getSession,
+  setSessionCookie, clearSessionCookie, requireSession, requireAdmin, getSession, getPanicLockState,
 } from '../lib/auth';
 
 // --- LOGIQUE D'AUDIT ---
@@ -38,6 +38,23 @@ export async function loginUser(formData: FormData) {
     const username = (formData.get('username') as string || '').toLowerCase().trim();
     const password = formData.get('password') as string || '';
 
+    const panic = await getPanicLockState();
+
+    // Panic Lock: every regular account is blocked; only the temporary emergency identity may authenticate.
+    if (panic.isLocked) {
+      if (username !== panic.emergencyUsername || !panic.emergencyUsername) {
+        return { success: false, error: 'PLATEFORME VERROUILLÉE — utilisez les identifiants d’urgence' };
+      }
+      // Read the emergency hash from the singleton record (not HubUser).
+      const lock = await prisma.hubPanicLock.findUnique({ where: { id: 'global' } });
+      if (!lock?.emergencyPasswordHash || !verifyPassword(password, lock.emergencyPasswordHash)) {
+        return { success: false, error: 'Identifiants d’urgence incorrects' };
+      }
+      await setSessionCookie({ id: 'panic-emergency', username: panic.emergencyUsername, role: 'emergency', epoch: panic.lockEpoch });
+      await prisma.hubAuditTrail.create({ data: { entityType: 'SECURITY', action: 'PANIC_EMERGENCY_LOGIN', details: 'Connexion via identifiant d’urgence', modifiedBy: panic.emergencyUsername } });
+      return { success: true, panicLocked: true, user: { id: 'panic-emergency', username: panic.emergencyUsername, role: 'emergency', canWrite: false, canEdit: false, canDelete: false } };
+    }
+
     const user = await prisma.hubUser.findUnique({ where: { username } });
 
     // Constant-ish failure to avoid leaking which field is wrong
@@ -54,7 +71,7 @@ export async function loginUser(formData: FormData) {
     }
 
     // Establish signed, httpOnly session cookie (server-side trust)
-    await setSessionCookie({ id: user.id, username: user.username, role: user.role });
+    await setSessionCookie({ id: user.id, username: user.username, role: user.role, epoch: panic.lockEpoch });
 
     await prisma.hubAuditTrail.create({
       data: {
@@ -100,36 +117,102 @@ export async function logoutUser() {
 }
 
 export async function getCurrentUser() {
-  // Step 1: is there a valid signed session cookie at all?
   const session = await getSession();
-  if (!session) {
-    // No/invalid/expired cookie -> genuinely logged out
-    return { authenticated: false as const };
-  }
+  if (!session) return { authenticated: false as const };
 
-  // Step 2: confirm the user still exists. A DB hiccup here must NOT log the
-  // user out — we return a transient flag so the client keeps the session.
   try {
+    const panic = await getPanicLockState();
+    // Emergency sessions never resolve to a HubUser and have zero permissions.
+    if (session.role === 'emergency') {
+      return {
+        authenticated: true as const,
+        panicLocked: true as const,
+        user: { id: session.id, username: session.username, role: 'emergency', canWrite: false, canEdit: false, canDelete: false },
+      };
+    }
+
     const user = await prisma.hubUser.findUnique({ where: { id: session.id } });
     if (!user) return { authenticated: false as const };
 
-    // Sliding session: extend the cookie on each successful validation
-    await setSessionCookie({ id: user.id, username: user.username, role: user.role });
-
+    // Sliding session stays on the current global epoch.
+    await setSessionCookie({ id: user.id, username: user.username, role: user.role, epoch: panic.lockEpoch });
     return {
       authenticated: true as const,
-      user: {
-        id: user.id, username: user.username, role: user.role,
-        canWrite: user.canWrite, canEdit: user.canEdit, canDelete: user.canDelete,
-      },
+      user: { id: user.id, username: user.username, role: user.role, canWrite: user.canWrite, canEdit: user.canEdit, canDelete: user.canDelete },
     };
   } catch {
-    // Transient backend error: trust the signed cookie, keep the user logged in
-    return {
-      authenticated: true as const,
-      transient: true as const,
-      user: { id: session.id, username: session.username, role: session.role, canWrite: true, canEdit: true, canDelete: true },
-    };
+    // Security-first: an auth/state lookup failure logs the client out rather than trusting stale access.
+    await clearSessionCookie();
+    return { authenticated: false as const };
+  }
+}
+
+// ---------------- PANIC LOCK (owner/admin only) ----------------
+export async function activatePanicLock(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const currentPassword = formData.get('currentPassword') as string || '';
+    const emergencyUsername = (formData.get('emergencyUsername') as string || '').toLowerCase().trim();
+    const emergencyPassword = formData.get('emergencyPassword') as string || '';
+    const emergencyPasswordConfirm = formData.get('emergencyPasswordConfirm') as string || '';
+
+    if (!/^[a-z0-9._-]{3,32}$/.test(emergencyUsername)) return { success: false, error: 'Identifiant urgence invalide (3–32: lettres, chiffres, . _ -)' };
+    if (emergencyPassword.length < 12) return { success: false, error: 'Mot de passe urgence trop court (minimum 12 caractères)' };
+    if (emergencyPassword !== emergencyPasswordConfirm) return { success: false, error: 'Les mots de passe urgence ne correspondent pas' };
+
+    const actor = await prisma.hubUser.findUnique({ where: { id: session.id } });
+    if (!actor || !verifyPassword(currentPassword, actor.passwordHash)) return { success: false, error: 'Mot de passe actuel incorrect' };
+    // Prevent an emergency username from colliding with a regular account.
+    const collision = await prisma.hubUser.findUnique({ where: { username: emergencyUsername } });
+    if (collision) return { success: false, error: 'Cet identifiant d’urgence correspond déjà à un utilisateur existant' };
+
+    await prisma.$transaction(async (tx) => {
+      const previous = await tx.hubPanicLock.findUnique({ where: { id: 'global' } });
+      if (previous?.isLocked) throw new Error('ALREADY_LOCKED');
+      const nextEpoch = (previous?.lockEpoch ?? 0) + 1;
+      await tx.hubPanicLock.upsert({
+        where: { id: 'global' },
+        create: { id: 'global', isLocked: true, emergencyUsername, emergencyPasswordHash: hashPassword(emergencyPassword), lockedAt: new Date(), lockedBy: actor.username, lockEpoch: nextEpoch },
+        update: { isLocked: true, emergencyUsername, emergencyPasswordHash: hashPassword(emergencyPassword), lockedAt: new Date(), lockedBy: actor.username, lockEpoch: nextEpoch },
+      });
+      await logAudit(tx, { entityType: 'SECURITY', action: 'PANIC_LOCK_ACTIVATED', details: `Panic Lock activé. Tous les accès réguliers ont été invalidés.`, modifiedBy: actor.username });
+    });
+    // Current caller's cookie is now stale because the epoch changed.
+    await clearSessionCookie();
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'ALREADY_LOCKED') return { success: false, error: 'Panic Lock déjà actif' };
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session administrateur requise' };
+    return { success: false, error: 'Impossible d’activer Panic Lock' };
+  }
+}
+
+// The emergency account can only unlock. It has no access to operational actions or data.
+export async function unlockPanicLock(formData: FormData) {
+  try {
+    const session = await getSession();
+    if (!session || session.role !== 'emergency') return { success: false, error: 'Session d’urgence requise' };
+    const password = formData.get('emergencyPassword') as string || '';
+    const lock = await prisma.hubPanicLock.findUnique({ where: { id: 'global' } });
+    if (!lock?.isLocked || !lock.emergencyPasswordHash || !verifyPassword(password, lock.emergencyPasswordHash)) {
+      return { success: false, error: 'Mot de passe d’urgence incorrect' };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const current = await tx.hubPanicLock.findUnique({ where: { id: 'global' } });
+      if (!current?.isLocked) throw new Error('NOT_LOCKED');
+      await tx.hubPanicLock.update({
+        where: { id: 'global' },
+        data: { isLocked: false, emergencyUsername: null, emergencyPasswordHash: null, lockedAt: null, lockedBy: null, lockEpoch: current.lockEpoch + 1 },
+      });
+      await logAudit(tx, { entityType: 'SECURITY', action: 'PANIC_LOCK_RELEASED', details: 'Panic Lock désactivé via identifiants d’urgence. Tous les anciens cookies restent invalides.', modifiedBy: session.username });
+    });
+    await clearSessionCookie();
+    revalidatePath('/');
+    return { success: true };
+  } catch {
+    return { success: false, error: 'Impossible de désactiver Panic Lock' };
   }
 }
 

@@ -130,3 +130,18 @@ model HubTndMovement {
   @@index([isSettled])
 }
 
+// Singleton global security state. id is always "global".
+// lockEpoch invalidates every signed cookie each time the lock changes state.
+model HubPanicLock {
+  id                    String   @id @default("global")
+  isLocked              Boolean  @default(false)
+  emergencyUsername     String?
+  emergencyPasswordHash String?
+  lockedAt              DateTime?
+  lockedBy              String?
+  lockEpoch             Int      @default(0)
+  updatedAt             DateTime @updatedAt
+
+  @@index([isLocked])
+}
+
