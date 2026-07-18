@@ -1,5 +1,5 @@
 /* Money Hub PWA worker — intentionally does NOT cache private pages or API data. */
-const VERSION = 'money-hub-shell-v1';
+const VERSION = 'money-hub-shell-v2';
 const PUBLIC_ASSETS = ['/manifest.webmanifest', '/icon?size=192', '/icon?size=512'];
 
 self.addEventListener('install', (event) => {

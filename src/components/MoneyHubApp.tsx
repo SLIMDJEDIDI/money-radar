@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, memo } from 'react';
+import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
@@ -577,9 +578,9 @@ export default function MoneyHubApp({
     <div className="min-h-screen bg-black flex items-center justify-center p-6">
       <div className="w-full max-w-sm bg-neutral-900/40 border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-8 shadow-2xl animate-in zoom-in-95 duration-500 ring-1 ring-white/10">
         <div className="text-center flex flex-col items-center gap-3">
-          <div className="h-16 w-16 rounded-[24px] bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-4xl shadow-xl shadow-emerald-500/10">M</div>
-          <h1 className="text-2xl font-black tracking-tighter uppercase text-white mt-2">MONEY HUB</h1>
-          <p className="text-[10px] text-neutral-500 font-black uppercase tracking-[0.3em]">Accès Contrôlé</p>
+          <MoneyHubLogo size={72} />
+          <h1 className="text-2xl font-black tracking-[-0.06em] uppercase text-white mt-2">MONEY HUB</h1>
+          <p className="text-[10px] text-emerald-300/60 font-black uppercase tracking-[0.28em]">Sourcing Control · Accès privé</p>
         </div>
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <input type="text" placeholder="UTILISATEUR" required className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50 shadow-inner" value={loginForm.username} onChange={e => setLoginForm(p=>({...p, username: e.target.value}))} />
@@ -603,8 +604,8 @@ export default function MoneyHubApp({
                   <button onClick={goForward} disabled={!canGoForward} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                 </div>
               )}
-              <div onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-black text-xl cursor-pointer shadow-lg shadow-emerald-500/10">M</div>
-              <div className="hidden sm:block"><h1 className="text-xl font-black tracking-tighter uppercase leading-none">MONEY HUB</h1><p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Sourcing Control</p></div>
+              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={42} /></button>
+              <div className="hidden sm:block"><MoneyHubLogo size={40} showWordmark /></div>
             </div>
             <div className="flex gap-2">
               {currentUser.role === 'admin' && (() => {
