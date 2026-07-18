@@ -1,6 +1,6 @@
 /* Money Hub PWA worker — intentionally does NOT cache private pages or API data. */
-const VERSION = 'money-hub-shell-v2';
-const PUBLIC_ASSETS = ['/manifest.webmanifest', '/icon?size=192', '/icon?size=512'];
+const VERSION = 'money-hub-shell-v3';
+const PUBLIC_ASSETS = ['/manifest.webmanifest', '/brand-icon'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -21,7 +21,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Public PWA artwork only: cache-first, then update in background.
-  if (url.pathname === '/manifest.webmanifest' || url.pathname === '/icon' || url.pathname === '/apple-icon') {
+  if (url.pathname === '/manifest.webmanifest' || url.pathname === '/brand-icon') {
     event.respondWith(caches.match(request).then((cached) => cached || fetch(request).then((response) => {
       const copy = response.clone();
       caches.open(VERSION).then((cache) => cache.put(request, copy));

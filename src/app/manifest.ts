@@ -15,10 +15,9 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: 'portrait-primary',
     categories: ['finance', 'business', 'productivity'],
     icons: [
-      { src: '/icon?size=192', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon?size=512', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon?size=512', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-      { src: '/apple-icon?size=180', sizes: '180x180', type: 'image/png', purpose: 'any' },
+      { src: '/brand-icon', sizes: '512x512', type: 'image/jpeg', purpose: 'any' },
+      { src: '/brand-icon', sizes: '512x512', type: 'image/jpeg', purpose: 'maskable' },
+      { src: '/brand-icon', sizes: '180x180', type: 'image/jpeg', purpose: 'any' },
     ],
   };
 }

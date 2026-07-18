@@ -578,9 +578,8 @@ export default function MoneyHubApp({
     <div className="min-h-screen bg-black flex items-center justify-center p-6">
       <div className="w-full max-w-sm bg-neutral-900/40 border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-8 shadow-2xl animate-in zoom-in-95 duration-500 ring-1 ring-white/10">
         <div className="text-center flex flex-col items-center gap-3">
-          <MoneyHubLogo size={72} />
-          <h1 className="text-2xl font-black tracking-[-0.06em] uppercase text-white mt-2">MONEY HUB</h1>
-          <p className="text-[10px] text-emerald-300/60 font-black uppercase tracking-[0.28em]">Sourcing Control · Accès privé</p>
+          <MoneyHubLogo size={176} className="shadow-2xl shadow-emerald-950/20" />
+          <p className="text-[10px] text-emerald-300/60 font-black uppercase tracking-[0.28em]">Accès privé</p>
         </div>
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <input type="text" placeholder="UTILISATEUR" required className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50 shadow-inner" value={loginForm.username} onChange={e => setLoginForm(p=>({...p, username: e.target.value}))} />
@@ -604,8 +603,7 @@ export default function MoneyHubApp({
                   <button onClick={goForward} disabled={!canGoForward} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                 </div>
               )}
-              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={42} /></button>
-              <div className="hidden sm:block"><MoneyHubLogo size={40} showWordmark /></div>
+              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={102} className="rounded-[13px]" /></button>
             </div>
             <div className="flex gap-2">
               {currentUser.role === 'admin' && (() => {
