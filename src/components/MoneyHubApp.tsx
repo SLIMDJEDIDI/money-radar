@@ -3,7 +3,7 @@
 import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, memo } from 'react';
 import MoneyHubLogo from './MoneyHubLogo';
 import {
-  Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink,
+  Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
   Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren
 } from 'lucide-react';
@@ -116,8 +116,9 @@ export default function MoneyHubApp({
     })();
   }, []);
 
+  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury';
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury'>('dashboard');
+  const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
   // Assistants land directly on Treasury (only section they can access)
   useEffect(() => {
     if (currentUser && currentUser.role !== 'admin' && activeSection !== 'treasury' && activeSection !== 'settings') {
@@ -633,43 +634,53 @@ export default function MoneyHubApp({
       </header>
 
       <main className="max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up pb-32">
-        {activeSection === 'dashboard' && (
+        {activeSection === 'dashboard' && (() => {
+          const urgentTnd = [...tndOverdue, ...tndDueSoon.filter((m: any) => !tndOverdue.some((o: any) => o.id === m.id))];
+          const urgentCount = urgentTnd.length + dueReminders.length;
+          const recentAudit = initialAuditTrails.slice(0, 5);
+          const activePartners = optimisticContacts.filter((c: any) => Math.abs(c.netPositionUsd) > 0.01 || (c.heldBalanceTnd || 0) > 0.01).length;
+          const lastAudit = recentAudit[0];
+          return (
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 px-1">
+                <div><p className="text-[10px] font-black text-emerald-300 uppercase tracking-[0.24em]">Command center</p><h2 className="text-3xl font-black tracking-[-0.06em] text-white mt-1">Dashboard</h2><p className="text-xs font-bold text-neutral-500 mt-1">Tout ce qui demande une décision, maintenant.</p></div>
+                <button onClick={() => refreshHubState()} className="self-start sm:self-auto px-4 py-3 bg-neutral-900 border border-neutral-800 rounded-2xl text-[10px] font-black uppercase tracking-widest text-neutral-300 hover:text-white active:scale-95 transition flex items-center gap-2"><RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} /> Actualiser</button>
+              </div>
+
+              {urgentCount > 0 ? (
+                <div className="relative overflow-hidden border border-rose-500/30 bg-gradient-to-br from-rose-500/15 to-amber-500/5 rounded-[36px] p-6 shadow-xl shadow-rose-950/10">
+                  <div className="absolute -right-8 -top-8 text-rose-400/10"><AlertTriangle className="h-32 w-32" /></div>
+                  <div className="relative flex items-start justify-between gap-4"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-[0.22em]">À traiter maintenant</p><h3 className="text-2xl font-black text-white tracking-tight mt-1">{urgentCount} élément{urgentCount > 1 ? 's' : ''} requiert une action</h3><p className="text-xs text-neutral-300 font-bold mt-2">{urgentTnd.length > 0 ? `${urgentTnd.length} mouvement${urgentTnd.length > 1 ? 's' : ''} TND prévu${urgentTnd.length > 1 ? 's' : ''}` : ''}{urgentTnd.length > 0 && dueReminders.length > 0 ? ' · ' : ''}{dueReminders.length > 0 ? `${dueReminders.length} rappel${dueReminders.length > 1 ? 's' : ''} arrivé${dueReminders.length > 1 ? 's' : ''}` : ''}</p></div><button onClick={() => navigateTo(urgentTnd.length > 0 ? 'treasury' : 'reminders')} className="relative shrink-0 px-4 py-3 rounded-2xl bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest active:scale-95 transition">Voir</button></div>
+                </div>
+              ) : (
+                <div className="border border-emerald-500/20 bg-emerald-500/5 rounded-[32px] p-5 flex items-center gap-4"><div className="h-11 w-11 rounded-2xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center"><CheckCircle className="h-5 w-5" /></div><div><p className="text-[11px] font-black text-emerald-300 uppercase tracking-widest">Aucune urgence</p><p className="text-xs text-neutral-500 font-bold mt-1">Les rappels et la trésorerie planifiée sont à jour.</p></div></div>
+              )}
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <button onClick={() => navigateTo('treasury')} className="text-left p-5 rounded-[28px] border border-blue-500/20 bg-blue-500/5 hover:border-blue-500/45 active:scale-[0.98] transition"><div className="flex justify-between items-start"><Coins className="h-5 w-5 text-blue-300" /><span className="text-[9px] font-black text-blue-300 uppercase tracking-widest">Live</span></div><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-5">Caisse TND</p><p className={`text-2xl font-black tracking-[-0.06em] mt-1 ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><p className="text-[10px] text-neutral-500 font-bold mt-2">Aujourd’hui: +{formatRawCurrency(metrics.tndTodayIn || 0, 'TND')} / -{formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</p></button>
+                <button onClick={() => navigateTo('treasury')} className="text-left p-5 rounded-[28px] border border-amber-500/20 bg-amber-500/5 hover:border-amber-500/45 active:scale-[0.98] transition"><div className="flex justify-between items-start"><CalendarClock className="h-5 w-5 text-amber-300" /><span className="text-[9px] font-black text-amber-300 uppercase tracking-widest">Prévu</span></div><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-5">Mouvements planifiés</p><p className="text-2xl font-black tracking-[-0.06em] mt-1 text-amber-300">{tndUpcoming.length}</p><p className="text-[10px] text-neutral-500 font-bold mt-2">Solde projeté: {formatRawCurrency(tndForecast?.projectedBalance ?? metrics.tndBalance ?? 0, 'TND')}</p></button>
+                <button onClick={() => navigateTo('reminders')} className="text-left p-5 rounded-[28px] border border-rose-500/20 bg-rose-500/5 hover:border-rose-500/45 active:scale-[0.98] transition"><div className="flex justify-between items-start"><Bell className="h-5 w-5 text-rose-300" /><span className="text-[9px] font-black text-rose-300 uppercase tracking-widest">Action</span></div><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-5">Rappels dus</p><p className="text-2xl font-black tracking-[-0.06em] mt-1 text-rose-300">{dueReminders.length}</p><p className="text-[10px] text-neutral-500 font-bold mt-2">{formatUSD(metrics.upcomingPayments || 0)} à suivre</p></button>
+                <button onClick={() => navigateTo('currencies')} className="text-left p-5 rounded-[28px] border border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/45 active:scale-[0.98] transition"><div className="flex justify-between items-start"><WalletCards className="h-5 w-5 text-emerald-300" /><span className="text-[9px] font-black text-emerald-300 uppercase tracking-widest">USD</span></div><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-5">Position globale</p><p className={`text-2xl font-black tracking-[-0.06em] mt-1 ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><p className="text-[10px] text-neutral-500 font-bold mt-2">{activePartners} partenaire{activePartners > 1 ? 's' : ''} actif{activePartners > 1 ? 's' : ''}</p></button>
+              </div>
+
+              <div className="grid lg:grid-cols-[1.15fr_.85fr] gap-4">
+                <div className="p-6 bg-neutral-900/55 border border-neutral-800 rounded-[36px] flex flex-col gap-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2.5"><div className="h-9 w-9 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-emerald-300"><Activity className="h-4 w-4" /></div><div><h3 className="text-[11px] font-black text-white uppercase tracking-widest">Dernières actions</h3><p className="text-[10px] text-neutral-500 font-bold mt-0.5">Traçabilité de la plateforme</p></div></div><button onClick={() => navigateTo('history')} className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Audit</button></div><div className="flex flex-col gap-2.5">{recentAudit.length === 0 ? <p className="py-6 text-center text-xs text-neutral-500 font-bold">Aucune action récente.</p> : recentAudit.map((a: any) => <div key={a.id} className="flex items-start gap-3 p-3.5 bg-black/20 border border-neutral-800/80 rounded-2xl"><span className="mt-0.5 h-2 w-2 rounded-full bg-emerald-400 shrink-0" /><div className="min-w-0 flex-1"><p className="text-xs text-neutral-200 font-bold truncate">{a.details || a.action}</p><p className="text-[10px] text-neutral-600 font-black uppercase mt-1">{a.modifiedBy} · {new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div></div>)}</div></div>
+                <div className="p-6 bg-neutral-900/55 border border-neutral-800 rounded-[36px] flex flex-col gap-4"><div className="flex items-center gap-2.5"><div className="h-9 w-9 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-blue-300"><Users className="h-4 w-4" /></div><div><h3 className="text-[11px] font-black text-white uppercase tracking-widest">Vue rapide</h3><p className="text-[10px] text-neutral-500 font-bold mt-0.5">Points de suivi métier</p></div></div><div className="flex flex-col gap-2.5"><button onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} className="flex items-center justify-between p-4 bg-emerald-500/5 border border-emerald-500/15 rounded-2xl text-left hover:border-emerald-500/40 transition"><span className="text-xs font-bold text-neutral-300">Créances à recevoir</span><span className="text-sm font-black text-emerald-400">{formatUSD(metrics.totalReceivables || 0)}</span></button><button onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} className="flex items-center justify-between p-4 bg-rose-500/5 border border-rose-500/15 rounded-2xl text-left hover:border-rose-500/40 transition"><span className="text-xs font-bold text-neutral-300">Dettes à payer</span><span className="text-sm font-black text-rose-400">{formatUSD(metrics.totalPayables || 0)}</span></button><button onClick={() => navigateTo('currencies')} className="flex items-center justify-between p-4 bg-blue-500/5 border border-blue-500/15 rounded-2xl text-left hover:border-blue-500/40 transition"><span className="text-xs font-bold text-neutral-300">Avoirs chez partenaires</span><span className="text-sm font-black text-blue-300">{formatUSD(metrics.totalAvoirs || 0)}</span></button></div>{lastAudit && <p className="text-[10px] text-neutral-600 font-bold mt-auto">Dernière mise à jour: {new Date(lastAudit.createdAt).toLocaleString('fr-FR')}</p>}</div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {activeSection === 'currencies' && (
           <div className="flex flex-col gap-5">
             <div className={`bg-gradient-to-br from-neutral-900 to-black border p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5 ${metrics.netPosition >= 0 ? 'border-emerald-500/20' : 'border-rose-500/20'}`}>
               <div className={`absolute top-0 right-0 p-8 opacity-[0.07] ${metrics.netPosition >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}><DollarSign className="h-32 w-32" /></div>
-              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-2">Position Nette Globale</p>
+              <p className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-2">Vue devises et positions partenaires</p>
               <h2 className={`text-4xl sm:text-6xl font-black tracking-tighter break-words ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-5 border-t border-white/5">
-                <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-neutral-300 font-black uppercase tracking-widest">Live · USD</span></span>
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-400">Avoirs {formatUSD(metrics.totalAvoirs)}</span>
-                {metrics.totalAvoirsTnd > 0.01 && <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">Avoirs {formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}</span>}
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">+ Créances {formatUSD(metrics.totalReceivables)}</span>
-                <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">− Dettes {formatUSD(metrics.totalPayables)}</span>
-              </div>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-5 border-t border-white/5"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-neutral-300 font-black uppercase tracking-widest">Live · USD</span></span><span className="text-[10px] font-black uppercase tracking-wider text-blue-400">Avoirs {formatUSD(metrics.totalAvoirs)}</span>{metrics.totalAvoirsTnd > 0.01 && <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">Avoirs {formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}</span>}<span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">+ Créances {formatUSD(metrics.totalReceivables)}</span><span className="text-[10px] font-black uppercase tracking-wider text-rose-400">− Dettes {formatUSD(metrics.totalPayables)}</span></div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); navigateTo('contacts'); }} />
-              <StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="emerald" note="Il me doit" onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} />
-              <StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} />
-              <StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => navigateTo('reminders')} />
-            </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center px-1">
-                <div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires Actifs</h3></div>
-                <button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir Tout</button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {filteredContacts.map((c: any) => {
-                  const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01;
-                  return (
-                    <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md">
-                      <div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div>
-                      <div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <div className="grid grid-cols-2 gap-4"><StatCard label="Avoirs" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="blue" note="Mon argent chez lui" onClick={() => { setContactFilterType('HELD'); navigateTo('contacts'); }} /><StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="emerald" note="Il me doit" onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} /><StatCard label="À payer" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Je lui dois" onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} /><StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => navigateTo('reminders')} /></div>
+            <div className="flex flex-col gap-4"><div className="flex justify-between items-center px-1"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires actifs</h3></div><button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir tout</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredContacts.map((c: any) => { const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01; return <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md"><div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div><div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div></div>; })}</div></div>
           </div>
         )}
 
@@ -1027,14 +1038,15 @@ export default function MoneyHubApp({
       <nav className="fixed bottom-4 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
         <div className="glass-panel border border-neutral-800 rounded-[36px] p-2.5 shadow-2xl flex items-center gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl scale-110 sm:scale-100">
           {[
-            { id: 'dashboard', label: 'Accueil', icon: <DollarSign className="h-5 w-5" />, adminOnly: true },
+            { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, adminOnly: true },
+            { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-5 w-5" />, adminOnly: true },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5" />, adminOnly: true },
             { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-5 w-5" />, adminOnly: false },
             { id: 'history', label: 'Audit', icon: <History className="h-5 w-5" />, adminOnly: true },
             { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5" />, adminOnly: true },
           ].filter(s => !s.adminOnly || currentUser?.role === 'admin').map(s => (
             <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-col items-center gap-1.5 px-5 py-3.5 rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
-              {s.icon} <span className="text-[9px] font-black uppercase tracking-tighter">{s.label}</span>
+              {s.icon} <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-tighter">{s.label}</span>
             </button>
           ))}
         </div>

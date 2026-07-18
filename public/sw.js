@@ -1,6 +1,6 @@
 /* Money Hub PWA worker — intentionally does NOT cache private pages or API data. */
-const VERSION = 'money-hub-shell-v3';
-const PUBLIC_ASSETS = ['/manifest.webmanifest', '/brand-icon'];
+const VERSION = 'money-hub-shell-v4';
+const PUBLIC_ASSETS = ['/manifest.webmanifest', '/icon?size=192', '/icon?size=512'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -32,4 +32,6 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+);
 });

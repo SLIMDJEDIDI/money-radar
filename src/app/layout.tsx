@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   applicationName: "Money Hub",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: [{ url: "/brand-icon", type: "image/jpeg", sizes: "512x512" }],
-    apple: [{ url: "/brand-icon", type: "image/jpeg", sizes: "180x180" }],
+    icon: [{ url: "/icon?size=192", type: "image/png", sizes: "192x192" }],
+    apple: [{ url: "/apple-icon?size=180", type: "image/png", sizes: "180x180" }],
   },
   appleWebApp: {
     capable: true,
