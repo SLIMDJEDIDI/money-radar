@@ -483,6 +483,55 @@ export async function createTndMovement(formData: FormData) {
   }
 }
 
+// Batch disbursement: all rows validate before one atomic transaction writes them.
+export async function createTndBatchDisbursement(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const raw = formData.get('items') as string || '';
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return { success: false, error: 'Liste de décaissements invalide' }; }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 30) return { success: false, error: 'Ajoutez entre 1 et 30 décaissements' };
+
+    const items = parsed.map((row: any, index: number) => ({
+      amount: Number(row?.amount),
+      note: String(row?.note || '').trim(),
+      index: index + 1,
+    }));
+    const invalid = items.find(item => !isFinite(item.amount) || item.amount <= 0 || !item.note);
+    if (invalid) return { success: false, error: `Ligne ${invalid.index} : montant positif et note obligatoire requis` };
+
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const date = new Date(scheduledForRaw);
+      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+    }
+
+    const total = items.reduce((sum, item) => sum + item.amount, 0);
+    await prisma.$transaction(async (tx) => {
+      const created = await Promise.all(items.map(item => tx.hubTndMovement.create({
+        data: { amount: item.amount, type: 'OUT', note: item.note, performedBy: session.username, scheduledFor, isSettled },
+      })));
+      await logAudit(tx, {
+        entityType: 'TREASURY',
+        entityId: created[0]?.id,
+        action: isSettled ? 'TND_BATCH_OUT' : 'TND_BATCH_OUT_SCHEDULED',
+        details: `${items.length} décaissements ${isSettled ? 'enregistrés' : 'planifiés'} — total ${total} TND${scheduledFor ? ` pour ${scheduledFor.toLocaleDateString('fr-FR')}` : ''}`,
+        newValue: JSON.stringify(items.map(({ amount, note }) => ({ amount, note }))),
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, count: items.length, total };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN' || error?.message === 'PANIC_LOCKED') return { success: false, error: error.message === 'PANIC_LOCKED' ? 'Panic Lock actif' : 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l’enregistrement groupé' };
+  }
+}
+
 export async function settleTndMovement(id: string) {
   try {
     const session = await requireSession();

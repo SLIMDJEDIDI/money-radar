@@ -13,7 +13,7 @@ import {
   confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
-  createTndMovement, deleteTndMovement, settleTndMovement,
+  createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -167,6 +167,7 @@ export default function MoneyHubApp({
   const [inlinePartnerName, setInlinePartnerName] = useState('');
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
+  const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
   // TND Treasury filters
   const [tndSearch, setTndSearch] = useState('');
   const [tndPeriod, setTndPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
@@ -355,6 +356,32 @@ export default function MoneyHubApp({
       const res: any = await createTndMovement(data);
       if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleAddTndBatchDisbursement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const invalid = tndBatchItems.find(item => !item.note.trim() || !item.amount || Number(item.amount) <= 0);
+    if (invalid) { alert('Chaque ligne doit avoir un montant positif et une note obligatoire.'); return; }
+    startTransition(async () => {
+      const scheduled = tndForm.scheduledFor || '';
+      const isPlanned = !!scheduled;
+      const validItems = tndBatchItems.map(item => ({ amount: Number(item.amount), note: item.note.trim() }));
+      // Optimistic rows keep the journal instant; server transaction guarantees all-or-nothing persistence.
+      validItems.forEach((item, index) => addOptimisticTndMovement({
+        id: `temp-batch-${Date.now()}-${index}`, amount: item.amount, type: 'OUT', note: item.note,
+        performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled) : null, isSettled: !isPlanned,
+      }));
+      const data = new FormData();
+      data.append('items', JSON.stringify(validItems));
+      if (scheduled) data.append('scheduledFor', scheduled);
+      const res: any = await createTndBatchDisbursement(data);
+      if (res.success) {
+        setTndBatchItems([{ amount: '', note: '' }]);
+        setTndForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' });
+        setActiveModal(null);
+        await refreshHubState();
+      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
 
@@ -762,7 +789,7 @@ export default function MoneyHubApp({
               {/* QUICK ACTIONS */}
               <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
-                <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
+                <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setTndBatchItems([{ amount: '', note: '' }]); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
               </div>
 
               {/* SEARCH + FILTERS */}
@@ -1064,26 +1091,40 @@ export default function MoneyHubApp({
 
       {activeModal === 'add_tnd' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
-          <div className="w-full max-w-sm bg-[#080808] border border-blue-500/40 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className={`w-full ${tndForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-blue-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-blue-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{tndForm.type === 'IN' ? 'Encaisser TND' : 'Décaissement TND'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
-            <form onSubmit={handleAddTndMovement} className="flex flex-col gap-5">
-              <div className="flex gap-3 w-full">
-                <input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} />
-                <div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div>
-              </div>
-              <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-blue-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={tndForm.note} onChange={e => setTndForm(p=>({...p, note: e.target.value}))} />
-              <div className="flex flex-col gap-2">
-                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label>
-                <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={(tndForm as any).scheduledFor || ''} onChange={e => setTndForm(p=>({...(p as any), scheduledFor: e.target.value}))} />
-                {(tndForm as any).scheduledFor && (
-                  <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>
-                )}
-              </div>
-              <div className="flex gap-4 mt-2">
-                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
-                <button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{(tndForm as any).scheduledFor ? 'Planifier' : 'Confirmer'}</button>
-              </div>
-            </form>
+            {tndForm.type === 'OUT' ? (
+              <form onSubmit={handleAddTndBatchDisbursement} className="flex flex-col gap-5">
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Décaissements multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant doit avoir sa propre note.</p></div><div className="px-4 py-2.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-lg font-black">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(tndBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))} DT</div></div>
+                <div className="flex flex-col gap-3 max-h-[38vh] overflow-y-auto pr-1">
+                  {tndBatchItems.map((item, index) => (
+                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_150px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                      <span className="h-8 w-8 rounded-xl bg-rose-500/10 text-rose-300 flex items-center justify-center text-[10px] font-black">{index + 1}</span>
+                      <input type="number" step="any" required min="0.001" placeholder="Montant" value={item.amount} onChange={e => setTndBatchItems(items => items.map((x, i) => i === index ? { ...x, amount: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-sm text-white font-black outline-none focus:border-rose-500/50" />
+                      <input type="text" required placeholder="NOTE OBLIGATOIRE" value={item.note} onChange={e => setTndBatchItems(items => items.map((x, i) => i === index ? { ...x, note: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-xs text-white font-bold uppercase outline-none focus:border-rose-500/50" />
+                      <button type="button" disabled={tndBatchItems.length === 1} onClick={() => setTndBatchItems(items => items.filter((_, i) => i !== index))} className="p-2.5 text-rose-500/50 hover:text-rose-400 disabled:opacity-20 disabled:cursor-not-allowed rounded-xl"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" disabled={tndBatchItems.length >= 30} onClick={() => setTndBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label>
+                  <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />
+                  {tndForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Tous les décaissements seront planifiés à cette date et rappelés dès J-1.</p>}
+                </div>
+                <div className="flex gap-4 mt-1">
+                  <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
+                  <button type="submit" disabled={isPending || tndBatchItems.some(item => !item.amount || !item.note.trim())} className="flex-[2] py-5 bg-rose-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-rose-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{tndForm.scheduledFor ? `Planifier ${tndBatchItems.length} sortie${tndBatchItems.length > 1 ? 's' : ''}` : `Enregistrer ${tndBatchItems.length} sortie${tndBatchItems.length > 1 ? 's' : ''}`}</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleAddTndMovement} className="flex flex-col gap-5">
+                <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div></div>
+                <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-blue-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={tndForm.note} onChange={e => setTndForm(p=>({...p, note: e.target.value}))} />
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />{tndForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
+                <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{tndForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
+              </form>
+            )}
           </div>
         </div>
       )}
