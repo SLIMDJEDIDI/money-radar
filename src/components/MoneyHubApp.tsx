@@ -231,8 +231,11 @@ export default function MoneyHubApp({
 
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
+    const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val);
+    // Tunisian convention: amount first, then DT (e.g. "11 130 DT").
+    if (curr === 'TND') return `${amount} DT`;
     const symbol = CURRENCY_SYMBOLS[curr] || curr;
-    return `${symbol} ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val)}`;
+    return `${symbol} ${amount}`;
   }, []);
 
   const refreshHubState = async () => {
