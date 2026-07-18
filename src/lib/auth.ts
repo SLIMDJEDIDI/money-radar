@@ -102,19 +102,23 @@ export type PanicLockState = {
   lockEpoch: number;
 };
 
-// Safe fallback keeps current production running until the one-time table migration is applied.
+// Security state is fail-closed: a DB/security-state outage must never silently preserve access.
 export async function getPanicLockState(): Promise<PanicLockState> {
   try {
     const lock = await prisma.hubPanicLock.findUnique({ where: { id: 'global' } });
+    if (!lock) {
+      // The singleton is required after the Panic Lock migration. Fail closed if absent.
+      return { isLocked: true, emergencyUsername: null, lockedAt: null, lockedBy: 'security-state-unavailable', lockEpoch: -1 };
+    }
     return {
-      isLocked: lock?.isLocked ?? false,
-      emergencyUsername: lock?.emergencyUsername ?? null,
-      lockedAt: lock?.lockedAt ?? null,
-      lockedBy: lock?.lockedBy ?? null,
-      lockEpoch: lock?.lockEpoch ?? 0,
+      isLocked: lock.isLocked,
+      emergencyUsername: lock.emergencyUsername,
+      lockedAt: lock.lockedAt,
+      lockedBy: lock.lockedBy,
+      lockEpoch: lock.lockEpoch,
     };
   } catch {
-    return { isLocked: false, emergencyUsername: null, lockedAt: null, lockedBy: null, lockEpoch: 0 };
+    return { isLocked: true, emergencyUsername: null, lockedAt: null, lockedBy: 'security-state-unavailable', lockEpoch: -1 };
   }
 }
 

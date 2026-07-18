@@ -261,8 +261,12 @@ export default function MoneyHubApp({
     e.preventDefault();
     const data = new FormData(); data.append('username', loginForm.username); data.append('password', loginForm.password);
     const res = await loginUser(data);
-    if (res.success && res.user) { setCurrentUser(res.user); localStorage.setItem('hub_session_user', JSON.stringify(res.user)); }
-    else setLoginError(res.error || 'Identifiants invalides');
+    if (res.success && res.user) {
+      setCurrentUser(res.user);
+      localStorage.setItem('hub_session_user', JSON.stringify(res.user));
+      // Normal sessions need a server reload to receive authenticated data; emergency goes to its zero-data console.
+      window.location.reload();
+    } else setLoginError(res.error || 'Identifiants invalides');
   };
 
   const handleSessionExpired = () => { setActiveModal(null); setCurrentUser(null); localStorage.removeItem('hub_session_user'); alert('Session expirée. Veuillez vous reconnecter.'); };

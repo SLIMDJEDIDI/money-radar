@@ -17,6 +17,15 @@ export default async function Page() {
     );
   }
 
+  // Normal mode is also private: do not embed financial data in unauthenticated HTML.
+  if (!session || session.role === 'emergency') {
+    return (
+      <main className="min-h-screen bg-black">
+        <MoneyHubApp initialPanicState={{ isLocked: false, emergencyUsername: null, emergencySession: false }} />
+      </main>
+    );
+  }
+
   const data = await getHubDashboardData();
   return (
     <main className="min-h-screen bg-black">

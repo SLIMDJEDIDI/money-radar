@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getPanicLockState, getSession } from '../../../lib/auth';
 
 export const revalidate = 0;
 export const runtime = 'nodejs';
@@ -22,6 +23,11 @@ async function safe<T>(label: string, fn: () => Promise<T>): Promise<{ label: st
 }
 
 export async function GET() {
+  // Never expose diagnostics during a global emergency lock.
+  const [panic, session] = await Promise.all([getPanicLockState(), getSession()]);
+  if (panic.isLocked) return NextResponse.json({ error: 'Panic Lock active' }, { status: 423 });
+  if (!session || session.role !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const dbUrlPresent = !!process.env.DATABASE_URL;
   let dbUrlProjectRef: string | null = null;
   try {
