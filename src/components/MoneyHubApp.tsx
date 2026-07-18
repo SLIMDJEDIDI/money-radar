@@ -604,7 +604,7 @@ export default function MoneyHubApp({
                   <button onClick={goForward} disabled={!canGoForward} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                 </div>
               )}
-              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={102} className="rounded-[13px]" /></button>
+              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={42} showWordmark /></button>
             </div>
             <div className="flex gap-2">
               {currentUser.role === 'admin' && (() => {
