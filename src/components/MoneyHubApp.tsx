@@ -604,7 +604,7 @@ export default function MoneyHubApp({
                   <button onClick={goForward} disabled={!canGoForward} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 transition active:scale-90 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                 </div>
               )}
-              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition" aria-label="Accueil Money Hub"><MoneyHubLogo size={42} showWordmark /></button>
+              <button onClick={() => navigateTo(currentUser.role === 'admin' ? 'dashboard' : 'treasury')} className="cursor-pointer active:scale-95 transition max-[430px]:[&>div>div:last-child]:hidden" aria-label="Accueil Money Hub"><MoneyHubLogo size={42} showWordmark /></button>
             </div>
             <div className="flex gap-2">
               {currentUser.role === 'admin' && (() => {
@@ -633,7 +633,7 @@ export default function MoneyHubApp({
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up pb-32">
+      <main className="app-main-safe-bottom max-w-4xl mx-auto p-4 flex flex-col gap-7 animate-fade-up pb-32">
         {activeSection === 'dashboard' && (() => {
           const urgentTnd = [...tndOverdue, ...tndDueSoon.filter((m: any) => !tndOverdue.some((o: any) => o.id === m.id))];
           const urgentCount = urgentTnd.length + dueReminders.length;
@@ -1036,18 +1036,18 @@ export default function MoneyHubApp({
         )}
       </main>
 
-      <nav className="fixed bottom-4 left-0 right-0 z-40 px-4 flex justify-center pointer-events-none">
-        <div className="glass-panel border border-neutral-800 rounded-[36px] p-2.5 shadow-2xl flex items-center gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl scale-110 sm:scale-100">
+      <nav className="app-bottom-nav fixed bottom-4 left-0 right-0 z-40 px-3 sm:px-4 flex justify-center pointer-events-none">
+        <div className="glass-panel w-full max-w-[680px] border border-neutral-800 rounded-[26px] sm:rounded-[36px] p-1.5 sm:p-2.5 shadow-2xl flex items-center gap-0.5 sm:gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl">
           {[
-            { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, adminOnly: true },
-            { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-5 w-5" />, adminOnly: true },
-            { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5" />, adminOnly: true },
-            { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-5 w-5" />, adminOnly: false },
-            { id: 'history', label: 'Audit', icon: <History className="h-5 w-5" />, adminOnly: true },
-            { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5" />, adminOnly: true },
+            { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
+            { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
+            { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'history', label: 'Audit', icon: <History className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
+            { id: 'settings', label: 'Param', icon: <Settings className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
           ].filter(s => !s.adminOnly || currentUser?.role === 'admin').map(s => (
-            <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-col items-center gap-1.5 px-5 py-3.5 rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
-              {s.icon} <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-tighter">{s.label}</span>
+            <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-1 min-w-0 flex-col items-center gap-1 px-1 py-2.5 sm:gap-1.5 sm:px-5 sm:py-3.5 rounded-[20px] sm:rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl sm:scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              {s.icon}<span className="w-full truncate text-center text-[7px] sm:text-[9px] font-black uppercase tracking-tight">{s.label}</span>
             </button>
           ))}
         </div>

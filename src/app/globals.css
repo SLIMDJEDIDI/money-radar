@@ -105,6 +105,25 @@ body {
     radial-gradient(900px circle at 100% 0%, rgba(59, 130, 246, 0.05), transparent 45%);
 }
 
+/* Mobile app shell: reserve space for the persistent navigation and device safe area. */
+.app-main-safe-bottom {
+  padding-bottom: calc(8.75rem + env(safe-area-inset-bottom));
+}
+
+.app-bottom-nav {
+  bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 430px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .app-main-safe-bottom {
+    padding-bottom: calc(7.5rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* Tap highlight removal for native app feel */
 * {
   -webkit-tap-highlight-color: transparent;
