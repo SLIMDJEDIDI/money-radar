@@ -187,6 +187,8 @@ export default function MoneyHubApp({
   const canGoForward = navPos < navStack.length - 1;
 
   const navigateTo = useCallback((section: string) => {
+    // Every menu destination opens at its own top, never at the previous screen's scroll position.
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     setActiveSection(section as any);
     setNavStack(prev => {
       if (prev[navPos] === section) return prev;
@@ -1041,8 +1043,8 @@ export default function MoneyHubApp({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
-            { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'history', label: 'Audit', icon: <History className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'settings', label: 'Param', icon: <Settings className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
           ].filter(s => !s.adminOnly || currentUser?.role === 'admin').map(s => (
