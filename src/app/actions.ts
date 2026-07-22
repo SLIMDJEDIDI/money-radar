@@ -555,6 +555,42 @@ export async function settleTndMovement(id: string) {
   }
 }
 
+// The amount, movement direction, schedule and settlement state are deliberately not accepted here.
+// This preserves the financial record while allowing a corrected explanatory note.
+export async function updateTndMovementNote(id: string, rawNote: string) {
+  try {
+    const session = await requireSession();
+    const note = String(rawNote || '').trim();
+    if (!id || !note) return { success: false, error: 'La note est obligatoire' };
+    if (note.length > 1000) return { success: false, error: 'La note ne peut pas dépasser 1 000 caractères' };
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubTndMovement.findUnique({ where: { id } });
+      if (!movement) throw new Error('NOT_FOUND');
+      if (movement.note === note) return;
+
+      // NOTE ONLY: no financial field is ever mutated in this action.
+      await tx.hubTndMovement.update({ where: { id }, data: { note } });
+      await logAudit(tx, {
+        entityType: 'TREASURY',
+        entityId: id,
+        action: 'TND_NOTE_EDIT',
+        details: `Note modifiée — ${movement.type === 'IN' ? 'Entrée' : 'Sortie'} ${movement.amount} TND : « ${movement.note} » → « ${note} »`,
+        oldValue: movement.note,
+        newValue: note,
+        modifiedBy: session.username,
+      });
+    });
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN' || error?.message === 'PANIC_LOCKED') return { success: false, error: error.message === 'PANIC_LOCKED' ? 'Panic Lock actif' : 'Session expirée', code: error.message };
+    if (error?.message === 'NOT_FOUND') return { success: false, error: 'Mouvement introuvable' };
+    return { success: false, error: 'Modification de la note impossible' };
+  }
+}
+
 export async function deleteTndMovement(id: string) {
   try {
     const session = await requireAdmin();

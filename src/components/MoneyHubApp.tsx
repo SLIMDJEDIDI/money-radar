@@ -14,7 +14,7 @@ import {
   confirmReminderReceived, postponeReminder, settleDebtFromAvoir,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
-  createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement,
+  createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -130,6 +130,7 @@ export default function MoneyHubApp({
   const [contacts, setContacts] = useState(initialContacts);
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
   const [metrics, setMetrics] = useState(initialMetrics);
+  const [auditTrails, setAuditTrails] = useState(initialAuditTrails);
   const [reminders, setReminders] = useState(initialReminders.map((r:any) => ({...r, dueDate: new Date(r.dueDate)})));
   const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })) || []);
   const [tndForecast, setTndForecast] = useState(initialTndForecast);
@@ -170,6 +171,8 @@ export default function MoneyHubApp({
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
+  const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
+  const [tndNoteEditError, setTndNoteEditError] = useState('');
   // TND Treasury filters
   const [tndSearch, setTndSearch] = useState('');
   const [tndPeriod, setTndPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
@@ -200,13 +203,14 @@ export default function MoneyHubApp({
   }, [navPos]);
 
   const closeTopOverlay = useCallback(() => {
+    if (tndNoteEdit) { setTndNoteEdit(null); return true; }
     if (postponeTarget) { setPostponeTarget(null); return true; }
     if (confirmModal.isOpen) { setConfirmModal({ isOpen: false }); return true; }
     if (activeModal) { setActiveModal(null); return true; }
     if (showNotifications) { setShowNotifications(false); return true; }
     if (selectedContact) { setSelectedContact(null); setDrawerTypeFilter(null); return true; }
     return false;
-  }, [postponeTarget, confirmModal, activeModal, showNotifications, selectedContact]);
+  }, [tndNoteEdit, postponeTarget, confirmModal, activeModal, showNotifications, selectedContact]);
 
   const goBack = useCallback(() => {
     if (closeTopOverlay()) return;
@@ -252,6 +256,7 @@ export default function MoneyHubApp({
         setContacts(data.contacts);
         setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
         setMetrics(data.metrics);
+        setAuditTrails(data.auditTrails || []);
         setReminders(data.reminders.map((r: any) => ({ ...r, dueDate: new Date(r.dueDate) })));
         const hydrateTnd = (m: any) => ({ ...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null });
         setTndMovements((data.tndMovements || []).map(hydrateTnd));
@@ -399,6 +404,19 @@ export default function MoneyHubApp({
         setConfirmModal({ isOpen: false });
         startTransition(async () => { await settleTndMovement(id); await refreshHubState(); });
       },
+    });
+  };
+
+  const handleSaveTndNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tndNoteEdit?.note.trim()) { setTndNoteEditError('La note est obligatoire.'); return; }
+    startTransition(async () => {
+      const res: any = await updateTndMovementNote(tndNoteEdit.id, tndNoteEdit.note);
+      if (res.success) {
+        setTndNoteEdit(null);
+        setTndNoteEditError('');
+        await refreshHubState();
+      } else if (res.code) handleSessionExpired(); else setTndNoteEditError(res.error || 'Modification impossible');
     });
   };
 
@@ -639,7 +657,7 @@ export default function MoneyHubApp({
         {activeSection === 'dashboard' && (() => {
           const urgentTnd = [...tndOverdue, ...tndDueSoon.filter((m: any) => !tndOverdue.some((o: any) => o.id === m.id))];
           const urgentCount = urgentTnd.length + dueReminders.length;
-          const recentAudit = initialAuditTrails.slice(0, 5);
+          const recentAudit = auditTrails.slice(0, 5);
           const activePartners = optimisticContacts.filter((c: any) => Math.abs(c.netPositionUsd) > 0.01 || (c.heldBalanceTnd || 0) > 0.01).length;
           const lastAudit = recentAudit[0];
           return (
@@ -882,6 +900,7 @@ export default function MoneyHubApp({
                           {isPending && currentUser.role === 'admin' && (
                             <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Confirmer l'encaissement">✓</button>
                           )}
+                          <button onClick={() => { setTndNoteEdit({ id: m.id, note: m.note, amount: m.amount, type: m.type }); setTndNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90" title="Modifier uniquement la note"><Edit className="h-4 w-4" /></button>
                           {currentUser.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
                         </div>
                       </div>
@@ -930,8 +949,8 @@ export default function MoneyHubApp({
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-neutral-900 pb-4 px-1"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Journal d'audit</h3><button onClick={() => refreshHubState()} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Actualiser</button></div>
             <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
-              {initialAuditTrails.length === 0 && <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Actions tracées ici." />}
-              {initialAuditTrails.map((a: any) => (
+              {auditTrails.length === 0 && <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Actions tracées ici." />}
+              {auditTrails.map((a: any) => (
                 <div key={a.id} className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-3xl flex flex-col gap-2.5 shadow-sm">
                   <div className="flex justify-between items-center"><div className="flex items-center gap-2"><span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${a.action === 'DELETE' || a.action === 'WIPE' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>{a.action}</span><span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">· {a.entityType}</span></div><p className="text-[9px] text-neutral-700 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div>
                   <p className="text-[11px] font-bold text-neutral-300 leading-relaxed px-1">{a.details}</p>
@@ -1055,6 +1074,16 @@ export default function MoneyHubApp({
       </nav>
 
       {/* --- MODALS --- */}
+      {tndNoteEdit && (
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setTndNoteEdit(null); }}>
+          <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-blue-300 uppercase tracking-[0.2em]">Trésorerie</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setTndNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
+            <div className="grid grid-cols-2 gap-3"><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant verrouillé</p><p className={`text-lg font-black mt-1 ${tndNoteEdit.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{tndNoteEdit.type === 'IN' ? '+' : '-'}{formatRawCurrency(tndNoteEdit.amount, 'TND')}</p></div><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type verrouillé</p><p className="text-lg font-black mt-1 text-neutral-200">{tndNoteEdit.type === 'IN' ? 'Entrée' : 'Sortie'}</p></div></div>
+            <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">Seule la note peut être corrigée. Le montant, le type, la date et l’état du mouvement ne peuvent pas être modifiés.</p>
+            <form onSubmit={handleSaveTndNote} className="flex flex-col gap-3"><textarea autoFocus required maxLength={1000} value={tndNoteEdit.note} onChange={e => setTndNoteEdit(current => current ? { ...current, note: e.target.value } : current)} className="min-h-28 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-bold outline-none focus:border-blue-500/50" placeholder="Note du mouvement" />{tndNoteEditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{tndNoteEditError}</p>}<div className="flex gap-3"><button type="button" onClick={() => setTndNoteEdit(null)} disabled={isPending} className="flex-1 py-3.5 bg-neutral-900 border border-neutral-800 text-neutral-400 font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending || !tndNoteEdit.note.trim()} className="flex-1 py-3.5 bg-blue-500 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition disabled:opacity-50">{isPending ? 'Enregistrement…' : 'Enregistrer'}</button></div></form>
+          </div>
+        </div>
+      )}
       {activeModal === 'add_tx' && currentUser.role === 'admin' && (
         <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl shadow-emerald-500/5 ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
