@@ -441,6 +441,9 @@ export async function createTndMovement(formData: FormData) {
     const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
 
     if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    // Strict type guard: only IN or OUT may ever be stored, so the balance sum can never
+    // mis-classify a malformed movement.
+    if (type !== 'IN' && type !== 'OUT') return { success: false, error: 'Type de mouvement invalide' };
     if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
 
     // Parse scheduled date if provided; a future date makes the movement UNSETTLED (pending).

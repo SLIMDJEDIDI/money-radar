@@ -240,9 +240,14 @@ export default function MoneyHubApp({
 
   const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
-    const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val);
     // Tunisian convention: amount first, then DT (e.g. "11 130 DT").
-    if (curr === 'TND') return `${amount} DT`;
+    // Show millimes ONLY when present, so the displayed total is always faithful to the
+    // stored cash value and can never silently round away a fraction of a dinar.
+    if (curr === 'TND') {
+      const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(val);
+      return `${amount} DT`;
+    }
+    const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val);
     const symbol = CURRENCY_SYMBOLS[curr] || curr;
     return `${symbol} ${amount}`;
   }, []);
