@@ -795,7 +795,7 @@ export default function MoneyHubApp({
           {currentUser.role === 'admin' && (
             <>
               <div className="flex gap-2 px-1">
-                <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); setActiveModal('add_tx'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
+                <button onClick={() => setActiveModal('choose_account')} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
                 <button onClick={() => setActiveModal('add_contact')} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-white font-black uppercase text-xs rounded-2xl active:scale-[0.98] transition shadow-md"> <UserPlus className="h-5 w-5" /> </button>
               </div>
               <div className="relative px-1">
@@ -1386,6 +1386,28 @@ export default function MoneyHubApp({
         </div>
       )}
 
+      {activeModal === 'choose_account' && currentUser.role === 'admin' && (
+        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[40px] p-8 flex flex-col gap-5 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 px-1"><div><h3 className="font-black uppercase tracking-[0.2em] text-sm text-white">Quelle caisse ?</h3><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1">Choisis où faire l'opération</p></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setTndBatchItems([{ amount: '', note: '' }]); navigateTo('treasury'); setActiveModal('add_tnd'); }} className="text-left p-5 rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.98] transition flex items-center gap-4">
+              <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-5 w-5" /></div>
+              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse TND VLT Coffre</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Trésorerie en dinars</p></div>
+              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
+            </button>
+            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); navigateTo('currencies'); setActiveModal('add_tx'); }} className="text-left p-5 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center gap-4">
+              <div className="h-11 w-11 rounded-2xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-5 w-5" /></div>
+              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Position Globale (Partenaires)</p><p className="text-[10px] font-black text-emerald-300/80 uppercase tracking-widest mt-1">Encaisser / décaisser un partenaire</p></div>
+              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
+            </button>
+            <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); navigateTo('archive'); setActiveModal('add_archive'); }} className="text-left p-5 rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.98] transition flex items-center gap-4">
+              <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
+              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Trésorerie archive en dinars</p></div>
+              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
+            </button>
+          </div>
+        </div>
+      )}
       {activeModal === 'add_tnd' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
           <div className={`w-full ${tndForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-blue-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
