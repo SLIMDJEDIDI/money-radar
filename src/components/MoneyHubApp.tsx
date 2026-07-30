@@ -5,7 +5,7 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
@@ -122,12 +122,20 @@ export default function MoneyHubApp({
   type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive';
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
-  // Assistants land directly on Treasury (only section they can access)
+  // Assistants land directly on Treasury (only section they can access) and can never reach ARCHIVE.
   useEffect(() => {
     if (currentUser && currentUser.role !== 'admin' && activeSection !== 'treasury' && activeSection !== 'settings') {
       setActiveSection('treasury');
     }
   }, [currentUser, activeSection]);
+
+  // One-time: ensure the ARCHIVE ledger table exists (admin only, non-destructive).
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      ensureArchiveTable().then((res: any) => { if (res?.success) refreshHubState(); }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.role]);
 
   // --- DATA STATES ---
   const [contacts, setContacts] = useState(initialContacts);
@@ -801,6 +809,7 @@ export default function MoneyHubApp({
               <div className="grid sm:grid-cols-2 gap-3">
                 <button onClick={() => navigateTo('treasury')} className="text-left p-5 sm:p-6 rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10"><div className="flex justify-between items-center gap-3"><div className="h-9 w-9 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center"><Coins className="h-4 w-4" /></div><span className="text-[8px] font-black text-blue-300 uppercase tracking-widest">Live · TND</span></div><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.16em] mt-4">Caisse TND</p><p className={`text-3xl sm:text-4xl font-black tracking-[-0.07em] mt-1 ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-white/5 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
                 <button onClick={() => navigateTo('currencies')} className="text-left p-5 sm:p-6 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.985] transition shadow-lg shadow-emerald-950/10"><div className="flex justify-between items-center gap-3"><div className="h-9 w-9 rounded-xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center"><WalletCards className="h-4 w-4" /></div><span className="text-[8px] font-black text-emerald-300 uppercase tracking-widest">Live · USD</span></div><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.16em] mt-4">Position globale</p><p className={`text-3xl sm:text-4xl font-black tracking-[-0.07em] mt-1 ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-white/5 text-[9px] font-black"><span className="text-blue-300">{formatUSD(metrics.totalAvoirs || 0)} avoirs</span><span className="text-neutral-500">{activePartners} actif{activePartners > 1 ? 's' : ''}</span></div></button>
+                <button onClick={() => navigateTo('archive')} className="text-left p-5 sm:p-6 rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.985] transition shadow-lg shadow-amber-950/10"><div className="flex justify-between items-center gap-3"><div className="h-9 w-9 rounded-xl bg-amber-500/15 text-amber-300 flex items-center justify-center"><Archive className="h-4 w-4" /></div><span className="text-[8px] font-black text-amber-300 uppercase tracking-widest">Live · TND</span></div><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.16em] mt-4">Caisse Archive</p><p className={`text-3xl sm:text-4xl font-black tracking-[-0.07em] mt-1 ${(metrics.archiveBalance || 0) >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-white/5 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.archiveTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.archiveTodayOut || 0, 'TND')}</span></div></button>
               </div>
 
               <div className="grid grid-cols-2 gap-3 px-1">
@@ -1037,6 +1046,105 @@ export default function MoneyHubApp({
           );
         })()}
 
+        {activeSection === 'archive' && currentUser.role === 'admin' && (() => {
+          const balanceById: Record<string, number> = {};
+          {
+            const ordered = [...optimisticArchiveMovements].reverse();
+            let acc = 0;
+            for (const m of ordered) { if (m.isSettled !== false) { acc += (m.type === 'IN' ? m.amount : -m.amount); } balanceById[m.id] = acc; }
+          }
+          const now = Date.now();
+          const periodMs = archivePeriod === 'today' ? 86400000 : archivePeriod === '7d' ? 7*86400000 : archivePeriod === '30d' ? 30*86400000 : 0;
+          const min = parseFloat(archiveAmountMin || '');
+          const max = parseFloat(archiveAmountMax || '');
+          const q = archiveSearch.trim().toLowerCase();
+          const filtered = optimisticArchiveMovements.filter((m: any) => {
+            if (archiveTypeFilter !== 'all' && m.type !== archiveTypeFilter) return false;
+            if (archiveUserFilter !== 'all' && m.performedBy !== archiveUserFilter) return false;
+            if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
+            if (!isNaN(min) && m.amount < min) return false;
+            if (!isNaN(max) && m.amount > max) return false;
+            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
+            return true;
+          });
+          const uniqueUsers: string[] = Array.from(new Set(optimisticArchiveMovements.map((m: any) => m.performedBy).filter(Boolean))) as string[];
+          const filteredIn = filtered.filter((m:any) => m.type === 'IN').reduce((s:number,m:any) => s+m.amount, 0);
+          const filteredOut = filtered.filter((m:any) => m.type === 'OUT').reduce((s:number,m:any) => s+m.amount, 0);
+          return (
+            <div className="flex flex-col gap-6 pb-20">
+              {(archiveDueSoon.length > 0 || archiveOverdue.length > 0) && (
+                <div className="relative overflow-hidden bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-orange-500/10 border-2 border-amber-500/40 rounded-[36px] p-6 shadow-2xl shadow-amber-500/10">
+                  <div className="flex items-start gap-4 mb-4"><div className="p-3 bg-amber-500/20 rounded-2xl ring-1 ring-amber-500/40 animate-pulse"><Bell className="h-5 w-5 text-amber-300" /></div><div className="flex-1 min-w-0"><p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.25em]">Rappel Archive</p><h3 className="text-xl font-black text-white leading-tight mt-1">{archiveOverdue.length > 0 ? `${archiveOverdue.length} mouvement${archiveOverdue.length>1?'s':''} en retard` : `${archiveDueSoon.length} mouvement${archiveDueSoon.length>1?'s':''} prévu${archiveDueSoon.length>1?'s':''} sous 24h`}</h3></div></div>
+                  <div className="flex flex-col gap-2">{[...archiveOverdue, ...archiveDueSoon.filter(m => !archiveOverdue.some(o => o.id === m.id))].slice(0, 4).map((m: any) => { const isOverdue = m.scheduledFor && new Date(m.scheduledFor).getTime() < Date.now(); return (
+                    <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-amber-500/20 rounded-2xl"><div className="flex items-center gap-3 min-w-0 flex-1"><div className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center ${m.type === 'IN' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{m.type === 'IN' ? <Plus className="h-4 w-4 stroke-[3]" /> : <ArrowUpRight className="h-4 w-4 stroke-[3] rotate-90" />}</div><div className="flex flex-col min-w-0 flex-1"><p className="text-sm font-black text-white truncate">{m.note}</p><p className={`text-[10px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-300' : 'text-amber-300'}`}>{isOverdue ? '⚠ En retard depuis' : '📅 Prévu'} {m.scheduledFor ? new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</p></div></div><div className="flex items-center gap-2 shrink-0"><p className={`text-base font-black tracking-tighter ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p><button onClick={() => handleSettleArchiveMovement(m.id)} className="px-3 py-2 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95">Confirmer</button></div></div>
+                  ); })}</div>
+                </div>
+              )}
+
+              <div className="bg-gradient-to-br from-[#1a1206] to-black border border-amber-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-amber-400"><History className="h-48 w-48" /></div>
+                <p className="text-[11px] font-black text-amber-300 uppercase tracking-[0.3em] mb-2">Caisse Archive TND</p>
+                <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</h2>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.archiveTodayIn || 0, 'TND')}</p></div>
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Aujourd'hui</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(metrics.archiveTodayOut || 0, 'TND')}</p></div>
+                  {(archiveUpcoming.length > 0) && (
+                    <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Solde Projeté</p><p className="text-amber-300 font-black text-base tracking-tighter">{formatRawCurrency((metrics.archiveBalance || 0) + (metrics.archivePendingIn || 0) - (metrics.archivePendingOut || 0), 'TND')}</p><p className="text-[9px] text-neutral-500 font-black uppercase tracking-widest mt-0.5">{archiveUpcoming.length} planifié{archiveUpcoming.length>1?'s':''}</p></div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal('add_archive'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
+                <button onClick={() => { setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); setActiveModal('add_archive'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
+              </div>
+
+              <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
+                <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={archiveSearch} onChange={e => setArchiveSearch(e.target.value)} placeholder="Rechercher note, montant, utilisateur…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-amber-500/40" /></div>
+                <div className="flex flex-wrap gap-2">
+                  {[{ id: 'today', label: "Aujourd'hui" },{ id: '7d', label: '7 jours' },{ id: '30d', label: '30 jours' },{ id: 'all', label: 'Tout' }].map(p => (<button key={p.id} onClick={() => setArchivePeriod(p.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${archivePeriod === p.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{p.label}</button>))}
+                  <span className="mx-1 border-l border-neutral-800" />
+                  {[{ id: 'all', label: 'Tous types' },{ id: 'IN', label: '+ Entrées' },{ id: 'OUT', label: '- Sorties' }].map(t => (<button key={t.id} onClick={() => setArchiveTypeFilter(t.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${archiveTypeFilter === t.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{t.label}</button>))}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <select value={archiveUserFilter} onChange={e => setArchiveUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40"><option value="all">Tous utilisateurs</option>{uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}</select>
+                  <input type="number" placeholder="Montant min" value={archiveAmountMin} onChange={e => setArchiveAmountMin(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40" />
+                  <input type="number" placeholder="Montant max" value={archiveAmountMax} onChange={e => setArchiveAmountMax(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40" />
+                </div>
+                {(archiveSearch || archivePeriod !== 'all' || archiveUserFilter !== 'all' || archiveAmountMin || archiveAmountMax || archiveTypeFilter !== 'all') && (
+                  <div className="flex items-center justify-between pt-2 border-t border-neutral-800"><div className="flex items-center gap-5 text-[10px] font-black uppercase tracking-widest"><span className="text-neutral-400">{filtered.length} rés.</span><span className="text-emerald-400">+{formatRawCurrency(filteredIn, 'TND')}</span><span className="text-rose-400">-{formatRawCurrency(filteredOut, 'TND')}</span></div><button onClick={() => { setArchiveSearch(''); setArchivePeriod('all'); setArchiveUserFilter('all'); setArchiveAmountMin(''); setArchiveAmountMax(''); setArchiveTypeFilter('all'); }} className="text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white transition">Réinitialiser</button></div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal Archive</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {optimisticArchiveMovements.length}</span></div>
+                {filtered.length === 0 && <EmptyState icon={<History className="h-10 w-10" />} title={optimisticArchiveMovements.length === 0 ? 'Archive vide' : 'Aucun résultat'} subtitle={optimisticArchiveMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
+                <div className="flex flex-col gap-3">
+                  {filtered.map((m: any) => {
+                    const running = balanceById[m.id] ?? 0;
+                    const isPending = m.isSettled === false;
+                    return (
+                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
+                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p></div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}{m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}{!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}</div>
+                        </div>
+                        <div className="text-right shrink-0 flex items-center gap-3">
+                          <p className={`text-lg font-black tracking-tighter ${isPending ? 'text-amber-300' : m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
+                          {isPending && <button onClick={() => handleSettleArchiveMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Confirmer">✓</button>}
+                          <button onClick={() => { setArchiveNoteEdit({ id: m.id, note: m.note, amount: m.amount, type: m.type }); setArchiveNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90" title="Modifier uniquement la note"><Edit className="h-4 w-4" /></button>
+                          <button onClick={() => handleDeleteArchiveMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {activeSection === 'transactions' && (
           <div className="flex flex-col gap-3">
             {filteredMovements.length === 0 && <EmptyState icon={<ArrowLeftRight className="h-10 w-10" />} title="Aucune opération" subtitle="Utilisez « Nouvelle Opération »." />}
@@ -1187,6 +1295,7 @@ export default function MoneyHubApp({
             { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'archive', label: 'Archive', icon: <Archive className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'history', label: 'Audit', icon: <History className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'settings', label: 'Param', icon: <Settings className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
@@ -1292,6 +1401,57 @@ export default function MoneyHubApp({
                 <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{tndForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'add_archive' && currentUser.role === 'admin' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className={`w-full ${archiveForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-amber-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{archiveForm.type === 'IN' ? 'Encaisser Archive' : 'Décaissement Archive'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            {archiveForm.type === 'OUT' ? (
+              <form onSubmit={handleAddArchiveBatchDisbursement} className="flex flex-col gap-5">
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Décaissements multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant doit avoir sa propre note.</p></div><div className="px-4 py-2.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-lg font-black">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(archiveBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))} DT</div></div>
+                <div className="flex flex-col gap-3 max-h-[38vh] overflow-y-auto pr-1">
+                  {archiveBatchItems.map((item, index) => (
+                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_150px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                      <span className="h-8 w-8 rounded-xl bg-rose-500/10 text-rose-300 flex items-center justify-center text-[10px] font-black">{index + 1}</span>
+                      <input type="number" step="any" required min="0.001" placeholder="Montant" value={item.amount} onChange={e => setArchiveBatchItems(items => items.map((x, i) => i === index ? { ...x, amount: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-sm text-white font-black outline-none focus:border-rose-500/50" />
+                      <input type="text" required placeholder="NOTE OBLIGATOIRE" value={item.note} onChange={e => setArchiveBatchItems(items => items.map((x, i) => i === index ? { ...x, note: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-xs text-white font-bold uppercase outline-none focus:border-rose-500/50" />
+                      <button type="button" disabled={archiveBatchItems.length === 1} onClick={() => setArchiveBatchItems(items => items.filter((_, i) => i !== index))} className="p-2.5 text-rose-500/50 hover:text-rose-400 disabled:opacity-20 disabled:cursor-not-allowed rounded-xl"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" disabled={archiveBatchItems.length >= 30} onClick={() => setArchiveBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label>
+                  <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />
+                  {archiveForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Tous les décaissements seront planifiés à cette date et rappelés dès J-1.</p>}
+                </div>
+                <div className="flex gap-4 mt-1">
+                  <button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
+                  <button type="submit" disabled={isPending || archiveBatchItems.some(item => !item.amount || !item.note.trim())} className="flex-[2] py-5 bg-rose-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-rose-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{archiveForm.scheduledFor ? `Planifier ${archiveBatchItems.length} sortie${archiveBatchItems.length > 1 ? 's' : ''}` : `Enregistrer ${archiveBatchItems.length} sortie${archiveBatchItems.length > 1 ? 's' : ''}`}</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleAddArchiveMovement} className="flex flex-col gap-5">
+                <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-amber-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={archiveForm.amount} onChange={e => setArchiveForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-amber-300 font-black text-lg shadow-inner">TND</div></div>
+                <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={archiveForm.note} onChange={e => setArchiveForm(p=>({...p, note: e.target.value}))} />
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />{archiveForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
+                <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !archiveForm.note.trim()} className="flex-[2] py-5 bg-amber-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-amber-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{archiveForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {archiveNoteEdit && (
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setArchiveNoteEdit(null); }}>
+          <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.2em]">Archive</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setArchiveNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
+            <div className="grid grid-cols-2 gap-3"><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant verrouillé</p><p className={`text-lg font-black mt-1 ${archiveNoteEdit.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{archiveNoteEdit.type === 'IN' ? '+' : '-'}{formatRawCurrency(archiveNoteEdit.amount, 'TND')}</p></div><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type verrouillé</p><p className="text-lg font-black mt-1 text-neutral-200">{archiveNoteEdit.type === 'IN' ? 'Entrée' : 'Sortie'}</p></div></div>
+            <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">Seule la note peut être corrigée. Le montant, le type, la date et l’état du mouvement ne peuvent pas être modifiés.</p>
+            <form onSubmit={handleSaveArchiveNote} className="flex flex-col gap-3"><textarea autoFocus required maxLength={1000} value={archiveNoteEdit.note} onChange={e => setArchiveNoteEdit(current => current ? { ...current, note: e.target.value } : current)} className="min-h-28 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-bold outline-none focus:border-amber-500/50" placeholder="Note du mouvement" />{archiveNoteEditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{archiveNoteEditError}</p>}<div className="flex gap-3"><button type="button" onClick={() => setArchiveNoteEdit(null)} disabled={isPending} className="flex-1 py-3.5 bg-neutral-900 border border-neutral-800 text-neutral-400 font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending || !archiveNoteEdit.note.trim()} className="flex-1 py-3.5 bg-amber-500 text-black font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition disabled:opacity-50">{isPending ? 'Enregistrement…' : 'Enregistrer'}</button></div></form>
           </div>
         </div>
       )}
