@@ -75,6 +75,7 @@ model HubReminder {
   dueDate       DateTime
   note          String?
   reminderEmail String?
+  plannedType   String     @default("RECEIVABLE") // "HELD" (encaisser), "PAYABLE" (décaisser), "RECEIVABLE" (rappel simple)
   lastNotifiedAt DateTime?
   isCompleted    Boolean    @default(false)
   createdAt      DateTime   @default(now())

@@ -15,6 +15,13 @@ export interface HubMetrics {
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
 export async function getHubDashboardData(searchQuery: string = '') {
   try {
+    // Self-healing: ensure the reminder plannedType column exists before any query selects it.
+    // Idempotent and non-destructive (ADD COLUMN IF NOT EXISTS). Prevents an SSR crash on the
+    // first deploy after the schema change, before an admin can trigger the client-side migration.
+    try {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "HubReminder" ADD COLUMN IF NOT EXISTS "plannedType" TEXT NOT NULL DEFAULT 'RECEIVABLE';`);
+    } catch {}
+
     // Ensure core currencies exist
     const coreCodes = ['USD', 'RMB', 'EURO', 'TND'];
     const existingCurrencies = await prisma.hubCurrency.findMany({

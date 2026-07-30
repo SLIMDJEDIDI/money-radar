@@ -650,6 +650,19 @@ export async function ensureArchiveTable() {
   }
 }
 
+// Non-destructive: adds the plannedType column to HubReminder if it is missing.
+// Lets a planned movement carry its intended type (HELD/PAYABLE/RECEIVABLE).
+export async function ensureReminderPlannedType() {
+  try {
+    await requireAdmin();
+    await prisma.$executeRawUnsafe(`ALTER TABLE "HubReminder" ADD COLUMN IF NOT EXISTS "plannedType" TEXT NOT NULL DEFAULT 'RECEIVABLE';`);
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Provisioning rappel impossible' };
+  }
+}
+
 export async function createArchiveMovement(formData: FormData) {
   try {
     const session = await requireAdmin();
@@ -1006,6 +1019,9 @@ export async function createReminder(formData: FormData) {
   const due = new Date(formData.get('dueDate') as string);
   const note = formData.get('note') as string || '';
   const reminderEmail = formData.get('reminderEmail') as string || '';
+  // Planned movement type: HELD (encaisser), PAYABLE (décaisser) or RECEIVABLE (rappel simple).
+  const rawPlanned = formData.get('plannedType') as string || 'RECEIVABLE';
+  const plannedType = ['HELD', 'PAYABLE', 'RECEIVABLE'].includes(rawPlanned) ? rawPlanned : 'RECEIVABLE';
 
   // Proper USD conversion using the currency rate
   const currency = await prisma.hubCurrency.findUnique({ where: { code: cur } });
@@ -1014,12 +1030,13 @@ export async function createReminder(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const reminder = await tx.hubReminder.create({
-      data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd, dueDate: due, note, reminderEmail }
+      data: { contactId: cid, amount: amt, currencyCode: cur, amountInUsd, dueDate: due, note, reminderEmail, plannedType }
     });
     const contact = await tx.hubContact.findUnique({ where: { id: cid } });
+    const kind = plannedType === 'HELD' ? 'Encaissement prévu' : plannedType === 'PAYABLE' ? 'Décaissement prévu' : 'Paiement attendu';
     await logAudit(tx, {
       entityType: 'REMINDER', entityId: reminder.id, action: 'CREATE',
-      details: `Paiement attendu: ${amt} ${cur} de ${contact?.name} le ${due.toLocaleDateString('fr-FR')}`,
+      details: `${kind}: ${amt} ${cur} · ${contact?.name} le ${due.toLocaleDateString('fr-FR')}`,
       modifiedBy: session.username,
     });
   });
@@ -1034,8 +1051,10 @@ export async function toggleReminderCompleted(id: string, isCompleted: boolean) 
   return { success: true };
 }
 
-// À RECEVOIR is a PURE reminder: a planned future receipt. Confirming it only marks
-// the reminder as done — it NEVER touches any partner balance (no pool impact).
+// Confirm a PLANNED movement. Behaviour depends on its planned type:
+//  - HELD    → book an ENCAISSER (pool +) real transaction on the partner
+//  - PAYABLE → book a DÉCAISSER (pool −) real transaction on the partner
+//  - RECEIVABLE (rappel simple) → just mark done, NEVER touches any balance
 export async function confirmReminderReceived(id: string) {
   try {
     const session = await requireAdmin();
@@ -1044,12 +1063,38 @@ export async function confirmReminderReceived(id: string) {
       if (!reminder) throw new Error('NOT_FOUND');
       if (reminder.isCompleted) return;
 
-      // Mark reminder completed — no transaction, no balance change.
+      const planned = (reminder as any).plannedType || 'RECEIVABLE';
+      const c = reminder.contact;
+
+      if ((planned === 'HELD' || planned === 'PAYABLE') && c) {
+        // Materialise the planned movement as a real transaction and apply it to the pool.
+        await tx.hubTransaction.create({
+          data: {
+            amount: reminder.amount,
+            currencyCode: reminder.currencyCode,
+            amountInUsd: reminder.amountInUsd,
+            contactId: c.id,
+            type: planned,
+            category: planned === 'HELD' ? 'Encaissement planifié' : 'Décaissement planifié',
+            note: reminder.note || `Mouvement planifié confirmé (${new Date(reminder.dueDate).toLocaleDateString('fr-FR')})`,
+          },
+        });
+        let h = c.heldBalanceUsd, p = c.payableBalanceUsd;
+        if (planned === 'HELD') h += reminder.amountInUsd;
+        else p += reminder.amountInUsd;
+        await tx.hubContact.update({
+          where: { id: c.id },
+          data: { heldBalanceUsd: h, payableBalanceUsd: p, netPositionUsd: h + c.receivableBalanceUsd - p },
+        });
+      }
+
+      // Mark reminder completed.
       await tx.hubReminder.update({ where: { id }, data: { isCompleted: true } });
 
+      const verb = planned === 'HELD' ? 'Encaissement' : planned === 'PAYABLE' ? 'Décaissement' : 'Rappel';
       await logAudit(tx, {
         entityType: 'REMINDER', entityId: id, action: 'RECEIVED',
-        details: `Rappel « à recevoir » confirmé pour ${reminder.contact?.name}: ${reminder.amount} ${reminder.currencyCode}`,
+        details: `${verb} planifié confirmé · ${c?.name}: ${reminder.amount} ${reminder.currencyCode}`,
         modifiedBy: session.username,
       });
     });

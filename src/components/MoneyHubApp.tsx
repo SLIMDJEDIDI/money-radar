@@ -15,7 +15,7 @@ import {
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
-  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner,
+  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -40,6 +40,21 @@ const StatCard = memo(({ label, val, type, activeFilter, onClick, style, note, e
   </div>
 ));
 StatCard.displayName = 'StatCard';
+
+// Action card: no amount — a big tappable button that triggers a movement.
+const ActionCard = memo(({ label, note, style, icon, onClick }: any) => (
+  <button
+    onClick={onClick}
+    className={`bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl cursor-pointer transition-all active:scale-[0.97] hover:border-${style}-500/50 text-left flex flex-col gap-3 min-h-[104px] justify-between`}
+  >
+    <div className={`h-9 w-9 rounded-xl bg-${style}-500/15 text-${style}-300 flex items-center justify-center`}>{icon}</div>
+    <div>
+      <p className={`text-[11px] font-black text-${style}-300 uppercase tracking-wider`}>{label}</p>
+      <p className="text-[9px] text-neutral-400 font-black italic uppercase mt-1 tracking-tighter">{note}</p>
+    </div>
+  </button>
+));
+ActionCard.displayName = 'ActionCard';
 
 const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect }: any) => {
   const positive = c.netPositionUsd >= 0;
@@ -138,6 +153,7 @@ export default function MoneyHubApp({
       (async () => {
         try {
           await ensureArchiveTable();
+          await ensureReminderPlannedType();
           await migrateArchivePartnerToLedger();
           // Only removes the ARCHIVE partner once the ledger already holds the migrated movements.
           await retireArchivePartner();
@@ -189,7 +205,7 @@ export default function MoneyHubApp({
 
   const [transactionForm, setTransactionForm] = useState({ 
     contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '',
-    isPostponed: false, dueDate: '', reminderEmail: ''
+    isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE'
   });
   const [contactForm, setContactForm] = useState({ id: '', name: '', emoji: '👤', country: '', isArchived: false });
   const [postponeTarget, setPostponeTarget] = useState<any>(null);
@@ -374,9 +390,13 @@ export default function MoneyHubApp({
     const contact = contacts.find((c:any) => c.id === transactionForm.contactId);
     const amount = parseFloat(transactionForm.amount);
     startTransition(async () => {
-      if (transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed) {
+      // Any PLANNED movement (encaisser / décaisser / rappel simple) is stored as a
+      // reminder carrying its plannedType; it only hits the balance when confirmed.
+      if (transactionForm.isPostponed) {
         const data = new FormData();
         Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
+        // The planned movement carries its direction (ENCAISSER=HELD / DÉCAISSER=PAYABLE).
+        data.set('plannedType', transactionForm.type);
         const res: any = await createReminder(data);
         if (res.success) { setTransactionForm({ ...transactionForm, amount: '', note: '', isPostponed: false }); setActiveModal(null); await refreshHubState(); }
         else if (res.code) handleSessionExpired(); else alert(res.error);
@@ -621,9 +641,14 @@ export default function MoneyHubApp({
 
   const handleConfirmReceived = (r: any) => {
     setConfirmModal({
-      isOpen: true, title: '✅ Rappel terminé ?',
-      description: `Marquer ce rappel « à recevoir » de ${formatRawCurrency(r.amount, r.currencyCode)} (${r.contact?.name}) comme terminé ? Ceci n'affecte aucun solde — c'est juste un rappel.`,
-      confirmText: 'Terminer',
+      isOpen: true, title: '✅ Confirmer le mouvement ?',
+      description: (() => {
+        const pt = r.plannedType || 'RECEIVABLE';
+        if (pt === 'HELD') return `Confirmer l'ENCAISSEMENT de ${formatRawCurrency(r.amount, r.currencyCode)} avec ${r.contact?.name} ? Ton argent chez lui augmentera (+).`;
+        if (pt === 'PAYABLE') return `Confirmer le DÉCAISSEMENT de ${formatRawCurrency(r.amount, r.currencyCode)} avec ${r.contact?.name} ? Ton argent chez lui diminuera (−).`;
+        return `Marquer ce rappel de ${formatRawCurrency(r.amount, r.currencyCode)} (${r.contact?.name}) comme terminé ? Ceci n'affecte aucun solde.`;
+      })(),
+      confirmText: 'Confirmer',
       onConfirm: async () => { startTransition(async () => { const res: any = await confirmReminderReceived(r.id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); }
     });
   };
@@ -770,7 +795,7 @@ export default function MoneyHubApp({
           {currentUser.role === 'admin' && (
             <>
               <div className="flex gap-2 px-1">
-                <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
+                <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); setActiveModal('add_tx'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
                 <button onClick={() => setActiveModal('add_contact')} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-white font-black uppercase text-xs rounded-2xl active:scale-[0.98] transition shadow-md"> <UserPlus className="h-5 w-5" /> </button>
               </div>
               <div className="relative px-1">
@@ -810,7 +835,7 @@ export default function MoneyHubApp({
 
               <div className="grid grid-cols-2 gap-3 px-1">
                 <button onClick={() => navigateTo('treasury')} className="flex items-center gap-3 p-3.5 rounded-2xl border border-neutral-800 bg-neutral-900/35 text-left hover:border-neutral-700 transition"><CalendarClock className="h-4 w-4 text-neutral-500 shrink-0" /><div className="min-w-0"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Planifiés</p><p className="text-sm font-black text-neutral-300 mt-0.5">{tndUpcoming.length} <span className="text-[10px] text-neutral-600">mouvement{tndUpcoming.length > 1 ? 's' : ''}</span></p></div></button>
-                <button onClick={() => navigateTo('reminders')} className="flex items-center gap-3 p-3.5 rounded-2xl border border-neutral-800 bg-neutral-900/35 text-left hover:border-neutral-700 transition"><Bell className="h-4 w-4 text-neutral-500 shrink-0" /><div className="min-w-0"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Rappels dus</p><p className="text-sm font-black text-neutral-300 mt-0.5">{dueReminders.length} <span className="text-[10px] text-neutral-600">à suivre</span></p></div></button>
+                <button onClick={() => navigateTo('reminders')} className="flex items-center gap-3 p-3.5 rounded-2xl border border-neutral-800 bg-neutral-900/35 text-left hover:border-neutral-700 transition"><CalendarClock className="h-4 w-4 text-neutral-500 shrink-0" /><div className="min-w-0"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Mouvements planifiés</p><p className="text-sm font-black text-neutral-300 mt-0.5">{dueReminders.length} <span className="text-[10px] text-neutral-600">à confirmer</span></p></div></button>
               </div>
 
               <div className="grid lg:grid-cols-[1.1fr_.9fr] gap-3">
@@ -829,7 +854,11 @@ export default function MoneyHubApp({
               <h2 className={`text-4xl sm:text-6xl font-black tracking-tighter break-words ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition)}</h2>
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-5 border-t border-white/5"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-neutral-300 font-black uppercase tracking-widest">Live · USD</span></span><span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">+ Encaissé {formatUSD(metrics.totalAvoirs)}</span>{metrics.totalAvoirsTnd > 0.01 && <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">+ Encaissé {formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}</span>}<span className="text-[10px] font-black uppercase tracking-wider text-rose-400">− Décaissé {formatUSD(metrics.totalPayables)}</span><span className="text-[10px] font-black uppercase tracking-wider text-blue-400">À recevoir {formatUSD(metrics.totalReceivables)}</span></div>
             </div>
-            <div className="grid grid-cols-2 gap-4"><StatCard label="Encaissé" val={formatUSD(metrics.totalAvoirs)} extra={metrics.totalAvoirsTnd > 0.01 ? `+ ${formatRawCurrency(metrics.totalAvoirsTnd, 'TND')}` : null} type="HELD" activeFilter={contactFilterType} style="emerald" note="Argent confié (+)" onClick={() => { setContactFilterType('HELD'); navigateTo('contacts'); }} /><StatCard label="Décaissé" val={formatUSD(metrics.totalPayables)} type="PAYABLE" activeFilter={contactFilterType} style="rose" note="Repris / dépensé (−)" onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} /><StatCard label="À recevoir" val={formatUSD(metrics.totalReceivables)} type="RECEIVABLE" activeFilter={contactFilterType} style="blue" note="Paiement prévu" onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} /><StatCard label="Rappels" val={formatUSD(metrics.upcomingPayments)} type="REMINDER" activeFilter={null} style="amber" note="À venir" onClick={() => navigateTo('reminders')} /></div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <ActionCard label="Encaisser" note="Argent confié (+)" style="emerald" icon={<ArrowUpRight className="h-4 w-4 rotate-180" />} onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); setActiveModal('add_tx'); }} />
+              <ActionCard label="Décaisser" note="Repris / dépensé (−)" style="rose" icon={<ArrowUpRight className="h-4 w-4" />} onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'PAYABLE', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); setActiveModal('add_tx'); }} />
+              <ActionCard label="Planifier un mouvement" note="Date future + rappel" style="amber" icon={<CalendarClock className="h-4 w-4" />} onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: true, dueDate: '', reminderEmail: '', plannedType: 'HELD' }); setActiveModal('add_tx'); }} />
+            </div>
             <div className="flex flex-col gap-4"><div className="flex justify-between items-center px-1"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires actifs</h3></div><button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir tout</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredContacts.map((c: any) => { const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01; return <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md"><div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div><div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div></div>; })}</div></div>
           </div>
         )}
@@ -1158,16 +1187,16 @@ export default function MoneyHubApp({
 
         {activeSection === 'reminders' && (
           <div className="flex flex-col gap-8 pb-20">
-            <div className="flex justify-between items-center px-1"><div className="flex flex-col gap-1.5"><h2 className="text-2xl font-black text-white uppercase tracking-tighter">Échéancier</h2><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Suivi des paiements attendus</p></div><button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'RECEIVABLE', category: 'Virement', note: '', isPostponed: true, dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); }} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 transition active:scale-90"><Calendar className="h-6 w-6" /></button></div>
+            <div className="flex justify-between items-center px-1"><div className="flex flex-col gap-1.5"><h2 className="text-2xl font-black text-white uppercase tracking-tighter">Mouvements Planifiés</h2><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">À confirmer à l'échéance</p></div><button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: true, dueDate: '', reminderEmail: '', plannedType: 'HELD' }); setActiveModal('add_tx'); }} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 transition active:scale-90"><Calendar className="h-6 w-6" /></button></div>
             <div className="flex flex-col gap-8">
               <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-rose-500 uppercase tracking-[0.2em] px-1 flex items-center gap-2 animate-pulse"><AlertTriangle className="h-4 w-4" /> En Retard</h3>
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) < new Date(new Date().toDateString())).map((r:any) => (
-                  <div key={r.id} className="relative p-5 rounded-[32px] border border-rose-900/50 bg-rose-950/10 flex items-center justify-between gap-4 overflow-hidden"><div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" /><div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest uppercase">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                  <div key={r.id} className="relative p-5 rounded-[32px] border border-rose-900/50 bg-rose-950/10 flex items-center justify-between gap-4 overflow-hidden"><div className="absolute top-0 bottom-0 left-0 w-1.5 bg-rose-600" /><div className="flex-1 min-w-0"><p className="text-xs font-black text-rose-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-rose-500 uppercase mt-2 font-black tracking-widest uppercase">DÉPASSÉ LE {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CheckCircle className="h-3.5 w-3.5" /> Confirmer</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
                 ))}
               </div>
               <div className="flex flex-col gap-4"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em] px-1">Prochaines Échéances</h3>
                 {reminders.filter((r:any) => !r.isCompleted && new Date(r.dueDate) >= new Date(new Date().toDateString())).map((r:any) => (
-                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Reçu</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
+                  <div key={r.id} className="p-5 rounded-[32px] border border-neutral-800 bg-neutral-900/40 flex justify-between items-center gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-1 truncate">{r.contact?.name}</p><p className="text-xl font-black text-white tracking-tighter break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p><p className="text-[9px] text-amber-500 uppercase mt-2 font-black tracking-widest">ÉCHÉANCE : {new Date(r.dueDate).toLocaleDateString()}</p><div className="flex gap-2 mt-3"><button onClick={() => handleConfirmReceived(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition hover:bg-emerald-500 hover:text-black"><CheckCircle className="h-3.5 w-3.5" /> Confirmer</button><button onClick={() => handlePostpone(r)} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition"><CalendarClock className="h-3.5 w-3.5" /> Reporter</button><button onClick={() => handleDeleteReminderLoc(r.id)} className="px-2.5 py-2 rounded-xl text-rose-500/40 hover:text-rose-500 active:scale-95 transition"><Trash2 className="h-3.5 w-3.5" /></button></div></div></div>
                 ))}
               </div>
             </div>
@@ -1334,22 +1363,22 @@ export default function MoneyHubApp({
                 </div>
               )}
               <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-emerald-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={transactionForm.amount} onChange={e => setTransactionForm(p=>({...p, amount: e.target.value}))} /><select className="bg-neutral-900 border border-neutral-800 rounded-[20px] px-5 font-black text-white outline-none focus:border-neutral-600 shadow-inner" value={transactionForm.currencyCode} onChange={e => setTransactionForm(p=>({...p, currencyCode: e.target.value}))}>{initialActiveCurrencies.map((c:any) => <option key={c.code} value={c.code}>{c.code}</option>)}</select></div>
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 {[
-                  { type: 'HELD', label: 'ENCAISSER', note: 'Argent confié (+)' },
-                  { type: 'PAYABLE', label: 'DÉCAISSER', note: "Repris / dépensé (−)" },
-                  { type: 'RECEIVABLE', label: 'À RECEVOIR', note: 'Paiement prévu' },
+                  { type: 'HELD', label: 'ENCAISSER', note: 'Argent confié (+)', active: 'bg-emerald-500 text-black border-emerald-500' },
+                  { type: 'PAYABLE', label: 'DÉCAISSER', note: "Repris / dépensé (−)", active: 'bg-rose-500 text-white border-rose-500' },
                 ].map(opt => (
-                  <button key={opt.type} type="button" onClick={() => setTransactionForm(p=>({...p, type: opt.type, isPostponed: opt.type === 'RECEIVABLE' ? true : false}))} className={`py-5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === opt.type ? 'bg-white text-black border-white shadow-emerald-500/10' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{opt.label}</span><span className="text-[7px] font-black opacity-50 tracking-tighter uppercase">{opt.note}</span></button>
+                  <button key={opt.type} type="button" onClick={() => setTransactionForm(p=>({...p, type: opt.type}))} className={`py-5 rounded-[20px] text-[11px] font-black uppercase border transition-all flex flex-col items-center gap-1 shadow-md ${transactionForm.type === opt.type ? opt.active : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}><span>{opt.label}</span><span className="text-[7px] font-black opacity-60 tracking-tighter uppercase">{opt.note}</span></button>
                 ))}
               </div>
-              {transactionForm.type === 'RECEIVABLE' && (
+              <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: !p.isPostponed}))} className={`w-full py-3.5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex items-center justify-center gap-2 tracking-widest ${transactionForm.isPostponed ? 'bg-amber-500 text-black border-amber-500 shadow-lg shadow-amber-500/20' : 'bg-neutral-900/50 border-neutral-800 text-amber-400 hover:border-amber-500/40'}`}><CalendarClock className="h-4 w-4" /> {transactionForm.isPostponed ? 'Planifié pour une date' : 'Planifier pour plus tard'}</button>
+              {transactionForm.isPostponed && (
                 <div className="flex flex-col gap-3 animate-in slide-in-from-top-2 duration-300">
-                  <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date prévue de réception</label><input type="date" required className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date prévue du mouvement</label><input type="date" required min={new Date().toISOString().slice(0,10)} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Email pour le rappel (optionnel)</label><input type="email" placeholder="votre@email.com" className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" value={transactionForm.reminderEmail} onChange={e => setTransactionForm(p=>({...p, reminderEmail: e.target.value}))} /></div>
                 </div>
               )}
-              <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{transactionForm.type === 'RECEIVABLE' && transactionForm.isPostponed ? "RAPPEL : Le montant ne sera pas ajouté aux soldes immédiatement. Vous serez notifié par email à l'échéance." : TYPE_EXPLAIN[transactionForm.type]}</p></div>
+              <div className="px-1 py-2.5 bg-neutral-900/40 border border-neutral-800 rounded-2xl flex items-start gap-2.5"><span className="text-base shrink-0 pl-2">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed pr-2">{transactionForm.isPostponed ? `MOUVEMENT PLANIFIÉ (${transactionForm.type === 'HELD' ? 'Encaisser' : 'Décaisser'}) : le solde ne change PAS maintenant. Il sera appliqué quand tu confirmeras le mouvement à l'échéance.` : TYPE_EXPLAIN[transactionForm.type]}</p></div>
               <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white focus:border-emerald-500/40 outline-none shadow-inner" placeholder="NOTE OBLIGATOIRE (TRACABILITÉ)" value={transactionForm.note} onChange={e => setTransactionForm(p=>({...p, note: e.target.value}))} />
               <div className="flex gap-4 mt-4"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !transactionForm.note.trim()} className="flex-[2] py-5 bg-emerald-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-emerald-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Enregistrer</button></div>
             </form>
@@ -1486,7 +1515,7 @@ export default function MoneyHubApp({
           { key: 'RECEIVABLE', label: 'À recevoir', val: selectedContact.receivableBalanceUsd, tnd: 0, style: 'blue', icon: <CalendarClock className="h-4 w-4" />, note: 'Paiement prévu', explain: 'À RECEVOIR = paiement prévu à une date future. Sert uniquement de rappel — n\'affecte aucun solde.' },
         ];
         const activeExplain = drawerTypeFilter ? breakdown.find(b => b.key === drawerTypeFilter) : null;
-        const startOpForPartner = (opType: string = 'HELD') => { setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: opType, category: 'Virement', note: '', isPostponed: opType === 'RECEIVABLE', dueDate: '', reminderEmail: '' }); setActiveModal('add_tx'); };
+        const startOpForPartner = (opType: string = 'HELD') => { setTransactionForm({ contactId: selectedContact.id, amount: '', currencyCode: 'USD', type: opType === 'RECEIVABLE' ? 'HELD' : opType, category: 'Virement', note: '', isPostponed: opType === 'RECEIVABLE', dueDate: '', reminderEmail: '', plannedType: opType === 'RECEIVABLE' ? 'HELD' : 'RECEIVABLE' }); setActiveModal('add_tx'); };
         const closeDrawer = () => { setSelectedContact(null); setDrawerTypeFilter(null); };
         return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={closeDrawer}>
@@ -1500,7 +1529,7 @@ export default function MoneyHubApp({
               <div className="relative mt-7"><p className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.25em] mb-1">Mon Argent {positive ? '(chez lui)' : '(je lui dois)'}</p><p className={`font-black tracking-tighter leading-none break-words text-4xl ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(selectedContact.netPositionUsd)}</p>{tnd > 0.01 && <p className="text-amber-400 font-black text-sm tracking-tighter mt-1.5">+ {formatRawCurrency(tnd, 'TND')} <span className="text-neutral-500 text-[10px]">(local)</span></p>}</div>
             </div>
             <div className="px-7 pt-6 grid grid-cols-2 gap-3"><button onClick={() => startOpForPartner('HELD')} className="py-4 bg-emerald-500 text-black font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 active:scale-[0.97] transition tracking-widest"><ArrowUpRight className="h-4 w-4 stroke-[3] rotate-180" /> Encaisser</button><button onClick={() => startOpForPartner('PAYABLE')} className="py-4 bg-rose-500 text-white font-black uppercase text-[11px] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-rose-500/20 active:scale-[0.97] transition tracking-widest"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Décaisser</button></div>
-            <div className="px-7 pt-3 flex gap-3"><button onClick={() => startOpForPartner('RECEIVABLE')} className="flex-1 py-3 bg-neutral-900 border border-blue-500/20 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> À recevoir</button><button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-3 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button></div>
+            <div className="px-7 pt-3 flex gap-3"><button onClick={() => startOpForPartner('RECEIVABLE')} className="flex-1 py-3 bg-neutral-900 border border-amber-500/20 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Planifier</button><button onClick={(e) => { handleOpenEditContact(e as any, selectedContact); }} className="px-5 py-3 bg-neutral-900 border border-neutral-800 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Edit className="h-4 w-4" /> Modifier</button></div>
             <div className="px-7 pt-6 grid grid-cols-3 gap-2.5">
               {breakdown.map(b => {
                 const showUsd = b.key !== 'HELD' || b.val > 0.01 || b.tnd <= 0.01; const active = drawerTypeFilter === b.key;
@@ -1564,7 +1593,7 @@ export default function MoneyHubApp({
               {dueReminders.map((r:any) => {
                 const overdue = new Date(r.dueDate) < new Date(new Date().toDateString());
                 return (
-                <div key={r.id} className={`p-5 rounded-[28px] border flex flex-col gap-4 shadow-lg ${overdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}><div className="flex justify-between items-start gap-3"><div className="min-w-0"><p className={`text-[10px] font-black uppercase tracking-widest ${overdue ? 'text-rose-400' : 'text-amber-400'}`}>{overdue ? '⚠ En retard' : '🔔 Échéance aujourd\'hui'}</p><p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{r.contact?.name}</p><p className="text-2xl font-black text-white tracking-tighter mt-1 break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p>{r.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black">≈ {formatUSD(r.amountInUsd)}</p>}<p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {new Date(r.dueDate).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })}</p>{r.note && <p className="text-[11px] text-neutral-500 font-bold mt-1 italic">{r.note}</p>}</div></div><div className="flex gap-2.5"><button onClick={() => handleConfirmReceived(r)} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Reçu</button><button onClick={() => handlePostpone(r)} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Reporter</button></div></div>
+                <div key={r.id} className={`p-5 rounded-[28px] border flex flex-col gap-4 shadow-lg ${overdue ? 'border-rose-900 bg-rose-950/20' : 'border-amber-900/50 bg-amber-950/10'}`}><div className="flex justify-between items-start gap-3"><div className="min-w-0"><p className={`text-[10px] font-black uppercase tracking-widest ${overdue ? 'text-rose-400' : 'text-amber-400'}`}>{overdue ? '⚠ En retard' : '🔔 Échéance aujourd\'hui'}</p><p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{r.contact?.name}</p><p className="text-2xl font-black text-white tracking-tighter mt-1 break-words">{formatRawCurrency(r.amount, r.currencyCode)}</p>{r.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black">≈ {formatUSD(r.amountInUsd)}</p>}<p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {new Date(r.dueDate).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })}</p>{r.note && <p className="text-[11px] text-neutral-500 font-bold mt-1 italic">{r.note}</p>}</div></div><div className="flex gap-2.5"><button onClick={() => handleConfirmReceived(r)} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Confirmer</button><button onClick={() => handlePostpone(r)} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-amber-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CalendarClock className="h-4 w-4" /> Reporter</button></div></div>
                 );
               })}
             </div>
