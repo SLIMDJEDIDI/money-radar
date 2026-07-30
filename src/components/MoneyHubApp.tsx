@@ -15,7 +15,7 @@ import {
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
-  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable,
+  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -129,10 +129,19 @@ export default function MoneyHubApp({
     }
   }, [currentUser, activeSection]);
 
-  // One-time: ensure the ARCHIVE ledger table exists (admin only, non-destructive).
+  // One-time: ensure the ARCHIVE ledger table exists (admin only, non-destructive),
+  // then import the ARCHIVE partner's AVOIR/TND operations as IN encaissements.
+  // Both steps are idempotent: provisioning uses IF NOT EXISTS, migration skips if
+  // the ledger already has movements (no double import).
   useEffect(() => {
     if (currentUser?.role === 'admin') {
-      ensureArchiveTable().then((res: any) => { if (res?.success) refreshHubState(); }).catch(() => {});
+      (async () => {
+        try {
+          await ensureArchiveTable();
+          await migrateArchivePartnerToLedger();
+          await refreshHubState();
+        } catch {}
+      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);

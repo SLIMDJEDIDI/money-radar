@@ -795,6 +795,61 @@ export async function updateArchiveMovementNote(id: string, rawNote: string) {
   }
 }
 
+// ONE-TIME MIGRATION: import the ARCHIVE partner's AVOIR (HELD) TND operations into the
+// new ARCHIVE ledger as settled IN encaissements, preserving original date and note.
+// Idempotent: refuses to run if the ledger already contains movements (prevents double import).
+// Only HELD/TND transactions are imported (CRÉANCE/DETTE and non-TND are ignored).
+export async function migrateArchivePartnerToLedger() {
+  try {
+    const session = await requireAdmin();
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.hubArchiveMovement.count();
+      if (existing > 0) return { skipped: true, reason: 'ALREADY_POPULATED', imported: 0, total: 0 };
+
+      const archiveContact = await tx.hubContact.findFirst({
+        where: { name: { equals: 'archive', mode: 'insensitive' } },
+      });
+      if (!archiveContact) return { skipped: true, reason: 'NO_ARCHIVE_PARTNER', imported: 0, total: 0 };
+
+      const ops = await tx.hubTransaction.findMany({
+        where: { contactId: archiveContact.id, type: 'HELD', currencyCode: 'TND' },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (ops.length === 0) return { skipped: true, reason: 'NO_HELD_TND_OPS', imported: 0, total: 0 };
+
+      let total = 0;
+      for (const op of ops) {
+        await tx.hubArchiveMovement.create({
+          data: {
+            amount: op.amount,
+            type: 'IN',
+            note: op.note && op.note.trim() ? op.note : `Encaissement archivé (import ${op.createdAt.toLocaleDateString('fr-FR')})`,
+            performedBy: session.username,
+            isSettled: true,
+            scheduledFor: null,
+            createdAt: op.createdAt, // preserve original date
+          },
+        });
+        total += op.amount;
+      }
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: archiveContact.id,
+        action: 'ARCH_MIGRATE',
+        details: `Migration ARCHIVE: ${ops.length} avoir(s) TND importés en encaissements — total ${total} TND`,
+        newValue: JSON.stringify(ops.map(o => ({ amount: o.amount, note: o.note, date: o.createdAt }))),
+        modifiedBy: session.username,
+      });
+      return { skipped: false, imported: ops.length, total };
+    });
+    revalidatePath('/');
+    return { success: true, ...result };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Migration impossible' };
+  }
+}
+
 export async function deleteArchiveMovement(id: string) {
   try {
     const session = await requireAdmin();
