@@ -298,16 +298,19 @@ export default function MoneyHubApp({
     return () => window.removeEventListener('popstate', onPop);
   }, [goBack]);
 
-  const formatUSD = useCallback((val: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val), []);
+  // fr-FR groups thousands with a narrow no-break space (U+202F) that often renders as
+  // no visible gap. Force a normal space so "12000" always shows as "12 000".
+  const groupSep = (s: string) => s.replace(/[\u202f\u00a0]/g, ' ');
+  const formatUSD = useCallback((val: number) => groupSep(new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val)), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
     // Tunisian convention: amount first, then DT (e.g. "11 130 DT").
     // Show millimes ONLY when present, so the displayed total is always faithful to the
     // stored cash value and can never silently round away a fraction of a dinar.
     if (curr === 'TND') {
-      const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(val);
+      const amount = groupSep(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(val));
       return `${amount} DT`;
     }
-    const amount = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val);
+    const amount = groupSep(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val));
     const symbol = CURRENCY_SYMBOLS[curr] || curr;
     return `${symbol} ${amount}`;
   }, []);
