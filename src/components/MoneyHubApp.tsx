@@ -15,7 +15,7 @@ import {
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
-  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger,
+  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -139,6 +139,8 @@ export default function MoneyHubApp({
         try {
           await ensureArchiveTable();
           await migrateArchivePartnerToLedger();
+          // Only removes the ARCHIVE partner once the ledger already holds the migrated movements.
+          await retireArchivePartner();
           await refreshHubState();
         } catch {}
       })();

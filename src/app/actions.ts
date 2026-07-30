@@ -850,6 +850,42 @@ export async function migrateArchivePartnerToLedger() {
   }
 }
 
+// ONE-TIME CLEANUP: remove the now-redundant ARCHIVE partner after its cash has been
+// migrated into the ARCHIVE ledger. SAFETY: refuses to delete unless the ledger already
+// contains movements (proof the migration succeeded) — so the source is never removed
+// before the copy exists. Idempotent: if the partner is already gone, returns success.
+export async function retireArchivePartner() {
+  try {
+    const session = await requireAdmin();
+    const result = await prisma.$transaction(async (tx) => {
+      const ledgerCount = await tx.hubArchiveMovement.count();
+      if (ledgerCount === 0) return { skipped: true, reason: 'LEDGER_EMPTY' };
+
+      const archiveContact = await tx.hubContact.findFirst({
+        where: { name: { equals: 'archive', mode: 'insensitive' } },
+      });
+      if (!archiveContact) return { skipped: true, reason: 'ALREADY_REMOVED' };
+
+      const old = await tx.hubContact.findUnique({ where: { id: archiveContact.id }, include: { transactions: true } });
+      await tx.hubContact.delete({ where: { id: archiveContact.id } }); // cascades transactions + reminders
+      await logAudit(tx, {
+        entityType: 'CONTACT',
+        entityId: archiveContact.id,
+        action: 'DELETE',
+        oldValue: JSON.stringify(old),
+        details: `Partenaire ARCHIVE retiré après migration vers le grand livre Archive (${ledgerCount} mouvement(s) présents).`,
+        modifiedBy: session.username,
+      });
+      return { skipped: false, removed: true };
+    });
+    revalidatePath('/');
+    return { success: true, ...result };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Suppression du partenaire ARCHIVE impossible' };
+  }
+}
+
 export async function deleteArchiveMovement(id: string) {
   try {
     const session = await requireAdmin();
