@@ -198,6 +198,8 @@ export default function MoneyHubApp({
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  // In the account chooser, which TND caisse is expanded to pick a direction (IN/OUT).
+  const [chooserExpand, setChooserExpand] = useState<null | 'treasury' | 'archive'>(null);
   const [selectedContact, setSelectedContact] = useState<any>(null);
   const [contactFilterType, setContactFilterType] = useState<'ALL' | 'HELD' | 'RECEIVABLE' | 'PAYABLE'>('ALL');
   const [confirmModal, setConfirmModal] = useState<any>({ isOpen: false });
@@ -1387,24 +1389,46 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'choose_account' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => { setActiveModal(null); setChooserExpand(null); }}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[40px] p-8 flex flex-col gap-5 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 px-1"><div><h3 className="font-black uppercase tracking-[0.2em] text-sm text-white">Quelle caisse ?</h3><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1">Choisis où faire l'opération</p></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
-            <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setTndBatchItems([{ amount: '', note: '' }]); navigateTo('treasury'); setActiveModal('add_tnd'); }} className="text-left p-5 rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.98] transition flex items-center gap-4">
-              <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-5 w-5" /></div>
-              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse TND VLT Coffre</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Trésorerie en dinars</p></div>
-              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
-            </button>
-            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); navigateTo('currencies'); setActiveModal('add_tx'); }} className="text-left p-5 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center gap-4">
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 px-1"><div><h3 className="font-black uppercase tracking-[0.2em] text-sm text-white">Quelle caisse ?</h3><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1">Choisis où faire l'opération</p></div><button onClick={() => { setActiveModal(null); setChooserExpand(null); }} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
+
+            {/* CAISSE TND VLT COFFRE — expand to choose direction */}
+            <div className="rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 overflow-hidden transition">
+              <button onClick={() => setChooserExpand(chooserExpand === 'treasury' ? null : 'treasury')} className="w-full text-left p-5 hover:border-blue-500/50 active:scale-[0.98] transition flex items-center gap-4">
+                <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-5 w-5" /></div>
+                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse TND VLT Coffre</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Trésorerie en dinars</p></div>
+                <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'treasury' ? 'rotate-90' : ''}`} />
+              </button>
+              {chooserExpand === 'treasury' && (
+                <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
+                  <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); navigateTo('treasury'); setActiveModal('add_tnd'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-emerald-500 text-black font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 rotate-180 stroke-[3]" /> Encaisser</button>
+                  <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setTndBatchItems([{ amount: '', note: '' }]); navigateTo('treasury'); setActiveModal('add_tnd'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-rose-500 text-white font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Décaissement</button>
+                </div>
+              )}
+            </div>
+
+            {/* POSITION GLOBALE USD — direction already inside its modal */}
+            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); navigateTo('currencies'); setActiveModal('add_tx'); setChooserExpand(null); }} className="text-left p-5 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center gap-4">
               <div className="h-11 w-11 rounded-2xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-5 w-5" /></div>
               <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Position Globale USD</p><p className="text-[10px] font-black text-emerald-300/80 uppercase tracking-widest mt-1">Encaisser / décaisser un partenaire</p></div>
               <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
             </button>
-            <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); navigateTo('archive'); setActiveModal('add_archive'); }} className="text-left p-5 rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.98] transition flex items-center gap-4">
-              <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
-              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Trésorerie archive en dinars</p></div>
-              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
-            </button>
+
+            {/* CAISSE ARCHIVE — expand to choose direction */}
+            <div className="rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 overflow-hidden transition">
+              <button onClick={() => setChooserExpand(chooserExpand === 'archive' ? null : 'archive')} className="w-full text-left p-5 hover:border-amber-500/50 active:scale-[0.98] transition flex items-center gap-4">
+                <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
+                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Trésorerie archive en dinars</p></div>
+                <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'archive' ? 'rotate-90' : ''}`} />
+              </button>
+              {chooserExpand === 'archive' && (
+                <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
+                  <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-emerald-500 text-black font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 rotate-180 stroke-[3]" /> Encaisser</button>
+                  <button onClick={() => { setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-rose-500 text-white font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Décaissement</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
