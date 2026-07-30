@@ -408,14 +408,14 @@ export async function settleDebtFromAvoir(contactId: string) {
       await tx.hubTransaction.create({
         data: {
           amount: settledUsd, currencyCode: 'USD', amountInUsd: settledUsd,
-          contactId, type: 'PAYABLE', category: 'Règlement à payer',
-          note: `Montant à payer réglé automatiquement depuis « En garde » (${settledUsd.toFixed(2)} $)`,
+          contactId, type: 'PAYABLE', category: 'Compensation',
+          note: `Compensation automatique décaissé/encaissé (${settledUsd.toFixed(2)} $)`,
         },
       });
 
       await logAudit(tx, {
         entityType: 'CONTACT', entityId: contactId, action: 'SETTLE_DEBT',
-        details: `Montant à payer de ${contact.name} réglé via « En garde »: ${settledUsd.toFixed(2)} $`,
+        details: `Compensation décaissé/encaissé pour ${contact.name}: ${settledUsd.toFixed(2)} $`,
         modifiedBy: session.username,
       });
     });
@@ -1043,25 +1043,26 @@ export async function confirmReminderReceived(id: string) {
       if (!reminder) throw new Error('NOT_FOUND');
       if (reminder.isCompleted) return;
 
-      // Create the AVOIR (HELD) transaction in the original currency
+      // Payment received = ENCAISSEMENT: money comes to me, so it REDUCES what the
+      // partner owes. Booked as PAYABLE (−) to keep the "positif = il me doit" model coherent.
       await tx.hubTransaction.create({
         data: {
           amount: reminder.amount,
           currencyCode: reminder.currencyCode,
           amountInUsd: reminder.amountInUsd,
           contactId: reminder.contactId,
-          type: 'HELD',
+          type: 'PAYABLE',
           category: 'Paiement reçu',
           note: `Encaissement du rappel du ${new Date(reminder.dueDate).toLocaleDateString('fr-FR')}`,
         },
       });
 
-      // Update partner balances (held += amount)
+      // Update partner balances (payable += amount → net decreases)
       const c = reminder.contact;
-      const h = c.heldBalanceUsd + reminder.amountInUsd;
+      const p = c.payableBalanceUsd + reminder.amountInUsd;
       await tx.hubContact.update({
         where: { id: c.id },
-        data: { heldBalanceUsd: h, netPositionUsd: h + c.receivableBalanceUsd - c.payableBalanceUsd },
+        data: { payableBalanceUsd: p, netPositionUsd: c.heldBalanceUsd + c.receivableBalanceUsd - p },
       });
 
       // Mark reminder completed
@@ -1069,7 +1070,7 @@ export async function confirmReminderReceived(id: string) {
 
       await logAudit(tx, {
         entityType: 'REMINDER', entityId: id, action: 'RECEIVED',
-        details: `Paiement reçu de ${c.name}: ${reminder.amount} ${reminder.currencyCode} ajouté à « En garde »`,
+        details: `Paiement encaissé de ${c.name}: ${reminder.amount} ${reminder.currencyCode}`,
         modifiedBy: session.username,
       });
     });
