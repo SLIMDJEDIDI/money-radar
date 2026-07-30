@@ -408,14 +408,14 @@ export async function settleDebtFromAvoir(contactId: string) {
       await tx.hubTransaction.create({
         data: {
           amount: settledUsd, currencyCode: 'USD', amountInUsd: settledUsd,
-          contactId, type: 'PAYABLE', category: 'Règlement dette',
-          note: `Dette réglée automatiquement depuis l'Avoir (${settledUsd.toFixed(2)} $)`,
+          contactId, type: 'PAYABLE', category: 'Règlement à payer',
+          note: `Montant à payer réglé automatiquement depuis « En garde » (${settledUsd.toFixed(2)} $)`,
         },
       });
 
       await logAudit(tx, {
         entityType: 'CONTACT', entityId: contactId, action: 'SETTLE_DEBT',
-        details: `Dette de ${contact.name} réglée via Avoir: ${settledUsd.toFixed(2)} $`,
+        details: `Montant à payer de ${contact.name} réglé via « En garde »: ${settledUsd.toFixed(2)} $`,
         modifiedBy: session.username,
       });
     });
@@ -1069,7 +1069,7 @@ export async function confirmReminderReceived(id: string) {
 
       await logAudit(tx, {
         entityType: 'REMINDER', entityId: id, action: 'RECEIVED',
-        details: `Paiement reçu de ${c.name}: ${reminder.amount} ${reminder.currencyCode} ajouté aux Avoirs`,
+        details: `Paiement reçu de ${c.name}: ${reminder.amount} ${reminder.currencyCode} ajouté à « En garde »`,
         modifiedBy: session.username,
       });
     });
