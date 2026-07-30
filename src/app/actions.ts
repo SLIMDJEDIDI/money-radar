@@ -1034,7 +1034,8 @@ export async function toggleReminderCompleted(id: string, isCompleted: boolean) 
   return { success: true };
 }
 
-// Confirm a payment was received -> move it into the partner's AVOIR (HELD) balance
+// À RECEVOIR is a PURE reminder: a planned future receipt. Confirming it only marks
+// the reminder as done — it NEVER touches any partner balance (no pool impact).
 export async function confirmReminderReceived(id: string) {
   try {
     const session = await requireAdmin();
@@ -1043,34 +1044,12 @@ export async function confirmReminderReceived(id: string) {
       if (!reminder) throw new Error('NOT_FOUND');
       if (reminder.isCompleted) return;
 
-      // Payment received = ENCAISSEMENT: money comes to me, so it REDUCES what the
-      // partner owes. Booked as PAYABLE (−) to keep the "positif = il me doit" model coherent.
-      await tx.hubTransaction.create({
-        data: {
-          amount: reminder.amount,
-          currencyCode: reminder.currencyCode,
-          amountInUsd: reminder.amountInUsd,
-          contactId: reminder.contactId,
-          type: 'PAYABLE',
-          category: 'Paiement reçu',
-          note: `Encaissement du rappel du ${new Date(reminder.dueDate).toLocaleDateString('fr-FR')}`,
-        },
-      });
-
-      // Update partner balances (payable += amount → net decreases)
-      const c = reminder.contact;
-      const p = c.payableBalanceUsd + reminder.amountInUsd;
-      await tx.hubContact.update({
-        where: { id: c.id },
-        data: { payableBalanceUsd: p, netPositionUsd: c.heldBalanceUsd + c.receivableBalanceUsd - p },
-      });
-
-      // Mark reminder completed
+      // Mark reminder completed — no transaction, no balance change.
       await tx.hubReminder.update({ where: { id }, data: { isCompleted: true } });
 
       await logAudit(tx, {
         entityType: 'REMINDER', entityId: id, action: 'RECEIVED',
-        details: `Paiement encaissé de ${c.name}: ${reminder.amount} ${reminder.currencyCode}`,
+        details: `Rappel « à recevoir » confirmé pour ${reminder.contact?.name}: ${reminder.amount} ${reminder.currencyCode}`,
         modifiedBy: session.username,
       });
     });
