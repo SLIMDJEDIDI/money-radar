@@ -617,6 +617,207 @@ export async function deleteTndMovement(id: string) {
   }
 }
 
+// ----------------------------------------------------
+// 5b. ARCHIVE LEDGER (admin-only, independent cash box)
+// ----------------------------------------------------
+// Non-destructive provisioning: creates the archive table only if it is missing.
+// Never drops or alters existing data. Admin-only.
+export async function ensureArchiveTable() {
+  try {
+    await requireAdmin();
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubArchiveMovement" (
+        "id" TEXT NOT NULL,
+        "amount" DOUBLE PRECISION NOT NULL,
+        "type" TEXT NOT NULL,
+        "note" TEXT NOT NULL,
+        "performedBy" TEXT NOT NULL,
+        "scheduledFor" TIMESTAMP(3),
+        "isSettled" BOOLEAN NOT NULL DEFAULT true,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "HubArchiveMovement_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubArchiveMovement_createdAt_idx" ON "HubArchiveMovement" ("createdAt");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubArchiveMovement_type_idx" ON "HubArchiveMovement" ("type");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubArchiveMovement_scheduledFor_idx" ON "HubArchiveMovement" ("scheduledFor");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubArchiveMovement_isSettled_idx" ON "HubArchiveMovement" ("isSettled");`);
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Provisioning archive impossible' };
+  }
+}
+
+export async function createArchiveMovement(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const amount = parseFloat(formData.get('amount') as string);
+    const type = formData.get('type') as string; // "IN" or "OUT"
+    const note = (formData.get('note') as string || '').trim();
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
+
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (type !== 'IN' && type !== 'OUT') return { success: false, error: 'Type de mouvement invalide' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const d = new Date(scheduledForRaw);
+      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+      if (d.getTime() > startOfToday.getTime()) { scheduledFor = d; isSettled = false; }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubArchiveMovement.create({
+        data: { amount, type, note, performedBy: session.username, scheduledFor, isSettled },
+      });
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: movement.id,
+        action: !isSettled ? (type === 'IN' ? 'ARCH_IN_SCHEDULED' : 'ARCH_OUT_SCHEDULED') : (type === 'IN' ? 'ARCH_IN' : 'ARCH_OUT'),
+        details: !isSettled
+          ? `${type === 'IN' ? 'Entrée' : 'Sortie'} ARCHIVE PLANIFIÉE ${amount} TND pour ${scheduledFor!.toLocaleDateString('fr-FR')}: ${note}`
+          : `${type === 'IN' ? 'Entrée' : 'Sortie'} ARCHIVE de ${amount} TND: ${note}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Erreur lors de l\'enregistrement' };
+  }
+}
+
+export async function createArchiveBatchDisbursement(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const raw = formData.get('items') as string || '';
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return { success: false, error: 'Liste de décaissements invalide' }; }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 30) return { success: false, error: 'Ajoutez entre 1 et 30 décaissements' };
+
+    const items = parsed.map((row: any, index: number) => ({
+      amount: Number(row?.amount),
+      note: String(row?.note || '').trim(),
+      index: index + 1,
+    }));
+    const invalid = items.find(item => !isFinite(item.amount) || item.amount <= 0 || !item.note);
+    if (invalid) return { success: false, error: `Ligne ${invalid.index} : montant positif et note obligatoire requis` };
+
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const date = new Date(scheduledForRaw);
+      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+    }
+
+    const total = items.reduce((sum, item) => sum + item.amount, 0);
+    await prisma.$transaction(async (tx) => {
+      const created = await Promise.all(items.map(item => tx.hubArchiveMovement.create({
+        data: { amount: item.amount, type: 'OUT', note: item.note, performedBy: session.username, scheduledFor, isSettled },
+      })));
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: created[0]?.id,
+        action: isSettled ? 'ARCH_BATCH_OUT' : 'ARCH_BATCH_OUT_SCHEDULED',
+        details: `${items.length} décaissements ARCHIVE ${isSettled ? 'enregistrés' : 'planifiés'} — total ${total} TND${scheduledFor ? ` pour ${scheduledFor.toLocaleDateString('fr-FR')}` : ''}`,
+        newValue: JSON.stringify(items.map(({ amount, note }) => ({ amount, note }))),
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, count: items.length, total };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Erreur lors de l’enregistrement groupé' };
+  }
+}
+
+export async function settleArchiveMovement(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      const m = await tx.hubArchiveMovement.findUnique({ where: { id } });
+      if (!m) return;
+      if (m.isSettled) return;
+      await tx.hubArchiveMovement.update({ where: { id }, data: { isSettled: true } });
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: id,
+        action: 'ARCH_SETTLE',
+        details: `Mouvement ARCHIVE confirmé (${m.amount} ${m.type})`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: 'Action non autorisée' };
+  }
+}
+
+export async function updateArchiveMovementNote(id: string, rawNote: string) {
+  try {
+    const session = await requireAdmin();
+    const note = String(rawNote || '').trim();
+    if (!id || !note) return { success: false, error: 'La note est obligatoire' };
+    if (note.length > 1000) return { success: false, error: 'La note ne peut pas dépasser 1 000 caractères' };
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubArchiveMovement.findUnique({ where: { id } });
+      if (!movement) throw new Error('NOT_FOUND');
+      if (movement.note === note) return;
+      await tx.hubArchiveMovement.update({ where: { id }, data: { note } });
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: id,
+        action: 'ARCH_NOTE_EDIT',
+        details: `Note ARCHIVE modifiée — ${movement.type === 'IN' ? 'Entrée' : 'Sortie'} ${movement.amount} TND : « ${movement.note} » → « ${note} »`,
+        oldValue: movement.note,
+        newValue: note,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    if (error?.message === 'NOT_FOUND') return { success: false, error: 'Mouvement introuvable' };
+    return { success: false, error: 'Modification de la note impossible' };
+  }
+}
+
+export async function deleteArchiveMovement(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      const old = await tx.hubArchiveMovement.findUnique({ where: { id } });
+      if (!old) return;
+      await tx.hubArchiveMovement.delete({ where: { id } });
+      await logAudit(tx, {
+        entityType: 'ARCHIVE',
+        entityId: id,
+        action: 'ARCH_DELETE',
+        oldValue: JSON.stringify(old),
+        details: `Suppression mouvement ARCHIVE: ${old.amount} (${old.type})`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: 'Action non autorisée' };
+  }
+}
+
 export async function deleteHubTransaction(id: string) {
   try {
     const session = await requireAdmin();

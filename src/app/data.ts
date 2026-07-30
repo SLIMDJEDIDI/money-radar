@@ -49,6 +49,15 @@ export async function getHubDashboardData(searchQuery: string = '') {
       prisma.hubTndMovement.findMany({ orderBy: { createdAt: 'desc' } })
     ]);
 
+    // ARCHIVE ledger — independent cash box. Queried defensively so the app still
+    // loads (empty archive) if the table has not been provisioned yet.
+    let archiveMovements: any[] = [];
+    try {
+      archiveMovements = await prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } });
+    } catch {
+      archiveMovements = [];
+    }
+
     const activeCurrencies = currencies.filter(c => c.isActive);
 
     // TND Treasury Logic
@@ -84,6 +93,28 @@ export async function getHubDashboardData(searchQuery: string = '') {
     // Projected balance = current balance + net of USER-SCHEDULED movements only.
     // No auto-extrapolation (historical averages give false precision).
     const tndProjectedBalance = tndBalance + pendingInflow - pendingOutflow;
+
+    // ARCHIVE ledger aggregation — same settled-only rule as the TND treasury.
+    let archiveBalance = 0;
+    let archiveTodayIn = 0;
+    let archiveTodayOut = 0;
+    archiveMovements.forEach(m => {
+      if (!m.isSettled) return;
+      if (m.type === 'IN') {
+        archiveBalance += m.amount;
+        if (m.createdAt >= startOfToday) archiveTodayIn += m.amount;
+      } else {
+        archiveBalance -= m.amount;
+        if (m.createdAt >= startOfToday) archiveTodayOut += m.amount;
+      }
+    });
+    const archiveUpcoming = archiveMovements
+      .filter(m => !m.isSettled && m.scheduledFor)
+      .sort((a, b) => (a.scheduledFor!.getTime() - b.scheduledFor!.getTime()));
+    const archiveDueSoon = archiveUpcoming.filter(m => m.scheduledFor!.getTime() <= in24h.getTime());
+    const archiveOverdue = archiveUpcoming.filter(m => m.scheduledFor!.getTime() < now.getTime());
+    const archivePendingIn = archiveUpcoming.filter(m => m.type === 'IN').reduce((s, m) => s + m.amount, 0);
+    const archivePendingOut = archiveUpcoming.filter(m => m.type === 'OUT').reduce((s, m) => s + m.amount, 0);
 
     // Per-contact TND held breakdown
     const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
@@ -166,6 +197,10 @@ export async function getHubDashboardData(searchQuery: string = '') {
         pendingOutflow,
         pendingCount: upcomingPending.length,
       },
+      archiveMovements,
+      archiveUpcoming,
+      archiveDueSoon,
+      archiveOverdue,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,
@@ -176,6 +211,11 @@ export async function getHubDashboardData(searchQuery: string = '') {
         tndTodayOut,
         tndPendingIn: pendingInflow,
         tndPendingOut: pendingOutflow,
+        archiveBalance,
+        archiveTodayIn,
+        archiveTodayOut,
+        archivePendingIn,
+        archivePendingOut,
       },
     };
   } catch (error) {

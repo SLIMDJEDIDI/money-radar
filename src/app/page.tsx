@@ -46,6 +46,10 @@ export default async function Page() {
         initialTndUpcoming={data.tndUpcoming}
         initialTndDueSoon={data.tndDueSoon}
         initialTndOverdue={data.tndOverdue}
+        initialArchiveMovements={data.archiveMovements}
+        initialArchiveUpcoming={data.archiveUpcoming}
+        initialArchiveDueSoon={data.archiveDueSoon}
+        initialArchiveOverdue={data.archiveOverdue}
       />
     </main>
   );
