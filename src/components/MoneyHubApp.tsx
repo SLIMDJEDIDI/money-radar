@@ -15,6 +15,7 @@ import {
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
+  createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -87,7 +88,9 @@ EmptyState.displayName = 'EmptyState';
 
 export default function MoneyHubApp({
   initialContacts = [], initialActiveCurrencies = [], initialTransactions = [], initialReminders = [], initialAuditTrails = [], initialUsers = [], initialMetrics = {}, initialCategories = [],
-  initialTndMovements = [], initialTndForecast = null, initialTndUpcoming = [], initialTndDueSoon = [], initialTndOverdue = [], initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
+  initialTndMovements = [], initialTndForecast = null, initialTndUpcoming = [], initialTndDueSoon = [], initialTndOverdue = [],
+  initialArchiveMovements = [], initialArchiveUpcoming = [], initialArchiveDueSoon = [], initialArchiveOverdue = [],
+  initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
 }: any) {
   // --- AUTH & THEME ---
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -116,7 +119,7 @@ export default function MoneyHubApp({
     })();
   }, []);
 
-  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury';
+  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive';
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
   // Assistants land directly on Treasury (only section they can access)
@@ -137,6 +140,11 @@ export default function MoneyHubApp({
   const [tndUpcoming, setTndUpcoming] = useState<any[]>((initialTndUpcoming || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
   const [tndDueSoon, setTndDueSoon] = useState<any[]>((initialTndDueSoon || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
   const [tndOverdue, setTndOverdue] = useState<any[]>((initialTndOverdue || []).map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })));
+  const hydrateMovement = (m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null });
+  const [archiveMovements, setArchiveMovements] = useState<any[]>((initialArchiveMovements || []).map(hydrateMovement));
+  const [archiveUpcoming, setArchiveUpcoming] = useState<any[]>((initialArchiveUpcoming || []).map(hydrateMovement));
+  const [archiveDueSoon, setArchiveDueSoon] = useState<any[]>((initialArchiveDueSoon || []).map(hydrateMovement));
+  const [archiveOverdue, setArchiveOverdue] = useState<any[]>((initialArchiveOverdue || []).map(hydrateMovement));
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
@@ -145,6 +153,9 @@ export default function MoneyHubApp({
     newContact.action === 'delete' ? state.filter((c:any) => c.id !== newContact.id) : [...state, newContact]
   );
   const [optimisticTndMovements, addOptimisticTndMovement] = useOptimistic(tndMovements, (state: any, newM: any) => 
+    newM.action === 'delete' ? state.filter((m:any) => m.id !== newM.id) : [newM, ...state]
+  );
+  const [optimisticArchiveMovements, addOptimisticArchiveMovement] = useOptimistic(archiveMovements, (state: any, newM: any) =>
     newM.action === 'delete' ? state.filter((m:any) => m.id !== newM.id) : [newM, ...state]
   );
 
@@ -180,6 +191,17 @@ export default function MoneyHubApp({
   const [tndAmountMin, setTndAmountMin] = useState<string>('');
   const [tndAmountMax, setTndAmountMax] = useState<string>('');
   const [tndTypeFilter, setTndTypeFilter] = useState<'all' | 'IN' | 'OUT'>('all');
+  // ARCHIVE ledger form + filters (mirror the treasury)
+  const [archiveForm, setArchiveForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
+  const [archiveBatchItems, setArchiveBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
+  const [archiveNoteEdit, setArchiveNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
+  const [archiveNoteEditError, setArchiveNoteEditError] = useState('');
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [archivePeriod, setArchivePeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
+  const [archiveUserFilter, setArchiveUserFilter] = useState<string>('all');
+  const [archiveAmountMin, setArchiveAmountMin] = useState<string>('');
+  const [archiveAmountMax, setArchiveAmountMax] = useState<string>('');
+  const [archiveTypeFilter, setArchiveTypeFilter] = useState<'all' | 'IN' | 'OUT'>('all');
   // Password management modal
   const [pwdModal, setPwdModal] = useState<{ open: boolean; targetId?: string; targetName?: string; mode?: 'self' | 'admin_reset' }>({ open: false });
 
@@ -204,6 +226,7 @@ export default function MoneyHubApp({
 
   const closeTopOverlay = useCallback(() => {
     if (tndNoteEdit) { setTndNoteEdit(null); return true; }
+    if (archiveNoteEdit) { setArchiveNoteEdit(null); return true; }
     if (postponeTarget) { setPostponeTarget(null); return true; }
     if (confirmModal.isOpen) { setConfirmModal({ isOpen: false }); return true; }
     if (activeModal) { setActiveModal(null); return true; }
@@ -259,6 +282,14 @@ export default function MoneyHubApp({
       if (res.ok) {
         const data = await res.json();
         setContacts(data.contacts);
+        // Keep an open partner drawer in sync: its balances must reflect newly added
+        // operations, not the stale snapshot captured when the drawer was opened.
+        setSelectedContact((current: any) => {
+          if (!current) return current;
+          const fresh = (data.contacts || []).find((c: any) => c.id === current.id)
+            || (data.allContacts || []).find((c: any) => c.id === current.id);
+          return fresh || current;
+        });
         setTransactions(data.transactions.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
         setMetrics(data.metrics);
         setAuditTrails(data.auditTrails || []);
@@ -269,6 +300,10 @@ export default function MoneyHubApp({
         setTndUpcoming((data.tndUpcoming || []).map(hydrateTnd));
         setTndDueSoon((data.tndDueSoon || []).map(hydrateTnd));
         setTndOverdue((data.tndOverdue || []).map(hydrateTnd));
+        setArchiveMovements((data.archiveMovements || []).map(hydrateTnd));
+        setArchiveUpcoming((data.archiveUpcoming || []).map(hydrateTnd));
+        setArchiveDueSoon((data.archiveDueSoon || []).map(hydrateTnd));
+        setArchiveOverdue((data.archiveOverdue || []).map(hydrateTnd));
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
@@ -435,6 +470,91 @@ export default function MoneyHubApp({
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
         startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+      },
+    });
+  };
+
+  // --- ARCHIVE ledger handlers (mirror the treasury) ---
+  const handleAddArchiveMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!archiveForm.amount || !archiveForm.note.trim()) return;
+    startTransition(async () => {
+      const amount = parseFloat(archiveForm.amount);
+      const scheduled = archiveForm.scheduledFor;
+      const isPlanned = !!scheduled;
+      addOptimisticArchiveMovement({ id: 'temp-' + Date.now(), amount, type: archiveForm.type, note: archiveForm.note, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled!) : null, isSettled: !isPlanned });
+      const data = new FormData();
+      data.append('amount', archiveForm.amount);
+      data.append('type', archiveForm.type);
+      data.append('note', archiveForm.note);
+      if (isPlanned) data.append('scheduledFor', scheduled!);
+      const res: any = await createArchiveMovement(data);
+      if (res.success) { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleAddArchiveBatchDisbursement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const invalid = archiveBatchItems.find(item => !item.note.trim() || !item.amount || Number(item.amount) <= 0);
+    if (invalid) { alert('Chaque ligne doit avoir un montant positif et une note obligatoire.'); return; }
+    startTransition(async () => {
+      const scheduled = archiveForm.scheduledFor || '';
+      const isPlanned = !!scheduled;
+      const validItems = archiveBatchItems.map(item => ({ amount: Number(item.amount), note: item.note.trim() }));
+      validItems.forEach((item, index) => addOptimisticArchiveMovement({
+        id: `temp-batch-${Date.now()}-${index}`, amount: item.amount, type: 'OUT', note: item.note,
+        performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled) : null, isSettled: !isPlanned,
+      }));
+      const data = new FormData();
+      data.append('items', JSON.stringify(validItems));
+      if (scheduled) data.append('scheduledFor', scheduled);
+      const res: any = await createArchiveBatchDisbursement(data);
+      if (res.success) {
+        setArchiveBatchItems([{ amount: '', note: '' }]);
+        setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' });
+        setActiveModal(null);
+        await refreshHubState();
+      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleSettleArchiveMovement = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Confirmer le mouvement ?',
+      description: 'Ce mouvement sera marqué comme réglé et impactera immédiatement le solde ARCHIVE.',
+      confirmText: 'Confirmer',
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        startTransition(async () => { await settleArchiveMovement(id); await refreshHubState(); });
+      },
+    });
+  };
+
+  const handleSaveArchiveNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!archiveNoteEdit?.note.trim()) { setArchiveNoteEditError('La note est obligatoire.'); return; }
+    startTransition(async () => {
+      const res: any = await updateArchiveMovementNote(archiveNoteEdit.id, archiveNoteEdit.note);
+      if (res.success) {
+        setArchiveNoteEdit(null);
+        setArchiveNoteEditError('');
+        await refreshHubState();
+      } else if (res.code) handleSessionExpired(); else setArchiveNoteEditError(res.error || 'Modification impossible');
+    });
+  };
+
+  const handleDeleteArchiveMovement = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Supprimer ce mouvement ?',
+      description: 'Ce mouvement ARCHIVE sera retiré du journal.',
+      confirmText: 'Supprimer',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmModal({ isOpen: false });
+        startTransition(async () => { addOptimisticArchiveMovement({ id, action: 'delete' }); await deleteArchiveMovement(id); await refreshHubState(); });
       },
     });
   };
