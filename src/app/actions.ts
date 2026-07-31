@@ -706,6 +706,47 @@ export async function createArchiveMovement(formData: FormData) {
   }
 }
 
+// Admin-only special movement: transfer money FROM the TND treasury INTO the Archive box.
+// Atomic — a single OUT (treasury) + IN (archive) are written together so the two caisses
+// can never drift. Both notes carry the TRANSFER_TAG sentinel so each journal highlights them.
+const TREASURY_ARCHIVE_TAG = '⇄ TRANSFERT COFFRE→ARCHIVE';
+export async function transferTreasuryToArchive(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const amount = parseFloat(formData.get('amount') as string);
+    const note = (formData.get('note') as string || '').trim();
+
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+
+    const taggedNote = `${TREASURY_ARCHIVE_TAG} · ${note}`;
+
+    await prisma.$transaction(async (tx) => {
+      const out = await tx.hubTndMovement.create({
+        data: { amount, type: 'OUT', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: true },
+      });
+      const inn = await tx.hubArchiveMovement.create({
+        data: { amount, type: 'IN', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: true },
+      });
+      await logAudit(tx, {
+        entityType: 'TREASURY', entityId: out.id, action: 'TND_TRANSFER_ARCHIVE',
+        details: `Transfert de ${amount} TND du Coffre vers l'Archive: ${note}`,
+        modifiedBy: session.username,
+      });
+      await logAudit(tx, {
+        entityType: 'ARCHIVE', entityId: inn.id, action: 'ARCH_TRANSFER_IN',
+        details: `Réception de ${amount} TND depuis le Coffre: ${note}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
+    return { success: false, error: 'Erreur lors du transfert' };
+  }
+}
+
 export async function createArchiveBatchDisbursement(formData: FormData) {
   try {
     const session = await requireAdmin();

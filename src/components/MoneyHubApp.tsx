@@ -16,10 +16,16 @@ import {
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
+  transferTreasuryToArchive,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
+
+// Sentinel prefix (must match TREASURY_ARCHIVE_TAG in actions.ts) marking a Coffre→Archive
+// transfer so both journals can highlight these special admin-only movements.
+const TREASURY_ARCHIVE_TAG = '⇄ TRANSFERT COFFRE→ARCHIVE';
+const isTransferNote = (note?: string) => !!note && note.startsWith(TREASURY_ARCHIVE_TAG);
 
 const TYPE_EXPLAIN: Record<string, string> = {
   HELD: "ENCAISSER : tu lui confies de l'argent à garder. Ton argent chez lui AUGMENTE (+).",
@@ -222,6 +228,7 @@ export default function MoneyHubApp({
   const [inlinePartnerCountry, setInlinePartnerCountry] = useState('');
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
+  const [transferForm, setTransferForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
   const [tndNoteEditError, setTndNoteEditError] = useState('');
   // TND Treasury filters
@@ -437,6 +444,21 @@ export default function MoneyHubApp({
       const res: any = await createTndMovement(data);
       if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const handleTransferToArchive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferForm.amount || !transferForm.note.trim()) return;
+    startTransition(async () => {
+      const amount = parseFloat(transferForm.amount);
+      const data = new FormData();
+      data.append('amount', transferForm.amount);
+      data.append('note', transferForm.note);
+      const res: any = await transferTreasuryToArchive(data);
+      if (res.success) { setTransferForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+      void amount;
     });
   };
 
@@ -989,6 +1011,10 @@ export default function MoneyHubApp({
                 <button onClick={() => { setTndForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setTndBatchItems([{ amount: '', note: '' }]); setActiveModal('add_tnd'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
               </div>
 
+              {currentUser.role === 'admin' && (
+                <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+              )}
+
               {/* SEARCH + FILTERS */}
               <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
                 <div className="relative">
@@ -1044,13 +1070,16 @@ export default function MoneyHubApp({
                   {filtered.map((m: any) => {
                     const running = balanceById[m.id] ?? 0;
                     const isPending = m.isSettled === false;
+                    const isTransfer = isTransferNote(m.note);
+                    const cleanNote = isTransfer ? m.note.replace(TREASURY_ARCHIVE_TAG, '').replace(/^\s*·\s*/, '').trim() : m.note;
                     return (
-                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
-                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isTransfer ? 'bg-violet-500/10 border-violet-500/40 hover:border-violet-500/60 ring-1 ring-violet-500/20' : isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
+                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isTransfer ? 'bg-violet-400 shadow-lg' : isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
+                            {isTransfer && <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-500/40 text-violet-200 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><ArrowLeftRight className="h-2.5 w-2.5" /> Transfert Archive</span>}
                             {isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}
-                            <p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p>
+                            <p className={`text-sm font-bold leading-tight break-words ${isTransfer ? 'text-violet-100' : isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{cleanNote}</p>
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             {isPending && m.scheduledFor ? (
@@ -1156,11 +1185,13 @@ export default function MoneyHubApp({
                   {filtered.map((m: any) => {
                     const running = balanceById[m.id] ?? 0;
                     const isPending = m.isSettled === false;
+                    const isTransfer = isTransferNote(m.note);
+                    const cleanNote = isTransfer ? m.note.replace(TREASURY_ARCHIVE_TAG, '').replace(/^\s*·\s*/, '').trim() : m.note;
                     return (
-                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
-                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                      <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isTransfer ? 'bg-violet-500/10 border-violet-500/40 hover:border-violet-500/60 ring-1 ring-violet-500/20' : isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
+                        <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isTransfer ? 'bg-violet-400 shadow-lg' : isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p></div>
+                          <div className="flex items-center gap-2 flex-wrap">{isTransfer && <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-500/40 text-violet-200 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><ArrowLeftRight className="h-2.5 w-2.5" /> Transfert Coffre</span>}{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isTransfer ? 'text-violet-100' : isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{cleanNote}</p></div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}{m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}{!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}</div>
                         </div>
                         <div className="text-right shrink-0 flex items-center gap-3">
@@ -1435,6 +1466,19 @@ export default function MoneyHubApp({
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {activeModal === 'transfer_archive' && currentUser.role === 'admin' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-amber-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-amber-300"><ArrowLeftRight className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Transfert Coffre → Archive</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Sortie du Coffre TND et entrée dans l'Archive, en une seule opération. Réservé à l'administrateur, mis en évidence dans les deux journaux.</p></div>
+            <form onSubmit={handleTransferToArchive} className="flex flex-col gap-5">
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Montant (TND)</label><input type="number" step="any" required autoFocus placeholder="0" value={transferForm.amount} onChange={e => setTransferForm(p => ({ ...p, amount: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white outline-none focus:border-amber-500/50 shadow-inner tracking-tighter" /></div>
+              <input type="text" required placeholder="NOTE OBLIGATOIRE (TRACABILITÉ)" value={transferForm.note} onChange={e => setTransferForm(p => ({ ...p, note: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white outline-none focus:border-amber-500/40 shadow-inner" />
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !transferForm.amount || !transferForm.note.trim()} className="flex-[2] py-5 bg-amber-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-amber-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Transférer</button></div>
+            </form>
           </div>
         </div>
       )}
