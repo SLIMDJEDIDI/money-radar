@@ -144,23 +144,26 @@ export default function MoneyHubApp({
     }
   }, [currentUser, activeSection]);
 
-  // One-time: ensure the ARCHIVE ledger table exists (admin only, non-destructive),
-  // then import the ARCHIVE partner's AVOIR/TND operations as IN encaissements.
-  // Both steps are idempotent: provisioning uses IF NOT EXISTS, migration skips if
-  // the ledger already has movements (no double import).
+  // One-time schema/data provisioning (admin only, non-destructive & idempotent).
+  // These migrations already ran on production and are safe to skip on every load — we
+  // guard with a localStorage flag so a returning admin does NOT pay 4 serial server
+  // round-trips + a full refetch on each visit (major perceived-speed win). If they have
+  // never run in this browser we run them once, in the background, WITHOUT blocking or
+  // double-fetching (SSR already delivered fresh data via page.tsx).
   useEffect(() => {
-    if (currentUser?.role === 'admin') {
-      (async () => {
-        try {
-          await ensureArchiveTable();
-          await ensureReminderPlannedType();
-          await migrateArchivePartnerToLedger();
-          // Only removes the ARCHIVE partner once the ledger already holds the migrated movements.
-          await retireArchivePartner();
-          await refreshHubState();
-        } catch {}
-      })();
-    }
+    if (currentUser?.role !== 'admin') return;
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_migrations_done') === '1') return;
+    (async () => {
+      try {
+        await ensureArchiveTable();
+        await ensureReminderPlannedType();
+        await migrateArchivePartnerToLedger();
+        // Only removes the ARCHIVE partner once the ledger already holds the migrated movements.
+        await retireArchivePartner();
+        localStorage.setItem('hub_migrations_done', '1');
+        await refreshHubState();
+      } catch {}
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 

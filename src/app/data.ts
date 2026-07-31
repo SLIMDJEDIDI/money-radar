@@ -12,15 +12,26 @@ export interface HubMetrics {
   tndTodayOut: number;
 }
 
+// Runs the one-off, idempotent self-healing DDL at most once per server instance instead of
+// on every page load. Once the column exists this DDL is pure overhead (an extra DB round-trip
+// on the critical path of every request), so we cache the "already ensured" state in memory.
+let plannedTypeEnsured = false;
+async function ensurePlannedTypeColumn() {
+  if (plannedTypeEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "HubReminder" ADD COLUMN IF NOT EXISTS "plannedType" TEXT NOT NULL DEFAULT 'RECEIVABLE';`);
+    plannedTypeEnsured = true;
+  } catch {
+    // Leave the flag false so a transient failure retries on the next request.
+  }
+}
+
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
 export async function getHubDashboardData(searchQuery: string = '') {
   try {
     // Self-healing: ensure the reminder plannedType column exists before any query selects it.
-    // Idempotent and non-destructive (ADD COLUMN IF NOT EXISTS). Prevents an SSR crash on the
-    // first deploy after the schema change, before an admin can trigger the client-side migration.
-    try {
-      await prisma.$executeRawUnsafe(`ALTER TABLE "HubReminder" ADD COLUMN IF NOT EXISTS "plannedType" TEXT NOT NULL DEFAULT 'RECEIVABLE';`);
-    } catch {}
+    // Idempotent, non-destructive, and now runs only once per server instance (see above).
+    await ensurePlannedTypeColumn();
 
     // Ensure core currencies exist
     const coreCodes = ['USD', 'RMB', 'EURO', 'TND'];

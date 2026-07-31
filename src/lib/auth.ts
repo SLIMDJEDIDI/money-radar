@@ -1,5 +1,6 @@
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
 import { cookies } from 'next/headers';
+import { cache } from 'react';
 import { prisma } from './db';
 
 const SESSION_COOKIE = 'hub_session';
@@ -103,7 +104,9 @@ export type PanicLockState = {
 };
 
 // Security state is fail-closed: a DB/security-state outage must never silently preserve access.
-export async function getPanicLockState(): Promise<PanicLockState> {
+// Wrapped in React cache(): within a single server request the panic-lock row is fetched ONCE
+// and reused (page.tsx + getSession + actions previously triggered 2-3 identical queries).
+export const getPanicLockState = cache(async function getPanicLockState(): Promise<PanicLockState> {
   try {
     const lock = await prisma.hubPanicLock.findUnique({ where: { id: 'global' } });
     if (!lock) {
@@ -120,9 +123,9 @@ export async function getPanicLockState(): Promise<PanicLockState> {
   } catch {
     return { isLocked: true, emergencyUsername: null, lockedAt: null, lockedBy: 'security-state-unavailable', lockEpoch: -1 };
   }
-}
+});
 
-export async function getSession(): Promise<SessionPayload | null> {
+export const getSession = cache(async function getSession(): Promise<SessionPayload | null> {
   const store = await cookies();
   const payload = verifySessionToken(store.get(SESSION_COOKIE)?.value);
   if (!payload) return null;
@@ -138,7 +141,7 @@ export async function getSession(): Promise<SessionPayload | null> {
     return null;
   }
   return payload;
-}
+});
 
 // Normal business actions reject the emergency session by design.
 export async function requireSession(): Promise<SessionPayload> {
