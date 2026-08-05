@@ -14,7 +14,7 @@ import {
   confirmReminderReceived, postponeReminder,
   resetDatabaseToZero, loginUser, logoutUser, getCurrentUser,
   changeUserPassword, createAssistantUser, deleteAssistantUser,
-  createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote,
+  createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote, createTndReceivable,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
   transferTreasuryToArchive,
   activatePanicLock, unlockPanicLock
@@ -26,6 +26,12 @@ const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '�
 // transfer so both journals can highlight these special admin-only movements.
 const TREASURY_ARCHIVE_TAG = '⇄ TRANSFERT COFFRE→ARCHIVE';
 const isTransferNote = (note?: string) => !!note && note.startsWith(TREASURY_ARCHIVE_TAG);
+
+// Receivable marker (must match TND_RECEIVABLE_TAG in actions.ts): money owed to you,
+// visible but excluded from the cash total until recovered.
+const TND_RECEIVABLE_TAG = '🔖 À RÉCUPÉRER';
+const isReceivableNote = (note?: string) => !!note && note.startsWith(TND_RECEIVABLE_TAG);
+const cleanReceivableNote = (note?: string) => (note || '').replace(TND_RECEIVABLE_TAG, '').replace(/^\s*·\s*/, '').trim();
 
 const TYPE_EXPLAIN: Record<string, string> = {
   HELD: "ENCAISSER : tu lui confies de l'argent à garder. Ton argent chez lui AUGMENTE (+).",
@@ -229,6 +235,7 @@ export default function MoneyHubApp({
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
   const [transferForm, setTransferForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
+  const [receivableForm, setReceivableForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
   const [tndNoteEditError, setTndNoteEditError] = useState('');
   // TND Treasury filters
@@ -459,6 +466,21 @@ export default function MoneyHubApp({
       if (res.success) { setTransferForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
       void amount;
+    });
+  };
+
+  const handleAddReceivable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receivableForm.amount || !receivableForm.note.trim()) return;
+    startTransition(async () => {
+      const amount = parseFloat(receivableForm.amount);
+      addOptimisticTndMovement({ id: 'temp-recv-' + Date.now(), amount, type: 'IN', note: `${TND_RECEIVABLE_TAG} · ${receivableForm.note}`, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: null, isSettled: false });
+      const data = new FormData();
+      data.append('amount', receivableForm.amount);
+      data.append('note', receivableForm.note);
+      const res: any = await createTndReceivable(data);
+      if (res.success) { setReceivableForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
 
@@ -927,7 +949,11 @@ export default function MoneyHubApp({
           const min = parseFloat(tndAmountMin || '');
           const max = parseFloat(tndAmountMax || '');
           const q = tndSearch.trim().toLowerCase();
+          // Receivables ("à récupérer") live in their own section, never in the main journal.
+          const receivables = optimisticTndMovements.filter((m: any) => isReceivableNote(m.note) && m.isSettled === false);
+          const receivablesTotal = receivables.reduce((s: number, m: any) => s + m.amount, 0);
           const filtered = optimisticTndMovements.filter((m: any) => {
+            if (isReceivableNote(m.note) && m.isSettled === false) return false;
             if (tndTypeFilter !== 'all' && m.type !== tndTypeFilter) return false;
             if (tndUserFilter !== 'all' && m.performedBy !== tndUserFilter) return false;
             if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
@@ -1015,6 +1041,38 @@ export default function MoneyHubApp({
                 <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
               )}
 
+              <button onClick={() => { setReceivableForm({ amount: '', note: '' }); setActiveModal('add_receivable'); }} className="w-full p-4 bg-gradient-to-r from-sky-500/10 to-cyan-500/10 border border-sky-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-sky-500/60"><Bell className="h-5 w-5 text-sky-300" /><p className="text-[11px] font-black uppercase tracking-widest text-sky-200">On me doit de l'argent</p><span className="text-[8px] font-black uppercase tracking-widest text-sky-300 bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 rounded-md">Hors solde</span></button>
+
+              {/* À RÉCUPÉRER — money owed to you: visible, noted, NOT counted in the balance */}
+              {receivables.length > 0 && (
+                <div className="relative overflow-hidden bg-gradient-to-br from-sky-500/12 via-sky-500/5 to-cyan-500/10 border-2 border-sky-500/30 rounded-[36px] p-6 shadow-2xl shadow-sky-950/10">
+                  <div className="absolute -top-12 -right-12 opacity-[0.07] pointer-events-none text-sky-400"><Bell className="h-40 w-40" /></div>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-3 bg-sky-500/20 rounded-2xl ring-1 ring-sky-500/40"><Bell className="h-5 w-5 text-sky-300" /></div>
+                      <div className="min-w-0"><p className="text-[10px] font-black text-sky-300 uppercase tracking-[0.25em]">À récupérer</p><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">On me doit — hors solde</p></div>
+                    </div>
+                    <p className="text-2xl font-black text-sky-300 tracking-tighter shrink-0">{formatRawCurrency(receivablesTotal, 'TND')}</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {receivables.map((m: any) => (
+                      <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-sky-500/20 rounded-2xl">
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <p className="text-sm font-black text-white truncate">{cleanReceivableNote(m.note)}</p>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{m.performedBy ? ` · ${m.performedBy}` : ''}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <p className="text-base font-black text-sky-300 tracking-tighter">{formatRawCurrency(m.amount, 'TND')}</p>
+                          <button onClick={() => { setTndNoteEdit({ id: m.id, note: cleanReceivableNote(m.note), amount: m.amount, type: m.type }); setTndNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90" title="Modifier la note"><Edit className="h-4 w-4" /></button>
+                          <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Marquer comme récupéré (ajoute au solde)">✓ Récupéré</button>
+                          {currentUser.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/30 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* SEARCH + FILTERS */}
               <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
                 <div className="relative">
@@ -1071,13 +1129,15 @@ export default function MoneyHubApp({
                     const running = balanceById[m.id] ?? 0;
                     const isPending = m.isSettled === false;
                     const isTransfer = isTransferNote(m.note);
-                    const cleanNote = isTransfer ? m.note.replace(TREASURY_ARCHIVE_TAG, '').replace(/^\s*·\s*/, '').trim() : m.note;
+                    const isRecovered = isReceivableNote(m.note);
+                    const cleanNote = isTransfer ? m.note.replace(TREASURY_ARCHIVE_TAG, '').replace(/^\s*·\s*/, '').trim() : isRecovered ? cleanReceivableNote(m.note) : m.note;
                     return (
                       <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isTransfer ? 'bg-violet-500/10 border-violet-500/40 hover:border-violet-500/60 ring-1 ring-violet-500/20' : isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
                         <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isTransfer ? 'bg-violet-400 shadow-lg' : isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             {isTransfer && <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-500/40 text-violet-200 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><ArrowLeftRight className="h-2.5 w-2.5" /> Transfert Archive</span>}
+                            {isRecovered && <span className="px-2 py-0.5 bg-sky-500/20 border border-sky-500/40 text-sky-200 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><Bell className="h-2.5 w-2.5" /> Récupéré</span>}
                             {isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}
                             <p className={`text-sm font-bold leading-tight break-words ${isTransfer ? 'text-violet-100' : isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{cleanNote}</p>
                           </div>
@@ -1466,6 +1526,19 @@ export default function MoneyHubApp({
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {activeModal === 'add_receivable' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-sky-300"><Bell className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">On me doit de l'argent</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-sky-500/5 border border-sky-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Ce montant reste <b className="text-sky-300">visible mais hors du solde</b>. Quand la personne te rembourse, tape « Récupéré » et il rejoint la caisse.</p></div>
+            <form onSubmit={handleAddReceivable} className="flex flex-col gap-5">
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Montant dû (TND)</label><input type="number" step="any" required autoFocus placeholder="0" value={receivableForm.amount} onChange={e => setReceivableForm(p => ({ ...p, amount: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white outline-none focus:border-sky-500/50 shadow-inner tracking-tighter" /></div>
+              <input type="text" required placeholder="QUI ? POURQUOI ? (NOTE OBLIGATOIRE)" value={receivableForm.note} onChange={e => setReceivableForm(p => ({ ...p, note: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white outline-none focus:border-sky-500/40 shadow-inner" />
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !receivableForm.amount || !receivableForm.note.trim()} className="flex-[2] py-5 bg-sky-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-sky-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Enregistrer</button></div>
+            </form>
           </div>
         </div>
       )}

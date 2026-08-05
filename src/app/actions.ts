@@ -558,6 +558,40 @@ export async function settleTndMovement(id: string) {
   }
 }
 
+// Receivable ("à récupérer"): money someone owes you. Stored as an UNSETTLED IN with NO
+// scheduled date, so the existing settled-only balance logic keeps it OUT of the cash total
+// AND out of the planned/forecast lists (those require a scheduledFor). It stays fully visible
+// with its note until you tap "Récupéré", which settles it via the normal settleTndMovement.
+const TND_RECEIVABLE_TAG = '🔖 À RÉCUPÉRER';
+export async function createTndReceivable(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const amount = parseFloat(formData.get('amount') as string);
+    const note = (formData.get('note') as string || '').trim();
+
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+
+    const taggedNote = `${TND_RECEIVABLE_TAG} · ${note}`;
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubTndMovement.create({
+        data: { amount, type: 'IN', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: false },
+      });
+      await logAudit(tx, {
+        entityType: 'TREASURY', entityId: movement.id, action: 'TND_RECEIVABLE',
+        details: `Créance enregistrée (hors solde): ${amount} TND — ${note}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l\'enregistrement' };
+  }
+}
+
 // The amount, movement direction, schedule and settlement state are deliberately not accepted here.
 // This preserves the financial record while allowing a corrected explanatory note.
 export async function updateTndMovementNote(id: string, rawNote: string) {
