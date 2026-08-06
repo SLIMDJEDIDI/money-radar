@@ -961,7 +961,7 @@ export default function MoneyHubApp({
         </div>
       </header>
 
-      <main className="app-main-safe-bottom max-w-4xl mx-auto p-3 sm:p-4 flex flex-col gap-4 sm:gap-6 animate-fade-up pb-32">
+      <main className="app-main-safe-bottom max-w-4xl mx-auto p-3 sm:p-4 flex flex-col gap-4 sm:gap-6 animate-fade-up">
         {activeSection === 'dashboard' && (() => {
           const urgentTnd = [...tndOverdue, ...tndDueSoon.filter((m: any) => !tndOverdue.some((o: any) => o.id === m.id))];
           const urgentCount = urgentTnd.length + dueReminders.length;
