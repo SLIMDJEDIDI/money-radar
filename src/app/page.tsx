@@ -51,6 +51,8 @@ export default async function Page() {
         initialArchiveDueSoon={data.archiveDueSoon}
         initialArchiveOverdue={data.archiveOverdue}
         initialPartnerNotes={data.partnerNotes}
+        initialBankAccounts={data.bankAccounts}
+        initialBankMovements={data.bankMovements}
       />
     </main>
   );

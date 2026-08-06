@@ -896,6 +896,250 @@ export async function transferTreasuryToArchive(formData: FormData) {
   }
 }
 
+// ----------------------------------------------------
+// 5d. BANQUE — multiple named bank accounts (assistant-visible, like Trésorerie)
+// ----------------------------------------------------
+// Non-destructive provisioning: creates both tables only if missing. Never alters data.
+export async function ensureBankTables() {
+  try {
+    await requireSession();
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubBankAccount" (
+        "id" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "currencyCode" TEXT NOT NULL DEFAULT 'TND',
+        "sortOrder" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "HubBankAccount_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubBankMovement" (
+        "id" TEXT NOT NULL,
+        "accountId" TEXT NOT NULL,
+        "amount" DOUBLE PRECISION NOT NULL,
+        "type" TEXT NOT NULL,
+        "note" TEXT NOT NULL,
+        "performedBy" TEXT NOT NULL,
+        "scheduledFor" TIMESTAMP(3),
+        "isSettled" BOOLEAN NOT NULL DEFAULT true,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "HubBankMovement_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_accountId_idx" ON "HubBankMovement" ("accountId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_isSettled_idx" ON "HubBankMovement" ("isSettled");`);
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Provisioning banque impossible' };
+  }
+}
+
+export async function createBankAccount(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const name = (formData.get('name') as string || '').trim();
+    const currencyCode = (formData.get('currencyCode') as string || 'TND').trim() || 'TND';
+    if (!name) return { success: false, error: 'Le nom du compte est obligatoire' };
+
+    await ensureBankTables();
+    const account = await prisma.$transaction(async (tx) => {
+      const count = await tx.hubBankAccount.count();
+      const acc = await tx.hubBankAccount.create({ data: { name, currencyCode, sortOrder: count } });
+      await logAudit(tx, {
+        entityType: 'BANK', entityId: acc.id, action: 'BANK_ACCOUNT_CREATE',
+        details: `Compte bancaire créé: ${name} (${currencyCode})`, modifiedBy: session.username,
+      });
+      return acc;
+    });
+    revalidatePath('/');
+    return { success: true, account };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de la création du compte' };
+  }
+}
+
+export async function renameBankAccount(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const id = (formData.get('id') as string || '').trim();
+    const name = (formData.get('name') as string || '').trim();
+    if (!id || !name) return { success: false, error: 'Nom invalide' };
+    await prisma.$transaction(async (tx) => {
+      await tx.hubBankAccount.update({ where: { id }, data: { name } });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_ACCOUNT_RENAME', details: `Compte renommé: ${name}`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors du renommage' };
+  }
+}
+
+// Deleting an account also removes its movements (admin-only, guarded).
+export async function deleteBankAccount(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      await tx.hubBankMovement.deleteMany({ where: { accountId: id } });
+      await tx.hubBankAccount.delete({ where: { id } });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_ACCOUNT_DELETE', details: `Compte bancaire supprimé (et ses mouvements)`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
+    return { success: false, error: 'Erreur lors de la suppression' };
+  }
+}
+
+export async function createBankMovement(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const accountId = (formData.get('accountId') as string || '').trim();
+    const amount = parseFloat(formData.get('amount') as string);
+    const type = formData.get('type') as string;
+    const note = (formData.get('note') as string || '').trim();
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
+
+    if (!accountId) return { success: false, error: 'Compte manquant' };
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (type !== 'IN' && type !== 'OUT') return { success: false, error: 'Type de mouvement invalide' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+
+    const acc = await prisma.hubBankAccount.findUnique({ where: { id: accountId } });
+    if (!acc) return { success: false, error: 'Compte bancaire introuvable' };
+
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const d = new Date(scheduledForRaw);
+      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+      if (d.getTime() > startOfToday.getTime()) { scheduledFor = d; isSettled = false; }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubBankMovement.create({
+        data: { accountId, amount, type, note, performedBy: session.username, scheduledFor, isSettled },
+      });
+      await logAudit(tx, {
+        entityType: 'BANK', entityId: movement.id,
+        action: !isSettled ? (type === 'IN' ? 'BANK_IN_SCHEDULED' : 'BANK_OUT_SCHEDULED') : (type === 'IN' ? 'BANK_IN' : 'BANK_OUT'),
+        details: !isSettled
+          ? `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE PLANIFIÉE ${amount} pour ${scheduledFor!.toLocaleDateString('fr-FR')}: ${note}`
+          : `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE de ${amount}: ${note}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l\'enregistrement' };
+  }
+}
+
+export async function createBankBatchDisbursement(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const accountId = (formData.get('accountId') as string || '').trim();
+    const raw = formData.get('items') as string || '';
+    const scheduledForRaw = (formData.get('scheduledFor') as string || '').trim();
+    if (!accountId) return { success: false, error: 'Compte manquant' };
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return { success: false, error: 'Liste de décaissements invalide' }; }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 30) return { success: false, error: 'Ajoutez entre 1 et 30 décaissements' };
+
+    const items = parsed.map((row: any, index: number) => ({ amount: Number(row?.amount), note: String(row?.note || '').trim(), index: index + 1 }));
+    const invalid = items.find(item => !isFinite(item.amount) || item.amount <= 0 || !item.note);
+    if (invalid) return { success: false, error: `Ligne ${invalid.index} : montant positif et note obligatoire requis` };
+
+    let scheduledFor: Date | null = null;
+    let isSettled = true;
+    if (scheduledForRaw) {
+      const date = new Date(scheduledForRaw);
+      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+    }
+
+    const total = items.reduce((sum, item) => sum + item.amount, 0);
+    await prisma.$transaction(async (tx) => {
+      const created = await Promise.all(items.map(item => tx.hubBankMovement.create({
+        data: { accountId, amount: item.amount, type: 'OUT', note: item.note, performedBy: session.username, scheduledFor, isSettled },
+      })));
+      await logAudit(tx, {
+        entityType: 'BANK', entityId: created[0]?.id,
+        action: isSettled ? 'BANK_BATCH_OUT' : 'BANK_BATCH_OUT_SCHEDULED',
+        details: `${items.length} décaissements BANQUE ${isSettled ? 'enregistrés' : 'planifiés'} — total ${total}${scheduledFor ? ` pour ${scheduledFor.toLocaleDateString('fr-FR')}` : ''}`,
+        newValue: JSON.stringify(items.map(({ amount, note }) => ({ amount, note }))),
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, count: items.length, total };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l’enregistrement groupé' };
+  }
+}
+
+export async function settleBankMovement(id: string) {
+  try {
+    const session = await requireSession();
+    await prisma.$transaction(async (tx) => {
+      const m = await tx.hubBankMovement.findUnique({ where: { id } });
+      if (!m || m.isSettled) return;
+      await tx.hubBankMovement.update({ where: { id }, data: { isSettled: true } });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_SETTLE', details: `Mouvement BANQUE confirmé (${m.amount} ${m.type})`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch { return { success: false, error: 'Action non autorisée' }; }
+}
+
+export async function updateBankMovementNote(id: string, rawNote: string) {
+  try {
+    const session = await requireSession();
+    const note = String(rawNote || '').trim();
+    if (!id || !note) return { success: false, error: 'La note est obligatoire' };
+    if (note.length > 1000) return { success: false, error: 'La note ne peut pas dépasser 1 000 caractères' };
+    await prisma.$transaction(async (tx) => {
+      const movement = await tx.hubBankMovement.findUnique({ where: { id } });
+      if (!movement) throw new Error('NOT_FOUND');
+      if (movement.note === note) return;
+      await tx.hubBankMovement.update({ where: { id }, data: { note } });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_NOTE_EDIT', details: `Note BANQUE modifiée`, oldValue: movement.note, newValue: note, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    if (error?.message === 'NOT_FOUND') return { success: false, error: 'Mouvement introuvable' };
+    return { success: false, error: 'Modification de la note impossible' };
+  }
+}
+
+export async function deleteBankMovement(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      const old = await tx.hubBankMovement.findUnique({ where: { id } });
+      if (!old) return;
+      await tx.hubBankMovement.delete({ where: { id } });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_DELETE', oldValue: JSON.stringify(old), details: `Suppression mouvement BANQUE: ${old.amount} (${old.type})`, modifiedBy: session.username });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch { return { success: false, error: 'Action non autorisée' }; }
+}
+
 export async function createArchiveBatchDisbursement(formData: FormData) {
   try {
     const session = await requireAdmin();

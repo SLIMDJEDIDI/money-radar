@@ -167,6 +167,38 @@ model HubPartnerNote {
   @@index([contactId])
 }
 
+// BANQUE — multiple named bank accounts, each an independent cash box mirroring the TND
+// treasury (its own movements/balance/history). Visible to assistants (like Trésorerie).
+// Additive tables provisioned via CREATE TABLE IF NOT EXISTS (zero risk).
+model HubBankAccount {
+  id           String   @id @default(cuid())
+  name         String
+  currencyCode String   @default("TND")
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([sortOrder])
+}
+
+model HubBankMovement {
+  id          String   @id @default(cuid())
+  accountId   String
+  amount      Float
+  type        String   // "IN" (Entrée), "OUT" (Sortie)
+  note        String
+  performedBy String
+  scheduledFor DateTime?
+  isSettled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([createdAt])
+  @@index([scheduledFor])
+  @@index([isSettled])
+}
+
 // Singleton global security state. id is always "global".
 // lockEpoch invalidates every signed cookie each time the lock changes state.
 model HubPanicLock {

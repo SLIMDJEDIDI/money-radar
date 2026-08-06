@@ -84,6 +84,18 @@ export async function getHubDashboardData(searchQuery: string = '') {
       partnerNotes = [];
     }
 
+    // BANQUE — named bank accounts + their movements. Defensive so the app loads if the
+    // tables aren't provisioned yet. Independent from every other total.
+    let bankAccounts: any[] = [];
+    let bankMovements: any[] = [];
+    try {
+      bankAccounts = await prisma.hubBankAccount.findMany({ orderBy: { sortOrder: 'asc' } });
+      bankMovements = await prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } });
+    } catch {
+      bankAccounts = [];
+      bankMovements = [];
+    }
+
     const activeCurrencies = currencies.filter(c => c.isActive);
 
     // TND Treasury Logic
@@ -141,6 +153,21 @@ export async function getHubDashboardData(searchQuery: string = '') {
     const archiveOverdue = archiveUpcoming.filter(m => m.scheduledFor!.getTime() < now.getTime());
     const archivePendingIn = archiveUpcoming.filter(m => m.type === 'IN').reduce((s, m) => s + m.amount, 0);
     const archivePendingOut = archiveUpcoming.filter(m => m.type === 'OUT').reduce((s, m) => s + m.amount, 0);
+
+    // BANQUE per-account aggregation — same settled-only rule as the treasury.
+    const bankAccountsWithStats = bankAccounts.map(acc => {
+      let balance = 0, todayIn = 0, todayOut = 0, pendingIn = 0, pendingOut = 0;
+      for (const m of bankMovements) {
+        if (m.accountId !== acc.id) continue;
+        if (!m.isSettled) {
+          if (m.scheduledFor) { if (m.type === 'IN') pendingIn += m.amount; else pendingOut += m.amount; }
+          continue;
+        }
+        if (m.type === 'IN') { balance += m.amount; if (m.createdAt >= startOfToday) todayIn += m.amount; }
+        else { balance -= m.amount; if (m.createdAt >= startOfToday) todayOut += m.amount; }
+      }
+      return { id: acc.id, name: acc.name, currencyCode: acc.currencyCode, sortOrder: acc.sortOrder, balance, todayIn, todayOut, pendingIn, pendingOut };
+    });
 
     // Per-contact TND held breakdown
     const tndHeldByContact: Record<string, { tnd: number; usd: number }> = {};
@@ -228,6 +255,8 @@ export async function getHubDashboardData(searchQuery: string = '') {
       archiveDueSoon,
       archiveOverdue,
       partnerNotes,
+      bankAccounts: bankAccountsWithStats,
+      bankMovements,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,

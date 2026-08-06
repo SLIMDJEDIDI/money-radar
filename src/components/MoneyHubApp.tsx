@@ -5,7 +5,7 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
@@ -18,6 +18,8 @@ import {
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
   transferTreasuryToArchive,
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
+  ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
+  createBankMovement, createBankBatchDisbursement, settleBankMovement, updateBankMovementNote, deleteBankMovement,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -165,6 +167,7 @@ export default function MoneyHubApp({
   initialTndMovements = [], initialTndForecast = null, initialTndUpcoming = [], initialTndDueSoon = [], initialTndOverdue = [],
   initialArchiveMovements = [], initialArchiveUpcoming = [], initialArchiveDueSoon = [], initialArchiveOverdue = [],
   initialPartnerNotes = [],
+  initialBankAccounts = [], initialBankMovements = [],
   initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
 }: any) {
   // --- AUTH & THEME ---
@@ -194,12 +197,12 @@ export default function MoneyHubApp({
     })();
   }, []);
 
-  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive';
+  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive' | 'banque';
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
   // Assistants land directly on Treasury (only section they can access) and can never reach ARCHIVE.
   useEffect(() => {
-    if (currentUser && currentUser.role !== 'admin' && activeSection !== 'treasury' && activeSection !== 'settings') {
+    if (currentUser && currentUser.role !== 'admin' && activeSection !== 'treasury' && activeSection !== 'settings' && activeSection !== 'banque') {
       setActiveSection('treasury');
     }
   }, [currentUser, activeSection]);
@@ -227,6 +230,20 @@ export default function MoneyHubApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 
+  // BANQUE tables provisioning — any logged-in user (assistants use Banque too).
+  // Idempotent CREATE TABLE IF NOT EXISTS, guarded by a localStorage flag (runs once per browser).
+  useEffect(() => {
+    if (!currentUser) return;
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_tables_done') === '1') return;
+    (async () => {
+      try {
+        const res: any = await ensureBankTables();
+        if (res?.success) { localStorage.setItem('hub_bank_tables_done', '1'); await refreshHubState(); }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
   // --- DATA STATES ---
   const [contacts, setContacts] = useState(initialContacts);
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
@@ -246,6 +263,20 @@ export default function MoneyHubApp({
   const [partnerNotes, setPartnerNotes] = useState<any[]>(initialPartnerNotes || []);
   const [noteModal, setNoteModal] = useState<{ open: boolean; contactId?: string; contactName?: string; editId?: string }>({ open: false });
   const [noteForm, setNoteForm] = useState<{ direction: string; amount: string; currencyCode: string; text: string }>({ direction: 'THEY_OWE', amount: '', currencyCode: 'TND', text: '' });
+  // BANQUE — named bank accounts + their movements (mirrors treasury, per selected account).
+  const [bankAccounts, setBankAccounts] = useState<any[]>(initialBankAccounts || []);
+  const [bankMovements, setBankMovements] = useState<any[]>((initialBankMovements || []).map(hydrateMovement));
+  const [selectedBankId, setSelectedBankId] = useState<string | null>((initialBankAccounts || [])[0]?.id || null);
+  const [bankForm, setBankForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
+  const [bankBatchItems, setBankBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
+  const [bankNoteEdit, setBankNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
+  const [bankNoteEditError, setBankNoteEditError] = useState('');
+  const [bankSearch, setBankSearch] = useState('');
+  const [bankPeriod, setBankPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
+  const [bankTypeFilter, setBankTypeFilter] = useState<'all' | 'IN' | 'OUT'>('all');
+  const [newAccountForm, setNewAccountForm] = useState<{ name: string; currencyCode: string }>({ name: '', currencyCode: 'TND' });
+  const [renameAccountId, setRenameAccountId] = useState<string | null>(null);
+  const [renameAccountName, setRenameAccountName] = useState('');
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
@@ -413,6 +444,8 @@ export default function MoneyHubApp({
         setArchiveDueSoon((data.archiveDueSoon || []).map(hydrateTnd));
         setArchiveOverdue((data.archiveOverdue || []).map(hydrateTnd));
         setPartnerNotes(data.partnerNotes || []);
+        setBankAccounts(data.bankAccounts || []);
+        setBankMovements((data.bankMovements || []).map(hydrateTnd));
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
@@ -555,6 +588,83 @@ export default function MoneyHubApp({
       const res: any = await createTndReceivable(data);
       if (res.success) { setReceivableForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  // ---------- BANQUE handlers (mirror Trésorerie, scoped to selectedBankId) ----------
+  const handleCreateBankAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAccountForm.name.trim()) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('name', newAccountForm.name.trim());
+      data.append('currencyCode', newAccountForm.currencyCode);
+      const res: any = await createBankAccount(data);
+      if (res.success) { setNewAccountForm({ name: '', currencyCode: 'TND' }); setActiveModal(null); if (res.account?.id) setSelectedBankId(res.account.id); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+  const handleRenameBankAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameAccountId || !renameAccountName.trim()) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('id', renameAccountId);
+      data.append('name', renameAccountName.trim());
+      const res: any = await renameBankAccount(data);
+      if (res.success) { setRenameAccountId(null); setRenameAccountName(''); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+  const handleDeleteBankAccount = (id: string, name: string) => {
+    setConfirmModal({ isOpen: true, title: 'Supprimer le compte ?', description: `« ${name} » et TOUS ses mouvements seront supprimés définitivement.`, confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankAccount(id); if (res.success) { if (selectedBankId === id) setSelectedBankId(bankAccounts.find((a:any) => a.id !== id)?.id || null); await refreshHubState(); } else if (res.code) handleSessionExpired(); else alert(res.error); }); } });
+  };
+  const handleAddBankMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBankId || !bankForm.amount || !bankForm.note.trim()) return;
+    startTransition(async () => {
+      const amount = parseFloat(bankForm.amount);
+      const scheduled = bankForm.scheduledFor || '';
+      const isPlanned = !!scheduled;
+      setBankMovements(prev => [{ id: 'temp-bank-' + Date.now(), accountId: selectedBankId, amount, type: bankForm.type, note: bankForm.note, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled) : null, isSettled: !isPlanned }, ...prev]);
+      const data = new FormData();
+      data.append('accountId', selectedBankId);
+      data.append('amount', bankForm.amount);
+      data.append('type', bankForm.type);
+      data.append('note', bankForm.note);
+      if (isPlanned) data.append('scheduledFor', scheduled);
+      const res: any = await createBankMovement(data);
+      if (res.success) { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+  const handleAddBankBatchDisbursement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBankId) return;
+    const invalid = bankBatchItems.find(item => !item.note.trim() || !item.amount || Number(item.amount) <= 0);
+    if (invalid) { alert('Chaque ligne doit avoir un montant positif et une note obligatoire.'); return; }
+    startTransition(async () => {
+      const scheduled = bankForm.scheduledFor || '';
+      const validItems = bankBatchItems.map(item => ({ amount: Number(item.amount), note: item.note.trim() }));
+      const data = new FormData();
+      data.append('accountId', selectedBankId);
+      data.append('items', JSON.stringify(validItems));
+      if (scheduled) data.append('scheduledFor', scheduled);
+      const res: any = await createBankBatchDisbursement(data);
+      if (res.success) { setBankBatchItems([{ amount: '', note: '' }]); setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+  const handleSettleBankMovement = (id: string) => { startTransition(async () => { const res: any = await settleBankMovement(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); };
+  const handleDeleteBankMovement = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer le mouvement ?', description: 'Ce mouvement bancaire sera supprimé définitivement.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankMovement(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); } }); };
+  const handleSaveBankNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bankNoteEdit) return;
+    setBankNoteEditError('');
+    startTransition(async () => {
+      const res: any = await updateBankMovementNote(bankNoteEdit.id, bankNoteEdit.note);
+      if (res.success) { setBankNoteEdit(null); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else setBankNoteEditError(res.error || 'Erreur');
     });
   };
 
@@ -985,6 +1095,9 @@ export default function MoneyHubApp({
                 <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Caisse TND VLT Coffre</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
                 <button onClick={() => navigateTo('currencies')} className="text-left p-4 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.985] transition shadow-lg shadow-emerald-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Position Globale USD</p></div><span className="text-[7px] font-black text-emerald-300 uppercase tracking-widest shrink-0">Live·USD</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-300">{formatUSD(metrics.totalAvoirs || 0)} encaissé</span><span className="text-neutral-500">{activePartners} actif{activePartners > 1 ? 's' : ''}</span></div></button>
                 <button onClick={() => navigateTo('archive')} className="text-left p-4 rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.985] transition shadow-lg shadow-amber-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Caisse Archive</p></div><span className="text-[7px] font-black text-amber-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(metrics.archiveBalance || 0) >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.archiveTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.archiveTodayOut || 0, 'TND')}</span></div></button>
+                {bankAccounts.map((a: any) => (
+                  <button key={a.id} onClick={() => { setSelectedBankId(a.id); navigateTo('banque'); }} className="text-left p-4 rounded-2xl border border-teal-500/25 bg-gradient-to-br from-teal-500/10 to-neutral-950 hover:border-teal-500/50 active:scale-[0.985] transition shadow-lg shadow-teal-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-teal-500/15 text-teal-300 flex items-center justify-center shrink-0"><Landmark className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">{a.name}</p></div><span className="text-[7px] font-black text-teal-300 uppercase tracking-widest shrink-0">Live·{a.currencyCode}</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(a.balance || 0) >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(a.todayIn || 0, a.currencyCode)}</span><span className="text-rose-400">− {formatRawCurrency(a.todayOut || 0, a.currencyCode)}</span></div></button>
+                ))}
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
@@ -1270,6 +1383,129 @@ export default function MoneyHubApp({
           );
         })()}
 
+        {activeSection === 'banque' && (() => {
+          const account = bankAccounts.find((a: any) => a.id === selectedBankId) || bankAccounts[0] || null;
+          const cur = account?.currencyCode || 'TND';
+          const accMovements = account ? bankMovements.filter((m: any) => m.accountId === account.id) : [];
+          // Running balance oldest→newest
+          const balanceById: Record<string, number> = {};
+          { const ordered = [...accMovements].reverse(); let acc = 0; for (const m of ordered) { if (m.isSettled !== false) acc += (m.type === 'IN' ? m.amount : -m.amount); balanceById[m.id] = acc; } }
+          const settled = accMovements.filter((m: any) => m.isSettled !== false);
+          const balance = settled.reduce((s: number, m: any) => s + (m.type === 'IN' ? m.amount : -m.amount), 0);
+          const startToday = new Date(); startToday.setHours(0,0,0,0);
+          const todayIn = settled.filter((m: any) => m.type === 'IN' && new Date(m.createdAt) >= startToday).reduce((s: number, m: any) => s + m.amount, 0);
+          const todayOut = settled.filter((m: any) => m.type === 'OUT' && new Date(m.createdAt) >= startToday).reduce((s: number, m: any) => s + m.amount, 0);
+          const pending = accMovements.filter((m: any) => m.isSettled === false && m.scheduledFor);
+          const pendingIn = pending.filter((m: any) => m.type === 'IN').reduce((s: number, m: any) => s + m.amount, 0);
+          const pendingOut = pending.filter((m: any) => m.type === 'OUT').reduce((s: number, m: any) => s + m.amount, 0);
+          const now = Date.now();
+          const periodMs = bankPeriod === 'today' ? 86400000 : bankPeriod === '7d' ? 7*86400000 : bankPeriod === '30d' ? 30*86400000 : 0;
+          const q = bankSearch.trim().toLowerCase();
+          const filtered = accMovements.filter((m: any) => {
+            if (bankTypeFilter !== 'all' && m.type !== bankTypeFilter) return false;
+            if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
+            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
+            return true;
+          });
+          return (
+            <div className="flex flex-col gap-6 pb-20">
+              <div className="flex items-center justify-between px-1">
+                <div><p className="text-[9px] font-black text-teal-300 uppercase tracking-[0.22em]">Command center</p><h2 className="text-2xl font-black tracking-[-0.06em] text-white leading-none mt-0.5 flex items-center gap-2"><Landmark className="h-6 w-6 text-teal-300" /> Banque</h2></div>
+                <button onClick={() => { setNewAccountForm({ name: '', currencyCode: 'TND' }); setActiveModal('add_bank_account'); }} className="shrink-0 px-3.5 py-2.5 bg-teal-500/15 border border-teal-500/30 rounded-2xl text-teal-200 text-[10px] font-black uppercase tracking-widest active:scale-95 transition flex items-center gap-1.5"><Plus className="h-4 w-4" /> Compte</button>
+              </div>
+
+              {bankAccounts.length === 0 ? (
+                <EmptyState icon={<Landmark className="h-10 w-10" />} title="Aucun compte bancaire" subtitle="Crée ton premier compte pour suivre son solde et ses mouvements." />
+              ) : (
+                <>
+                  {/* Account selector — one chip per account with its live balance */}
+                  <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1">
+                    {bankAccounts.map((a: any) => (
+                      <button key={a.id} onClick={() => setSelectedBankId(a.id)} className={`shrink-0 text-left px-4 py-3 rounded-2xl border transition min-w-[130px] ${account?.id === a.id ? 'bg-teal-500/15 border-teal-500/50 ring-1 ring-teal-500/30' : 'bg-neutral-900/50 border-neutral-800 hover:border-neutral-700'}`}>
+                        <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{a.name}</p>
+                        <p className={`text-base font-black tracking-tighter ${(a.balance || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {account && (<>
+                  {/* HERO */}
+                  <div className="bg-gradient-to-br from-[#062925] to-black border border-teal-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                    <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-teal-400"><Landmark className="h-48 w-48" /></div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-black text-teal-300 uppercase tracking-[0.3em] mb-2">{account.name}</p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => { setRenameAccountId(account.id); setRenameAccountName(account.name); setActiveModal('rename_bank_account'); }} className="p-2 rounded-xl bg-neutral-900/70 border border-neutral-800 text-blue-300 active:scale-90 transition"><Edit className="h-4 w-4" /></button>
+                        {currentUser.role === 'admin' && <button onClick={() => handleDeleteBankAccount(account.id, account.name)} className="p-2 rounded-xl bg-neutral-900/70 border border-neutral-800 text-rose-400 active:scale-90 transition"><Trash2 className="h-4 w-4" /></button>}
+                      </div>
+                    </div>
+                    <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(balance, cur)}</h2>
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                      <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Auj.</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(todayIn, cur)}</p></div>
+                      <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Auj.</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(todayOut, cur)}</p></div>
+                      {pending.length > 0 && (
+                        <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-teal-400 uppercase tracking-widest">Solde Projeté</p><p className="text-teal-300 font-black text-base tracking-tighter">{formatRawCurrency(balance + pendingIn - pendingOut, cur)}</p><p className="text-[9px] text-neutral-500 font-black uppercase tracking-widest mt-0.5">{pending.length} planifié{pending.length>1?'s':''}</p></div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* QUICK ACTIONS */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal('add_bank'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Entrée</p></button>
+                    <button onClick={() => { setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setBankBatchItems([{ amount: '', note: '' }]); setActiveModal('add_bank'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Sortie</p></button>
+                  </div>
+
+                  {/* FILTERS */}
+                  <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
+                    <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={bankSearch} onChange={e => setBankSearch(e.target.value)} placeholder="Rechercher note, montant…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-teal-500/40" /></div>
+                    <div className="flex flex-wrap gap-2">
+                      {[{ id: 'today', label: "Auj." }, { id: '7d', label: '7j' }, { id: '30d', label: '30j' }, { id: 'all', label: 'Tout' }].map(p => (
+                        <button key={p.id} onClick={() => setBankPeriod(p.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${bankPeriod === p.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{p.label}</button>
+                      ))}
+                      <span className="mx-1 border-l border-neutral-800" />
+                      {[{ id: 'all', label: 'Tous' }, { id: 'IN', label: '+ Entrées' }, { id: 'OUT', label: '- Sorties' }].map(t => (
+                        <button key={t.id} onClick={() => setBankTypeFilter(t.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${bankTypeFilter === t.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{t.label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* JOURNAL */}
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal — {account.name}</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {accMovements.length}</span></div>
+                    {filtered.length === 0 && <EmptyState icon={<Landmark className="h-10 w-10" />} title={accMovements.length === 0 ? 'Compte vide' : 'Aucun résultat'} subtitle={accMovements.length === 0 ? 'Enregistre ton premier mouvement.' : 'Modifie les filtres.'} />}
+                    <div className="flex flex-col gap-3">
+                      {filtered.map((m: any) => {
+                        const running = balanceById[m.id] ?? 0;
+                        const isPending = m.isSettled === false;
+                        return (
+                          <div key={m.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${isPending ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50' : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700'}`}>
+                            <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
+                            <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p></div>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                {isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}
+                                {m.performedBy && <p className="text-[9px] text-teal-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}
+                                {!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, cur)}</p>}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 flex items-center gap-3">
+                              <p className={`text-lg font-black tracking-tighter ${isPending ? 'text-amber-300' : m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, cur)}</p>
+                              {isPending && <button onClick={() => handleSettleBankMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95">✓</button>}
+                              <button onClick={() => { setBankNoteEdit({ id: m.id, note: m.note, amount: m.amount, type: m.type }); setBankNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90"><Edit className="h-4 w-4" /></button>
+                              {currentUser.role === 'admin' && <button onClick={() => handleDeleteBankMovement(m.id)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  </>)}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {activeSection === 'archive' && currentUser.role === 'admin' && (() => {
           const balanceById: Record<string, number> = {};
           {
@@ -1521,6 +1757,7 @@ export default function MoneyHubApp({
             { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'banque', label: 'Banque', icon: <Landmark className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'archive', label: 'Archive', icon: <Archive className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'history', label: 'Audit', icon: <History className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
@@ -1719,6 +1956,70 @@ export default function MoneyHubApp({
         </div>
       )}
 
+      {activeModal === 'add_bank_account' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 text-teal-300"><div className="flex items-center gap-2"><Landmark className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Nouveau compte bancaire</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleCreateBankAccount} className="flex flex-col gap-5">
+              <input type="text" required autoFocus placeholder="NOM DU COMPTE (ex: BIAT, ATTIJARI…)" value={newAccountForm.name} onChange={e => setNewAccountForm(p => ({ ...p, name: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" />
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Devise du compte</label><select value={newAccountForm.currencyCode} onChange={e => setNewAccountForm(p => ({ ...p, currencyCode: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm font-black text-white outline-none focus:border-teal-500/40 [color-scheme:dark]">{['TND','USD','EURO','RMB'].map(cc => <option key={cc} value={cc}>{cc}</option>)}</select></div>
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !newAccountForm.name.trim()} className="flex-[2] py-5 bg-teal-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Créer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      {activeModal === 'rename_bank_account' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className="w-full max-w-sm bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 text-teal-300"><div className="flex items-center gap-2"><Edit className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Renommer le compte</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <form onSubmit={handleRenameBankAccount} className="flex flex-col gap-5">
+              <input type="text" required autoFocus value={renameAccountName} onChange={e => setRenameAccountName(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" />
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !renameAccountName.trim()} className="flex-[2] py-5 bg-teal-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      {activeModal === 'add_bank' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+          <div className={`w-full ${bankForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-teal-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-teal-300 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{bankForm.type === 'IN' ? 'Entrée' : 'Sortie'} — {(bankAccounts.find((a:any)=>a.id===selectedBankId)?.name) || 'Compte'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            {bankForm.type === 'OUT' ? (
+              <form onSubmit={handleAddBankBatchDisbursement} className="flex flex-col gap-5">
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Sorties multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant a sa propre note.</p></div><div className="px-4 py-2.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-lg font-black">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(bankBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))}</div></div>
+                <div className="flex flex-col gap-3 max-h-[38vh] overflow-y-auto pr-1">
+                  {bankBatchItems.map((item, index) => (
+                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_150px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                      <span className="h-8 w-8 rounded-xl bg-rose-500/10 text-rose-300 flex items-center justify-center text-[10px] font-black">{index + 1}</span>
+                      <input type="number" step="any" required min="0.001" placeholder="Montant" value={item.amount} onChange={e => setBankBatchItems(items => items.map((x, i) => i === index ? { ...x, amount: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-sm text-white font-black outline-none focus:border-rose-500/50" />
+                      <input type="text" required placeholder="NOTE OBLIGATOIRE" value={item.note} onChange={e => setBankBatchItems(items => items.map((x, i) => i === index ? { ...x, note: e.target.value } : x))} className="min-w-0 bg-black border border-neutral-800 rounded-xl px-3 py-3 text-xs text-white font-bold uppercase outline-none focus:border-rose-500/50" />
+                      <button type="button" disabled={bankBatchItems.length === 1} onClick={() => setBankBatchItems(items => items.filter((_, i) => i !== index))} className="p-2.5 text-rose-500/50 hover:text-rose-400 disabled:opacity-20 rounded-xl"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" disabled={bankBatchItems.length >= 30} onClick={() => setBankBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
+                <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || bankBatchItems.some(item => !item.amount || !item.note.trim())} className="flex-[2] py-5 bg-rose-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-rose-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{bankForm.scheduledFor ? `Planifier ${bankBatchItems.length} sortie${bankBatchItems.length > 1 ? 's' : ''}` : `Enregistrer ${bankBatchItems.length} sortie${bankBatchItems.length > 1 ? 's' : ''}`}</button></div>
+              </form>
+            ) : (
+              <form onSubmit={handleAddBankMovement} className="flex flex-col gap-5">
+                <div className="flex gap-3 w-full"><input type="number" step="any" required autoFocus className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-teal-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={bankForm.amount} onChange={e => setBankForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-teal-300 font-black text-lg shadow-inner">{bankAccounts.find((a:any)=>a.id===selectedBankId)?.currencyCode || 'TND'}</div></div>
+                <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={bankForm.note} onChange={e => setBankForm(p=>({...p, note: e.target.value}))} />
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
+                <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !bankForm.note.trim()} className="flex-[2] py-5 bg-teal-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{bankForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {bankNoteEdit && (
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setBankNoteEdit(null); }}>
+          <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-teal-300 uppercase tracking-[0.2em]">Banque</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setBankNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
+            <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">Seule la note peut être corrigée. Le montant, le type et la date ne changent pas.</p>
+            <form onSubmit={handleSaveBankNote} className="flex flex-col gap-3"><textarea autoFocus required maxLength={1000} value={bankNoteEdit.note} onChange={e => setBankNoteEdit(current => current ? { ...current, note: e.target.value } : current)} className="min-h-28 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-bold outline-none focus:border-teal-500/50" placeholder="Note du mouvement" />{bankNoteEditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{bankNoteEditError}</p>}<div className="flex gap-3"><button type="button" onClick={() => setBankNoteEdit(null)} disabled={isPending} className="flex-1 py-3.5 bg-neutral-900 border border-neutral-800 text-neutral-400 font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending || !bankNoteEdit.note.trim()} className="flex-1 py-3.5 bg-teal-500 text-black font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition disabled:opacity-50">{isPending ? 'Enregistrement…' : 'Enregistrer'}</button></div></form>
+          </div>
+        </div>
+      )}
       {activeModal === 'add_archive' && currentUser.role === 'admin' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
           <div className={`w-full ${archiveForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-amber-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
