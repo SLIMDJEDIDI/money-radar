@@ -17,6 +17,7 @@ import {
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote, createTndReceivable,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
   transferTreasuryToArchive,
+  createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -68,7 +69,43 @@ const ActionCard = memo(({ label, note, style, icon, onClick }: any) => (
 ));
 ActionCard.displayName = 'ActionCard';
 
-const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect }: any) => {
+const PartnerNotes = memo(({ notes, formatRawCurrency, onAdd, onEdit, onDelete, compact }: any) => {
+  const list = notes || [];
+  return (
+    <div className={`flex flex-col gap-2 ${compact ? '' : 'pt-1'}`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-500 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Notes · hors solde</p>
+        {onAdd && <button onClick={(e) => { e.stopPropagation(); onAdd(); }} className="text-[9px] font-black uppercase tracking-widest text-sky-400 hover:text-sky-300 flex items-center gap-1 active:scale-95 transition"><Plus className="h-3 w-3" /> Note</button>}
+      </div>
+      {list.length === 0 ? (
+        <p className="text-[10px] font-bold text-neutral-600 italic">Aucune note.</p>
+      ) : list.map((n: any) => {
+        const they = n.direction === 'THEY_OWE';
+        return (
+          <div key={n.id} onClick={(e) => e.stopPropagation()} className={`group/note flex items-start gap-2.5 p-2.5 rounded-xl border ${they ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}>
+            <span className={`mt-0.5 h-6 w-6 shrink-0 rounded-lg flex items-center justify-center text-[10px] ${they ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>{they ? '↙' : '↗'}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[8px] font-black uppercase tracking-widest ${they ? 'text-emerald-400' : 'text-rose-400'}`}>{they ? 'Il me doit' : 'Je lui dois'}</span>
+                {n.amount > 0 && <span className="text-[11px] font-black text-white tracking-tighter">{formatRawCurrency(n.amount, n.currencyCode)}</span>}
+              </div>
+              <p className="text-[11px] font-bold text-neutral-300 leading-snug break-words mt-0.5">{n.text}</p>
+            </div>
+            {(onEdit || onDelete) && (
+              <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover/note:opacity-100 transition">
+                {onEdit && <button onClick={(e) => { e.stopPropagation(); onEdit(n); }} className="p-1.5 text-blue-400/70 hover:text-blue-300 rounded-lg transition active:scale-90"><Edit className="h-3.5 w-3.5" /></button>}
+                {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(n.id); }} className="p-1.5 text-rose-500/40 hover:text-rose-500 rounded-lg transition active:scale-90"><Trash2 className="h-3.5 w-3.5" /></button>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+PartnerNotes.displayName = 'PartnerNotes';
+
+const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect, notes, onAddNote, onEditNote, onDeleteNote }: any) => {
   const positive = c.netPositionUsd >= 0;
   const hasTnd = (c.heldBalanceTnd || 0) > 0.01;
   const hasActivity = Math.abs(c.netPositionUsd) > 0.01 || c.heldBalanceUsd > 0.01 || c.receivableBalanceUsd > 0.01 || c.payableBalanceUsd > 0.01 || hasTnd;
@@ -99,6 +136,9 @@ const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect }:
         <div className="flex flex-col gap-1"><p className="text-neutral-400">À recevoir</p><p className="text-blue-400 font-black text-xs break-all">{formatUSD(c.receivableBalanceUsd)}</p></div>
       </div>
     </div>
+    <div className="border-t border-neutral-800/70 pt-4">
+      <PartnerNotes notes={notes} formatRawCurrency={formatRawCurrency} onAdd={() => onAddNote(c)} onEdit={(n: any) => onEditNote(n, c.name)} onDelete={onDeleteNote} />
+    </div>
   </div>
   );
 });
@@ -117,6 +157,7 @@ export default function MoneyHubApp({
   initialContacts = [], initialActiveCurrencies = [], initialTransactions = [], initialReminders = [], initialAuditTrails = [], initialUsers = [], initialMetrics = {}, initialCategories = [],
   initialTndMovements = [], initialTndForecast = null, initialTndUpcoming = [], initialTndDueSoon = [], initialTndOverdue = [],
   initialArchiveMovements = [], initialArchiveUpcoming = [], initialArchiveDueSoon = [], initialArchiveOverdue = [],
+  initialPartnerNotes = [],
   initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
 }: any) {
   // --- AUTH & THEME ---
@@ -195,6 +236,9 @@ export default function MoneyHubApp({
   const [archiveUpcoming, setArchiveUpcoming] = useState<any[]>((initialArchiveUpcoming || []).map(hydrateMovement));
   const [archiveDueSoon, setArchiveDueSoon] = useState<any[]>((initialArchiveDueSoon || []).map(hydrateMovement));
   const [archiveOverdue, setArchiveOverdue] = useState<any[]>((initialArchiveOverdue || []).map(hydrateMovement));
+  const [partnerNotes, setPartnerNotes] = useState<any[]>(initialPartnerNotes || []);
+  const [noteModal, setNoteModal] = useState<{ open: boolean; contactId?: string; contactName?: string; editId?: string }>({ open: false });
+  const [noteForm, setNoteForm] = useState<{ direction: string; amount: string; currencyCode: string; text: string }>({ direction: 'THEY_OWE', amount: '', currencyCode: 'TND', text: '' });
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
@@ -361,9 +405,32 @@ export default function MoneyHubApp({
         setArchiveUpcoming((data.archiveUpcoming || []).map(hydrateTnd));
         setArchiveDueSoon((data.archiveDueSoon || []).map(hydrateTnd));
         setArchiveOverdue((data.archiveOverdue || []).map(hydrateTnd));
+        setPartnerNotes(data.partnerNotes || []);
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
+  };
+
+  const openAddNote = (contactId: string, contactName: string) => { setNoteForm({ direction: 'THEY_OWE', amount: '', currencyCode: 'TND', text: '' }); setNoteModal({ open: true, contactId, contactName }); };
+  const openEditNote = (n: any, contactName: string) => { setNoteForm({ direction: n.direction, amount: String(n.amount || ''), currencyCode: n.currencyCode || 'TND', text: n.text }); setNoteModal({ open: true, contactId: n.contactId, contactName, editId: n.id }); };
+  const handleSaveNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noteForm.text.trim()) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('direction', noteForm.direction);
+      data.append('amount', noteForm.amount || '0');
+      data.append('currencyCode', noteForm.currencyCode);
+      data.append('text', noteForm.text);
+      let res: any;
+      if (noteModal.editId) { data.append('id', noteModal.editId); res = await updatePartnerNote(data); }
+      else { data.append('contactId', noteModal.contactId!); res = await createPartnerNote(data); }
+      if (res.success) { setNoteModal({ open: false }); await refreshHubState(); }
+      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+  const handleDeleteNote = (id: string) => {
+    setConfirmModal({ isOpen: true, title: 'Supprimer la note ?', description: 'Cette note informelle sera supprimée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deletePartnerNote(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); } });
   };
 
   const handleLogout = async () => { try { await logoutUser(); } catch {} setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
@@ -730,6 +797,13 @@ export default function MoneyHubApp({
     return result;
   }, [optimisticContacts, contactFilterType, searchQuery]);
 
+  // Group informal notes by partner (never counted in any total).
+  const notesByContact = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    for (const n of (partnerNotes || [])) { (map[n.contactId] ||= []).push(n); }
+    return map;
+  }, [partnerNotes]);
+
   const filteredMovements = useMemo(() =>
     optimisticTransactions.filter((t:any) => !searchQuery || t.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.note?.toLowerCase().includes(searchQuery.toLowerCase())),
     [optimisticTransactions, searchQuery]
@@ -911,7 +985,7 @@ export default function MoneyHubApp({
               <ActionCard label="Décaisser" note="Repris / dépensé (−)" style="rose" icon={<ArrowUpRight className="h-4 w-4" />} onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'PAYABLE', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); setActiveModal('add_tx'); }} />
               <ActionCard label="Planifier un mouvement" note="Date future + rappel" style="amber" icon={<CalendarClock className="h-4 w-4" />} onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: true, dueDate: '', reminderEmail: '', plannedType: 'HELD' }); setActiveModal('add_tx'); }} />
             </div>
-            <div className="flex flex-col gap-4"><div className="flex justify-between items-center px-1"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires actifs</h3></div><button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir tout</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredContacts.map((c: any) => { const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01; return <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex justify-between items-center active:scale-[0.98] transition cursor-pointer hover:border-neutral-700 shadow-md"><div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div><div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div></div>; })}</div></div>
+            <div className="flex flex-col gap-4"><div className="flex justify-between items-center px-1"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires actifs</h3></div><button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir tout</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredContacts.map((c: any) => { const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const hasUsd = Math.abs(c.netPositionUsd) > 0.01; const cNotes = notesByContact[c.id] || []; return <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex flex-col gap-3 active:scale-[0.99] transition cursor-pointer hover:border-neutral-700 shadow-md"><div className="flex justify-between items-center"><div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div><div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${c.netPositionUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(c.netPositionUsd)}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div></div><div className="border-t border-neutral-800/70 pt-3"><PartnerNotes notes={cNotes} formatRawCurrency={formatRawCurrency} onAdd={() => openAddNote(c.id, c.name)} onEdit={(n: any) => openEditNote(n, c.name)} onDelete={handleDeleteNote} compact /></div></div>; })}</div></div>
           </div>
         )}
 
@@ -928,7 +1002,7 @@ export default function MoneyHubApp({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {!meta && <div onClick={() => setActiveModal('add_contact')} className="border border-dashed border-neutral-800 bg-neutral-900/10 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-neutral-900/30 transition shadow-inner group"><div className="p-4 bg-emerald-500/10 rounded-3xl group-hover:scale-110 transition"><Plus className="h-8 w-8 text-emerald-500" /></div><p className="text-xs font-black uppercase tracking-widest text-neutral-400">Ajouter un Partenaire</p></div>}
                   {meta && <div onClick={() => startOp(meta.type)} className={`border border-dashed border-${meta.color}-500/30 bg-${meta.color}-500/5 p-10 rounded-[40px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-${meta.color}-500/10 transition group`}><div className={`p-4 bg-${meta.color}-500/10 rounded-3xl group-hover:scale-110 transition`}><Plus className={`h-8 w-8 text-${meta.color}-400`} /></div><p className="text-xs font-black uppercase tracking-widest text-neutral-300">{meta.cta}</p></div>}
-                  {filteredContacts.map((c: any) => <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} />)}
+                  {filteredContacts.map((c: any) => <ContactCard key={c.id} c={c} formatUSD={formatUSD} formatRawCurrency={formatRawCurrency} onEdit={handleOpenEditContact} onSelect={setSelectedContact} notes={notesByContact[c.id]} onAddNote={(ct: any) => openAddNote(ct.id, ct.name)} onEditNote={openEditNote} onDeleteNote={handleDeleteNote} />)}
                 </div>
               )}
             </div>
@@ -1529,6 +1603,28 @@ export default function MoneyHubApp({
           </div>
         </div>
       )}
+      {noteModal.open && (
+        <div className="fixed inset-0 z-[170] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setNoteModal({ open: false })}>
+          <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-sky-300 min-w-0"><Bell className="h-5 w-5 shrink-0" /><h3 className="font-black uppercase tracking-[0.2em] text-sm truncate">{noteModal.editId ? 'Modifier la note' : 'Nouvelle note'}{noteModal.contactName ? ` · ${noteModal.contactName}` : ''}</h3></div><button onClick={() => setNoteModal({ open: false })} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800 shrink-0"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-sky-500/5 border border-sky-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Argent informel <b className="text-sky-300">jamais compté</b> dans les totaux. Juste un rappel visible sur la fiche du partenaire.</p></div>
+            <form onSubmit={handleSaveNote} className="flex flex-col gap-5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <button type="button" onClick={() => setNoteForm(p => ({ ...p, direction: 'THEY_OWE' }))} className={`py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest border transition ${noteForm.direction === 'THEY_OWE' ? 'bg-emerald-500 text-black border-emerald-500' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}>Il me doit</button>
+                <button type="button" onClick={() => setNoteForm(p => ({ ...p, direction: 'I_OWE' }))} className={`py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest border transition ${noteForm.direction === 'I_OWE' ? 'bg-rose-500 text-white border-rose-500' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500 hover:border-neutral-700'}`}>Je lui dois</button>
+              </div>
+              <div className="flex gap-2.5">
+                <input type="number" step="any" placeholder="Montant (optionnel)" value={noteForm.amount} onChange={e => setNoteForm(p => ({ ...p, amount: e.target.value }))} className="flex-[2] min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-xl font-black text-white outline-none focus:border-sky-500/50 shadow-inner tracking-tighter" />
+                <select value={noteForm.currencyCode} onChange={e => setNoteForm(p => ({ ...p, currencyCode: e.target.value }))} className="flex-1 min-w-0 bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm font-black text-white outline-none focus:border-sky-500/40 [color-scheme:dark]">
+                  {['TND','USD','EURO','RMB'].map(cc => <option key={cc} value={cc}>{cc}</option>)}
+                </select>
+              </div>
+              <input type="text" required placeholder="DÉTAIL (QUI / POURQUOI)" value={noteForm.text} onChange={e => setNoteForm(p => ({ ...p, text: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white outline-none focus:border-sky-500/40 shadow-inner" />
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setNoteModal({ open: false })} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !noteForm.text.trim()} className="flex-[2] py-5 bg-sky-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-sky-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{noteModal.editId ? 'Enregistrer' : 'Ajouter'}</button></div>
+            </form>
+          </div>
+        </div>
+      )}
       {activeModal === 'add_receivable' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
           <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
@@ -1708,6 +1804,9 @@ export default function MoneyHubApp({
               })}
             </div>
             {activeExplain && <div className={`mx-7 mt-4 p-4 rounded-2xl border bg-${activeExplain.style}-500/5 border-${activeExplain.style}-500/20 flex items-start gap-3 animate-in fade-in duration-200`}><span className={`text-${activeExplain.style}-400 shrink-0 mt-0.5`}>{activeExplain.icon}</span><p className="text-[11px] font-bold text-neutral-300 leading-relaxed">{activeExplain.explain}</p></div>}
+            <div className="mx-7 mt-6 p-5 rounded-[28px] border border-sky-500/25 bg-gradient-to-br from-sky-500/8 to-transparent">
+              <PartnerNotes notes={notesByContact[selectedContact.id]} formatRawCurrency={formatRawCurrency} onAdd={() => openAddNote(selectedContact.id, selectedContact.name)} onEdit={(n: any) => openEditNote(n, selectedContact.name)} onDelete={handleDeleteNote} />
+            </div>
             <div className="px-7 pt-8 pb-10 flex flex-col gap-4">
               <div className="flex items-center justify-between border-b border-neutral-900 pb-3"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Historique{drawerTypeFilter && <span className="text-neutral-500">· {breakdown.find(b=>b.key===drawerTypeFilter)?.label}</span>}</h4>{drawerTypeFilter ? <button onClick={() => setDrawerTypeFilter(null)} className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1">Tout voir <X className="h-3 w-3" /></button> : <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{txCount} op.</span>}</div>
               {(() => {

@@ -150,6 +150,23 @@ model HubArchiveMovement {
   @@index([isSettled])
 }
 
+// Informal money notes per partner — money owed in either direction that must stay
+// VISIBLE (partner card + DEVISES) but is NEVER counted in any balance/total.
+// Independent additive table, provisioned via CREATE TABLE IF NOT EXISTS (zero risk).
+model HubPartnerNote {
+  id           String   @id @default(cuid())
+  contactId    String
+  direction    String   // "THEY_OWE" (il me doit) or "I_OWE" (je lui dois)
+  amount       Float     @default(0)
+  currencyCode String    @default("TND")
+  text         String
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([contactId])
+}
+
 // Singleton global security state. id is always "global".
 // lockEpoch invalidates every signed cookie each time the lock changes state.
 model HubPanicLock {

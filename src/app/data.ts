@@ -76,6 +76,14 @@ export async function getHubDashboardData(searchQuery: string = '') {
       archiveMovements = [];
     }
 
+    // Partner notes — informal money owed, NEVER counted in any total. Defensive query.
+    let partnerNotes: any[] = [];
+    try {
+      partnerNotes = await prisma.hubPartnerNote.findMany({ orderBy: { createdAt: 'desc' } });
+    } catch {
+      partnerNotes = [];
+    }
+
     const activeCurrencies = currencies.filter(c => c.isActive);
 
     // TND Treasury Logic
@@ -219,6 +227,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       archiveUpcoming,
       archiveDueSoon,
       archiveOverdue,
+      partnerNotes,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,

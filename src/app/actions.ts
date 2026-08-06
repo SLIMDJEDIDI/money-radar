@@ -300,6 +300,8 @@ export async function deleteContact(id: string) {
     const modifiedBy = session.username;
     await prisma.$transaction(async (tx) => {
       const old = await tx.hubContact.findUnique({ where: { id } });
+      // Clean up informal notes (no FK cascade — plain contactId) to avoid orphan rows.
+      try { await tx.hubPartnerNote.deleteMany({ where: { contactId: id } }); } catch {}
       await tx.hubContact.delete({ where: { id } });
 
       await logAudit(tx, {
@@ -697,6 +699,119 @@ export async function ensureReminderPlannedType() {
   }
 }
 
+// ----------------------------------------------------
+// 5c. PARTNER NOTES (informal money owed, never in totals)
+// ----------------------------------------------------
+// Non-destructive provisioning: creates the table only if missing. Never alters data.
+export async function ensurePartnerNoteTable() {
+  try {
+    await requireSession();
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubPartnerNote" (
+        "id" TEXT NOT NULL,
+        "contactId" TEXT NOT NULL,
+        "direction" TEXT NOT NULL,
+        "amount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "currencyCode" TEXT NOT NULL DEFAULT 'TND',
+        "text" TEXT NOT NULL,
+        "createdBy" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "HubPartnerNote_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubPartnerNote_contactId_idx" ON "HubPartnerNote" ("contactId");`);
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Provisioning notes impossible' };
+  }
+}
+
+export async function createPartnerNote(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const contactId = (formData.get('contactId') as string || '').trim();
+    const direction = formData.get('direction') as string;
+    const text = (formData.get('text') as string || '').trim();
+    const currencyCode = (formData.get('currencyCode') as string || 'TND').trim();
+    const amount = parseFloat(formData.get('amount') as string);
+
+    if (!contactId) return { success: false, error: 'Partenaire manquant' };
+    if (direction !== 'THEY_OWE' && direction !== 'I_OWE') return { success: false, error: 'Sens invalide' };
+    if (!text) return { success: false, error: 'La note est obligatoire' };
+    if (!isFinite(amount) || amount < 0) return { success: false, error: 'Montant invalide' };
+
+    await ensurePartnerNoteTable();
+    await prisma.$transaction(async (tx) => {
+      const note = await tx.hubPartnerNote.create({
+        data: { contactId, direction, amount: amount || 0, currencyCode, text, createdBy: session.username },
+      });
+      await logAudit(tx, {
+        entityType: 'PARTNER_NOTE', entityId: note.id, action: 'CREATE',
+        details: `Note ${direction === 'THEY_OWE' ? 'il me doit' : 'je lui dois'}: ${amount} ${currencyCode} — ${text}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l\'ajout de la note' };
+  }
+}
+
+export async function updatePartnerNote(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const id = (formData.get('id') as string || '').trim();
+    const direction = formData.get('direction') as string;
+    const text = (formData.get('text') as string || '').trim();
+    const currencyCode = (formData.get('currencyCode') as string || 'TND').trim();
+    const amount = parseFloat(formData.get('amount') as string);
+
+    if (!id) return { success: false, error: 'Note manquante' };
+    if (direction !== 'THEY_OWE' && direction !== 'I_OWE') return { success: false, error: 'Sens invalide' };
+    if (!text) return { success: false, error: 'La note est obligatoire' };
+    if (!isFinite(amount) || amount < 0) return { success: false, error: 'Montant invalide' };
+
+    await prisma.$transaction(async (tx) => {
+      await tx.hubPartnerNote.update({
+        where: { id },
+        data: { direction, amount: amount || 0, currencyCode, text },
+      });
+      await logAudit(tx, {
+        entityType: 'PARTNER_NOTE', entityId: id, action: 'UPDATE',
+        details: `Note modifiée: ${amount} ${currencyCode} — ${text}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de la modification' };
+  }
+}
+
+export async function deletePartnerNote(id: string) {
+  try {
+    const session = await requireSession();
+    await prisma.$transaction(async (tx) => {
+      await tx.hubPartnerNote.delete({ where: { id } });
+      await logAudit(tx, {
+        entityType: 'PARTNER_NOTE', entityId: id, action: 'DELETE',
+        details: 'Note partenaire supprimée', modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de la suppression' };
+  }
+}
+
 export async function createArchiveMovement(formData: FormData) {
   try {
     const session = await requireAdmin();
@@ -1050,6 +1165,7 @@ export async function resetDatabaseToZero(password: string) {
       await tx.hubAuditTrail.deleteMany({});
       await tx.hubReminder.deleteMany({});
       await tx.hubTransaction.deleteMany({});
+      try { await tx.hubPartnerNote.deleteMany({}); } catch {}
       await tx.hubContact.deleteMany({});
       await tx.hubCurrency.deleteMany({});
 
