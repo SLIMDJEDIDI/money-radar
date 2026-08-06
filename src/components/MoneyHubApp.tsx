@@ -341,6 +341,7 @@ export default function MoneyHubApp({
   const [postponeTarget, setPostponeTarget] = useState<any>(null);
   const [postponeDate, setPostponeDate] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showTotalTnd, setShowTotalTnd] = useState(false);
   const [drawerTypeFilter, setDrawerTypeFilter] = useState<string | null>(null);
   const [inlineNewPartner, setInlineNewPartner] = useState(false);
   const [inlinePartnerName, setInlinePartnerName] = useState('');
@@ -1150,6 +1151,12 @@ export default function MoneyHubApp({
           const recentAudit = auditTrails.slice(0, 5);
           const activePartners = optimisticContacts.filter((c: any) => Math.abs(c.netPositionUsd) > 0.01 || (c.heldBalanceTnd || 0) > 0.01).length;
           const lastAudit = recentAudit[0];
+          // TOTAL TND — every TND cash pool EXCEPT the DEVISES partner positions.
+          // Formal = TND bank accounts; Informal = Coffre + Archive.
+          const tndBankAccounts = bankAccounts.filter((a: any) => a.currencyCode === 'TND');
+          const bankTndTotal = tndBankAccounts.reduce((s: number, a: any) => s + (a.balance || 0), 0);
+          const informalTndTotal = (metrics.tndBalance || 0) + (metrics.archiveBalance || 0);
+          const grandTndTotal = bankTndTotal + informalTndTotal;
           return (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-3 px-1">
@@ -1170,6 +1177,48 @@ export default function MoneyHubApp({
                 {bankAccounts.map((a: any) => (
                   <button key={a.id} onClick={() => { setSelectedBankId(a.id); navigateTo('banque'); }} className="text-left p-4 rounded-2xl border border-teal-500/25 bg-gradient-to-br from-teal-500/10 to-neutral-950 hover:border-teal-500/50 active:scale-[0.985] transition shadow-lg shadow-teal-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-teal-500/15 text-teal-300 flex items-center justify-center shrink-0"><Landmark className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">{a.name}</p></div><span className="text-[7px] font-black text-teal-300 uppercase tracking-widest shrink-0">Live·{a.currencyCode}</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(a.balance || 0) >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(a.todayIn || 0, a.currencyCode)}</span><span className="text-rose-400">− {formatRawCurrency(a.todayOut || 0, a.currencyCode)}</span></div></button>
                 ))}
+              </div>
+
+              {/* TOTAL TND — sum of every TND pool except DEVISES partner positions */}
+              <div className="flex flex-col gap-0">
+                <button
+                  onClick={() => setShowTotalTnd(v => !v)}
+                  aria-expanded={showTotalTnd}
+                  className={`group relative overflow-hidden w-full text-left p-5 sm:p-6 border-2 transition-all active:scale-[0.99] shadow-2xl shadow-indigo-950/20 ${showTotalTnd ? 'rounded-t-[32px] rounded-b-none border-b-0 border-indigo-400/70' : 'rounded-[32px] border-indigo-500/40 hover:border-indigo-400/70'} bg-gradient-to-br from-indigo-500/25 via-violet-500/15 to-blue-600/20`}
+                >
+                  <div className="absolute -top-8 -right-6 opacity-[0.10] pointer-events-none text-indigo-300"><Coins className="h-40 w-40" /></div>
+                  <div className="relative flex items-center gap-4">
+                    <div className="h-14 w-14 shrink-0 rounded-2xl bg-indigo-500/25 ring-1 ring-indigo-400/40 flex items-center justify-center text-indigo-200 shadow-lg"><Coins className="h-7 w-7" /></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.28em]">Total TND · toutes caisses</p>
+                      <p className={`text-4xl sm:text-5xl font-black tracking-tighter leading-none mt-1 break-words ${grandTndTotal >= 0 ? 'text-white' : 'text-rose-300'}`}>{formatRawCurrency(grandTndTotal, 'TND')}</p>
+                      <p className="text-[9px] font-black text-indigo-300/80 uppercase tracking-widest mt-1.5">Hors devises partenaires · {showTotalTnd ? 'Masquer le détail' : 'Voir le détail'}</p>
+                    </div>
+                    <ChevronRight className={`h-6 w-6 text-indigo-300 shrink-0 transition-transform duration-200 ${showTotalTnd ? 'rotate-90' : ''}`} />
+                  </div>
+                </button>
+                {showTotalTnd && (
+                  <div className="rounded-b-[32px] border-2 border-t-0 border-indigo-400/70 bg-neutral-950/80 p-4 sm:p-5 grid gap-3 animate-in slide-in-from-top-2 duration-200">
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      {/* Formal — bank accounts */}
+                      <div className="p-4 rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/12 to-neutral-950">
+                        <div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0"><Landmark className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black text-teal-300 uppercase tracking-[0.18em]">Argent formel</p><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Comptes banque</p></div></div>
+                        <p className={`text-2xl font-black tracking-tighter mt-2.5 ${bankTndTotal >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>{formatRawCurrency(bankTndTotal, 'TND')}</p>
+                        <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest mt-1">{tndBankAccounts.length} compte{tndBankAccounts.length > 1 ? 's' : ''} TND</p>
+                      </div>
+                      {/* Informal — coffre + archive */}
+                      <div className="p-4 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/12 to-neutral-950">
+                        <div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0"><Vault className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Argent non formel</p><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Coffre + Archive</p></div></div>
+                        <p className={`text-2xl font-black tracking-tighter mt-2.5 ${informalTndTotal >= 0 ? 'text-amber-300' : 'text-rose-400'}`}>{formatRawCurrency(informalTndTotal, 'TND')}</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-1"><span>Coffre {formatRawCurrency(metrics.tndBalance || 0, 'TND')}</span><span>Archive {formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</span></div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/25">
+                      <p className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.2em]">Total général TND</p>
+                      <p className={`text-xl font-black tracking-tighter ${grandTndTotal >= 0 ? 'text-white' : 'text-rose-300'}`}>{formatRawCurrency(grandTndTotal, 'TND')}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
