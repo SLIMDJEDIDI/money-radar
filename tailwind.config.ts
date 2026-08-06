@@ -20,6 +20,26 @@ const safelist = dynamicColors.flatMap((c) => [
   `group-hover:text-${c}-400`,
 ]);
 
+// Per-bank-account distinctive colors (see BANK_PALETTES in MoneyHubApp). These are chosen
+// at runtime from the account id, so every class variant must be safelisted explicitly.
+const bankColors = ["teal", "sky", "violet", "amber", "fuchsia", "lime", "orange", "cyan"];
+const bankSafelist = bankColors.flatMap((c) => [
+  `ring-${c}-400`,
+  `border-${c}-500/60`,
+  `border-${c}-500/25`,
+  `text-${c}-300`,
+  `bg-${c}-500/15`,
+  `from-${c}-500/20`,
+  `bg-${c}-400`,
+  `bg-${c}-500`,
+]);
+safelist.push(...bankSafelist);
+// Arbitrary hero gradient starts per account palette.
+safelist.push(
+  "from-[#062925]", "from-[#082234]", "from-[#1e1633]", "from-[#2a2109]",
+  "from-[#2a0f28]", "from-[#1a2408]", "from-[#2a1608]", "from-[#06272b]",
+);
+
 export default {
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",

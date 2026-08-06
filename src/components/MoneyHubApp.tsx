@@ -25,6 +25,24 @@ import {
 
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', RMB: '¥', EURO: '€', TND: 'DT' };
 
+// Distinctive, stable color per bank account (derived from its id) so each account keeps
+// the SAME color everywhere (selector, hero, dashboard) — a strong anti-mistake cue.
+const BANK_PALETTES = [
+  { key: 'teal',    ring: 'ring-teal-400',    border: 'border-teal-500/60',    borderSoft: 'border-teal-500/25',    text: 'text-teal-300',    bgSoft: 'bg-teal-500/15',    grad: 'from-teal-500/20',    heroFrom: 'from-[#062925]', dot: 'bg-teal-400', solid: 'bg-teal-500' },
+  { key: 'sky',     ring: 'ring-sky-400',     border: 'border-sky-500/60',     borderSoft: 'border-sky-500/25',     text: 'text-sky-300',     bgSoft: 'bg-sky-500/15',     grad: 'from-sky-500/20',     heroFrom: 'from-[#082234]', dot: 'bg-sky-400', solid: 'bg-sky-500' },
+  { key: 'violet',  ring: 'ring-violet-400',  border: 'border-violet-500/60',  borderSoft: 'border-violet-500/25',  text: 'text-violet-300',  bgSoft: 'bg-violet-500/15',  grad: 'from-violet-500/20',  heroFrom: 'from-[#1e1633]', dot: 'bg-violet-400', solid: 'bg-violet-500' },
+  { key: 'amber',   ring: 'ring-amber-400',   border: 'border-amber-500/60',   borderSoft: 'border-amber-500/25',   text: 'text-amber-300',   bgSoft: 'bg-amber-500/15',   grad: 'from-amber-500/20',   heroFrom: 'from-[#2a2109]', dot: 'bg-amber-400', solid: 'bg-amber-500' },
+  { key: 'fuchsia', ring: 'ring-fuchsia-400', border: 'border-fuchsia-500/60', borderSoft: 'border-fuchsia-500/25', text: 'text-fuchsia-300', bgSoft: 'bg-fuchsia-500/15', grad: 'from-fuchsia-500/20', heroFrom: 'from-[#2a0f28]', dot: 'bg-fuchsia-400', solid: 'bg-fuchsia-500' },
+  { key: 'lime',    ring: 'ring-lime-400',    border: 'border-lime-500/60',    borderSoft: 'border-lime-500/25',    text: 'text-lime-300',    bgSoft: 'bg-lime-500/15',    grad: 'from-lime-500/20',    heroFrom: 'from-[#1a2408]', dot: 'bg-lime-400', solid: 'bg-lime-500' },
+  { key: 'orange',  ring: 'ring-orange-400',  border: 'border-orange-500/60',  borderSoft: 'border-orange-500/25',  text: 'text-orange-300',  bgSoft: 'bg-orange-500/15',  grad: 'from-orange-500/20',  heroFrom: 'from-[#2a1608]', dot: 'bg-orange-400', solid: 'bg-orange-500' },
+  { key: 'cyan',    ring: 'ring-cyan-400',    border: 'border-cyan-500/60',    borderSoft: 'border-cyan-500/25',    text: 'text-cyan-300',    bgSoft: 'bg-cyan-500/15',    grad: 'from-cyan-500/20',    heroFrom: 'from-[#06272b]', dot: 'bg-cyan-400', solid: 'bg-cyan-500' },
+];
+const bankPalette = (id: string) => {
+  let h = 0;
+  for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return BANK_PALETTES[h % BANK_PALETTES.length];
+};
+
 // Sentinel prefix (must match TREASURY_ARCHIVE_TAG in actions.ts) marking a Coffre→Archive
 // transfer so both journals can highlight these special admin-only movements.
 const TREASURY_ARCHIVE_TAG = '⇄ TRANSFERT COFFRE→ARCHIVE';
@@ -277,6 +295,14 @@ export default function MoneyHubApp({
   const [newAccountForm, setNewAccountForm] = useState<{ name: string; currencyCode: string }>({ name: '', currencyCode: 'TND' });
   const [renameAccountId, setRenameAccountId] = useState<string | null>(null);
   const [renameAccountName, setRenameAccountName] = useState('');
+  // Ephemeral success/error feedback banner (auto-dismisses).
+  const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
+  const showToast = useCallback((kind: 'success' | 'error', msg: string) => {
+    setToast({ kind, msg });
+    setTimeout(() => setToast(null), 3800);
+  }, []);
+  // Pending bank action awaiting explicit confirmation (anti-mistake dialog).
+  const [bankConfirm, setBankConfirm] = useState<{ accountId: string; accountName: string; currencyCode: string; type: 'IN' | 'OUT'; amount: number; note: string; count?: number; scheduledFor?: string; run: () => void } | null>(null);
 
   const [optimisticTransactions, addOptimisticTransaction] = useOptimistic(transactions, (state: any, newTx: any) => 
     newTx.action === 'delete' ? state.filter((t:any) => t.id !== newTx.id) : [newTx, ...state]
@@ -600,8 +626,8 @@ export default function MoneyHubApp({
       data.append('name', newAccountForm.name.trim());
       data.append('currencyCode', newAccountForm.currencyCode);
       const res: any = await createBankAccount(data);
-      if (res.success) { setNewAccountForm({ name: '', currencyCode: 'TND' }); setActiveModal(null); if (res.account?.id) setSelectedBankId(res.account.id); await refreshHubState(); }
-      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+      if (res.success) { const nm = newAccountForm.name.trim(); setNewAccountForm({ name: '', currencyCode: 'TND' }); setActiveModal(null); if (res.account?.id) setSelectedBankId(res.account.id); await refreshHubState(); showToast('success', `Compte « ${nm} » créé`); }
+      else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur');
     });
   };
   const handleRenameBankAccount = async (e: React.FormEvent) => {
@@ -612,58 +638,79 @@ export default function MoneyHubApp({
       data.append('id', renameAccountId);
       data.append('name', renameAccountName.trim());
       const res: any = await renameBankAccount(data);
-      if (res.success) { setRenameAccountId(null); setRenameAccountName(''); setActiveModal(null); await refreshHubState(); }
-      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+      if (res.success) { setRenameAccountId(null); setRenameAccountName(''); setActiveModal(null); await refreshHubState(); showToast('success', 'Compte renommé'); }
+      else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur');
     });
   };
   const handleDeleteBankAccount = (id: string, name: string) => {
-    setConfirmModal({ isOpen: true, title: 'Supprimer le compte ?', description: `« ${name} » et TOUS ses mouvements seront supprimés définitivement.`, confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankAccount(id); if (res.success) { if (selectedBankId === id) setSelectedBankId(bankAccounts.find((a:any) => a.id !== id)?.id || null); await refreshHubState(); } else if (res.code) handleSessionExpired(); else alert(res.error); }); } });
+    setConfirmModal({ isOpen: true, title: 'Supprimer le compte ?', description: `« ${name} » et TOUS ses mouvements seront supprimés définitivement.`, confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankAccount(id); if (res.success) { if (selectedBankId === id) setSelectedBankId(bankAccounts.find((a:any) => a.id !== id)?.id || null); await refreshHubState(); showToast('success', `Compte « ${name} » supprimé`); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); }); } });
   };
-  const handleAddBankMovement = async (e: React.FormEvent) => {
+  // Step 1: validate + open the anti-mistake confirmation dialog (shows account, type, amount).
+  const handleAddBankMovement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBankId || !bankForm.amount || !bankForm.note.trim()) return;
-    startTransition(async () => {
-      const amount = parseFloat(bankForm.amount);
-      const scheduled = bankForm.scheduledFor || '';
-      const isPlanned = !!scheduled;
-      setBankMovements(prev => [{ id: 'temp-bank-' + Date.now(), accountId: selectedBankId, amount, type: bankForm.type, note: bankForm.note, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled) : null, isSettled: !isPlanned }, ...prev]);
-      const data = new FormData();
-      data.append('accountId', selectedBankId);
-      data.append('amount', bankForm.amount);
-      data.append('type', bankForm.type);
-      data.append('note', bankForm.note);
-      if (isPlanned) data.append('scheduledFor', scheduled);
-      const res: any = await createBankMovement(data);
-      if (res.success) { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
-      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+    if (!acc) { showToast('error', 'Compte introuvable'); return; }
+    const amount = parseFloat(bankForm.amount);
+    const scheduled = bankForm.scheduledFor || '';
+    setBankConfirm({
+      accountId: acc.id, accountName: acc.name, currencyCode: acc.currencyCode,
+      type: bankForm.type as 'IN' | 'OUT', amount, note: bankForm.note, scheduledFor: scheduled,
+      run: () => performAddBankMovement(acc.id, amount, bankForm.type, bankForm.note, scheduled, acc.name),
     });
   };
-  const handleAddBankBatchDisbursement = async (e: React.FormEvent) => {
+  // Step 2: actually write it (only after explicit confirmation).
+  const performAddBankMovement = (accountId: string, amount: number, type: string, note: string, scheduled: string, accName: string) => {
+    startTransition(async () => {
+      const isPlanned = !!scheduled;
+      setBankMovements(prev => [{ id: 'temp-bank-' + Date.now(), accountId, amount, type, note, performedBy: currentUser.username, createdAt: new Date(), scheduledFor: isPlanned ? new Date(scheduled) : null, isSettled: !isPlanned }, ...prev]);
+      const data = new FormData();
+      data.append('accountId', accountId);
+      data.append('amount', String(amount));
+      data.append('type', type);
+      data.append('note', note);
+      if (isPlanned) data.append('scheduledFor', scheduled);
+      const res: any = await createBankMovement(data);
+      if (res.success) { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); setBankConfirm(null); await refreshHubState(); showToast('success', `${type === 'IN' ? 'Entrée' : 'Sortie'} de ${formatRawCurrency(amount, '')}enregistrée · ${accName}`); }
+      else if (res.code) handleSessionExpired(); else { setBankConfirm(null); showToast('error', res.error || 'Erreur'); }
+    });
+  };
+  const handleAddBankBatchDisbursement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBankId) return;
     const invalid = bankBatchItems.find(item => !item.note.trim() || !item.amount || Number(item.amount) <= 0);
-    if (invalid) { alert('Chaque ligne doit avoir un montant positif et une note obligatoire.'); return; }
+    if (invalid) { showToast('error', 'Chaque ligne doit avoir un montant positif et une note.'); return; }
+    const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+    if (!acc) { showToast('error', 'Compte introuvable'); return; }
+    const scheduled = bankForm.scheduledFor || '';
+    const validItems = bankBatchItems.map(item => ({ amount: Number(item.amount), note: item.note.trim() }));
+    const total = validItems.reduce((s, it) => s + it.amount, 0);
+    setBankConfirm({
+      accountId: acc.id, accountName: acc.name, currencyCode: acc.currencyCode,
+      type: 'OUT', amount: total, note: `${validItems.length} sorties`, count: validItems.length, scheduledFor: scheduled,
+      run: () => performAddBankBatch(acc.id, validItems, scheduled, acc.name, total),
+    });
+  };
+  const performAddBankBatch = (accountId: string, validItems: Array<{amount:number;note:string}>, scheduled: string, accName: string, total: number) => {
     startTransition(async () => {
-      const scheduled = bankForm.scheduledFor || '';
-      const validItems = bankBatchItems.map(item => ({ amount: Number(item.amount), note: item.note.trim() }));
       const data = new FormData();
-      data.append('accountId', selectedBankId);
+      data.append('accountId', accountId);
       data.append('items', JSON.stringify(validItems));
       if (scheduled) data.append('scheduledFor', scheduled);
       const res: any = await createBankBatchDisbursement(data);
-      if (res.success) { setBankBatchItems([{ amount: '', note: '' }]); setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
-      else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+      if (res.success) { setBankBatchItems([{ amount: '', note: '' }]); setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setActiveModal(null); setBankConfirm(null); await refreshHubState(); showToast('success', `${validItems.length} sorties enregistrées · ${accName}`); }
+      else if (res.code) handleSessionExpired(); else { setBankConfirm(null); showToast('error', res.error || 'Erreur'); }
     });
   };
-  const handleSettleBankMovement = (id: string) => { startTransition(async () => { const res: any = await settleBankMovement(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); };
-  const handleDeleteBankMovement = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer le mouvement ?', description: 'Ce mouvement bancaire sera supprimé définitivement.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankMovement(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); } }); };
+  const handleSettleBankMovement = (id: string) => { startTransition(async () => { const res: any = await settleBankMovement(id); if (res.success) { await refreshHubState(); showToast('success', 'Mouvement confirmé'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur'); }); };
+  const handleDeleteBankMovement = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer le mouvement ?', description: 'Ce mouvement bancaire sera supprimé définitivement.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankMovement(id); if (res.success) { await refreshHubState(); showToast('success', 'Mouvement supprimé'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); }); } }); };
   const handleSaveBankNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bankNoteEdit) return;
     setBankNoteEditError('');
     startTransition(async () => {
       const res: any = await updateBankMovementNote(bankNoteEdit.id, bankNoteEdit.note);
-      if (res.success) { setBankNoteEdit(null); await refreshHubState(); }
+      if (res.success) { setBankNoteEdit(null); await refreshHubState(); showToast('success', 'Note modifiée'); }
       else if (res.code) handleSessionExpired(); else setBankNoteEditError(res.error || 'Erreur');
     });
   };
@@ -1418,33 +1465,44 @@ export default function MoneyHubApp({
                 <EmptyState icon={<Landmark className="h-10 w-10" />} title="Aucun compte bancaire" subtitle="Crée ton premier compte pour suivre son solde et ses mouvements." />
               ) : (
                 <>
-                  {/* Account selector — one chip per account with its live balance */}
-                  <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1">
-                    {bankAccounts.map((a: any) => (
-                      <button key={a.id} onClick={() => setSelectedBankId(a.id)} className={`shrink-0 text-left px-4 py-3 rounded-2xl border transition min-w-[130px] ${account?.id === a.id ? 'bg-teal-500/15 border-teal-500/50 ring-1 ring-teal-500/30' : 'bg-neutral-900/50 border-neutral-800 hover:border-neutral-700'}`}>
-                        <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{a.name}</p>
-                        <p className={`text-base font-black tracking-tighter ${(a.balance || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p>
-                      </button>
-                    ))}
-                  </div>
+                  {/* Account selector — bigger, color-coded chips; active one is unmistakable */}
+                  {bankAccounts.length > 1 && (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.2em] px-1 flex items-center gap-1.5"><Landmark className="h-3 w-3" /> Choisir le compte</p>
+                      <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1">
+                        {bankAccounts.map((a: any) => {
+                          const p = bankPalette(a.id); const on = account?.id === a.id;
+                          return (
+                            <button key={a.id} onClick={() => setSelectedBankId(a.id)} className={`shrink-0 text-left px-4 py-3 rounded-2xl border transition min-w-[150px] relative ${on ? `${p.bgSoft} ${p.border} ring-2 ${p.ring} scale-[1.02] shadow-lg` : 'bg-neutral-900/50 border-neutral-800 hover:border-neutral-700 opacity-70'}`}>
+                              <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${p.dot}`} /><p className={`text-sm font-black uppercase tracking-tight truncate ${on ? 'text-white' : 'text-neutral-300'}`}>{a.name}</p>{on && <CheckCircle className={`h-3.5 w-3.5 ml-auto ${p.text}`} />}</div>
+                              <p className={`text-lg font-black tracking-tighter mt-1 ${(a.balance || 0) >= 0 ? (on ? p.text : 'text-neutral-400') : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                  {account && (<>
-                  {/* HERO */}
-                  <div className="bg-gradient-to-br from-[#062925] to-black border border-teal-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-                    <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-teal-400"><Landmark className="h-48 w-48" /></div>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[11px] font-black text-teal-300 uppercase tracking-[0.3em] mb-2">{account.name}</p>
-                      <div className="flex items-center gap-2">
+                  {account && (() => { const p = bankPalette(account.id); return (<>
+                  {/* HERO — account name is the biggest element so the active account is unmistakable */}
+                  <div className={`bg-gradient-to-br ${p.heroFrom} to-black border-2 ${p.border} p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5`}>
+                    <div className={`absolute -top-10 -right-10 opacity-[0.06] pointer-events-none ${p.text}`}><Landmark className="h-48 w-48" /></div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1"><span className={`h-3 w-3 rounded-full ${p.dot}`} /><p className={`text-[10px] font-black ${p.text} uppercase tracking-[0.3em]`}>Compte actif</p></div>
+                        <h2 className={`text-4xl sm:text-5xl font-black tracking-tighter break-words leading-[0.95] ${p.text}`}>{account.name}</h2>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
                         <button onClick={() => { setRenameAccountId(account.id); setRenameAccountName(account.name); setActiveModal('rename_bank_account'); }} className="p-2 rounded-xl bg-neutral-900/70 border border-neutral-800 text-blue-300 active:scale-90 transition"><Edit className="h-4 w-4" /></button>
                         {currentUser.role === 'admin' && <button onClick={() => handleDeleteBankAccount(account.id, account.name)} className="p-2 rounded-xl bg-neutral-900/70 border border-neutral-800 text-rose-400 active:scale-90 transition"><Trash2 className="h-4 w-4" /></button>}
                       </div>
                     </div>
-                    <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(balance, cur)}</h2>
+                    <div className="mt-6"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.25em] mb-1">Solde · {cur}</p><h3 className="text-5xl sm:text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(balance, cur)}</h3></div>
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
                       <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Auj.</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(todayIn, cur)}</p></div>
                       <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Sorties Auj.</p><p className="text-rose-400 font-black text-base tracking-tighter">-{formatRawCurrency(todayOut, cur)}</p></div>
                       {pending.length > 0 && (
-                        <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-teal-400 uppercase tracking-widest">Solde Projeté</p><p className="text-teal-300 font-black text-base tracking-tighter">{formatRawCurrency(balance + pendingIn - pendingOut, cur)}</p><p className="text-[9px] text-neutral-500 font-black uppercase tracking-widest mt-0.5">{pending.length} planifié{pending.length>1?'s':''}</p></div>
+                        <div className="flex flex-col border-l border-white/10 pl-6"><p className={`text-[9px] font-black ${p.text} uppercase tracking-widest`}>Solde Projeté</p><p className={`${p.text} font-black text-base tracking-tighter`}>{formatRawCurrency(balance + pendingIn - pendingOut, cur)}</p><p className="text-[9px] text-neutral-500 font-black uppercase tracking-widest mt-0.5">{pending.length} planifié{pending.length>1?'s':''}</p></div>
                       )}
                     </div>
                   </div>
@@ -1499,7 +1557,7 @@ export default function MoneyHubApp({
                       })}
                     </div>
                   </div>
-                  </>)}
+                  </>); })()}
                 </>
               )}
             </div>
@@ -1979,10 +2037,12 @@ export default function MoneyHubApp({
           </div>
         </div>
       )}
-      {activeModal === 'add_bank' && (
+      {activeModal === 'add_bank' && (() => { const bAcc = bankAccounts.find((a:any)=>a.id===selectedBankId); const bp = bAcc ? bankPalette(bAcc.id) : bankPalette('x'); return (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
-          <div className={`w-full ${bankForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-teal-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-teal-300 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{bankForm.type === 'IN' ? 'Entrée' : 'Sortie'} — {(bankAccounts.find((a:any)=>a.id===selectedBankId)?.name) || 'Compte'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+          <div className={`w-full ${bankForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border-2 ${bp.border} rounded-[48px] p-7 sm:p-10 flex flex-col gap-6 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
+            <div className={`flex justify-between items-center border-b border-neutral-900 pb-5 ${bp.text} px-1`}><h3 className="font-black uppercase tracking-[0.2em] text-sm flex items-center gap-2">{bankForm.type === 'IN' ? <ArrowUpRight className="h-4 w-4 rotate-180" /> : <ArrowUpRight className="h-4 w-4" />} {bankForm.type === 'IN' ? 'Entrée' : 'Sortie'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            {/* Prominent account banner — always visible during the transaction */}
+            <div className={`flex items-center gap-3 p-4 rounded-[24px] ${bp.bgSoft} border-2 ${bp.border}`}><span className={`h-3.5 w-3.5 rounded-full ${bp.dot} shrink-0`} /><div className="min-w-0"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte concerné</p><p className={`text-xl font-black uppercase tracking-tight truncate ${bp.text}`}>{bAcc?.name || 'Compte'}</p></div><p className="ml-auto text-right text-sm font-black text-white tracking-tighter shrink-0">{formatRawCurrency(bAcc?.balance || 0, bAcc?.currencyCode || 'TND')}</p></div>
             {bankForm.type === 'OUT' ? (
               <form onSubmit={handleAddBankBatchDisbursement} className="flex flex-col gap-5">
                 <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Sorties multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant a sa propre note.</p></div><div className="px-4 py-2.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-lg font-black">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(bankBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))}</div></div>
@@ -2010,7 +2070,7 @@ export default function MoneyHubApp({
             )}
           </div>
         </div>
-      )}
+      ); })()}
       {bankNoteEdit && (
         <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setBankNoteEdit(null); }}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
@@ -2262,6 +2322,43 @@ export default function MoneyHubApp({
             <div className="flex flex-col gap-5 items-center"><div className={`p-6 rounded-[32px] shadow-2xl shadow-rose-900/10 ${confirmModal.isDanger ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'}`}><AlertTriangle className="h-12 w-12" /></div><h3 className="text-2xl font-black uppercase text-white tracking-widest mt-2 leading-tight">{confirmModal.title}</h3><p className="text-[13px] text-neutral-400 font-bold leading-relaxed px-2">{confirmModal.description}</p></div>
             {confirmModal.requirePassword && ( <input type="password" placeholder="MOT DE PASSE ADMIN" className="w-full bg-neutral-900 border border-neutral-800 rounded-[28px] p-6 text-center text-lg outline-none text-white focus:border-rose-500/50 shadow-inner font-black tracking-[0.3em]" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /> )}
             <div className="flex gap-4"><button onClick={() => setConfirmModal({isOpen:false})} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[28px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Non</button><button onClick={async () => { const p = confirmPassword; setConfirmModal({isOpen:false}); setConfirmPassword(''); await confirmModal.onConfirm(p); }} className={`flex-1 py-5 font-black uppercase rounded-[28px] transition active:scale-95 shadow-2xl tracking-widest text-xs ${confirmModal.isDanger ? 'bg-rose-600 text-white shadow-rose-900/40' : 'bg-emerald-500 text-black shadow-emerald-900/40'}`}>{confirmModal.confirmText}</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* BANK transaction confirmation — anti-mistake dialog (account / type / amount / warning) */}
+      {bankConfirm && (() => { const bp = bankPalette(bankConfirm.accountId); const isIn = bankConfirm.type === 'IN'; return (
+        <div className="fixed inset-0 z-[230] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setBankConfirm(null)}>
+          <div className={`w-full max-w-sm bg-[#0a0a0a] border-2 ${bp.border} rounded-[44px] p-8 flex flex-col gap-6 shadow-2xl ring-1 ring-white/10`} onClick={e => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className={`p-4 rounded-3xl ${isIn ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border border-rose-500/25'}`}>{isIn ? <ArrowUpRight className="h-9 w-9 rotate-180" /> : <ArrowUpRight className="h-9 w-9" />}</div>
+              <h3 className="text-lg font-black uppercase text-white tracking-widest">Confirmer {isIn ? "l'entrée" : 'la sortie'}</h3>
+            </div>
+            {/* Account — the most prominent element */}
+            <div className={`flex items-center gap-3 p-4 rounded-[24px] ${bp.bgSoft} border-2 ${bp.border}`}>
+              <span className={`h-3.5 w-3.5 rounded-full ${bp.dot} shrink-0`} />
+              <div className="min-w-0 text-left"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte affecté</p><p className={`text-2xl font-black uppercase tracking-tight truncate ${bp.text}`}>{bankConfirm.accountName}</p></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 text-center"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type</p><p className={`text-sm font-black uppercase mt-1 ${isIn ? 'text-emerald-400' : 'text-rose-400'}`}>{bankConfirm.count ? `${bankConfirm.count} sorties` : isIn ? 'Entrée' : 'Sortie'}</p></div>
+              <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 text-center"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant</p><p className="text-sm font-black text-white mt-1 tracking-tighter">{isIn ? '+' : '-'}{formatRawCurrency(bankConfirm.amount, bankConfirm.currencyCode)}</p></div>
+            </div>
+            {bankConfirm.scheduledFor && <p className="text-center text-[10px] font-black text-amber-300 uppercase tracking-widest flex items-center justify-center gap-1.5"><CalendarClock className="h-3.5 w-3.5" /> Planifié · {new Date(bankConfirm.scheduledFor).toLocaleDateString('fr-FR')}</p>}
+            <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30"><AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" /><p className="text-[11px] font-bold text-amber-200 leading-relaxed text-left">Vérifie que <b className="text-amber-100">{bankConfirm.accountName}</b> est bien le bon compte avant de valider.</p></div>
+            <div className="flex gap-3">
+              <button onClick={() => setBankConfirm(null)} className="flex-1 py-4 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-[11px]">Annuler</button>
+              <button onClick={() => bankConfirm.run()} disabled={isPending} className={`flex-[2] py-4 font-black uppercase rounded-[24px] transition active:scale-95 shadow-2xl tracking-widest text-[11px] disabled:opacity-50 ${isIn ? 'bg-emerald-500 text-black shadow-emerald-900/40' : 'bg-rose-600 text-white shadow-rose-900/40'}`}>{isPending ? '…' : 'Confirmer'}</button>
+            </div>
+          </div>
+        </div>
+      ); })()}
+
+      {/* Ephemeral success / error toast */}
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 z-[240] bottom-[calc(6rem+env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-sm animate-slide-up" onClick={() => setToast(null)}>
+          <div className={`flex items-center gap-3 p-4 rounded-[24px] shadow-2xl ring-1 ring-white/10 border ${toast.kind === 'success' ? 'bg-emerald-500 text-black border-emerald-400' : 'bg-rose-600 text-white border-rose-500'}`}>
+            {toast.kind === 'success' ? <CheckCircle className="h-5 w-5 shrink-0" /> : <AlertTriangle className="h-5 w-5 shrink-0" />}
+            <p className="text-[12px] font-black uppercase tracking-wide leading-tight">{toast.msg}</p>
           </div>
         </div>
       )}
