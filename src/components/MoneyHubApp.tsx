@@ -5,7 +5,7 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Vault
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
@@ -770,7 +770,7 @@ export default function MoneyHubApp({
     setConfirmModal({
       isOpen: true,
       title: 'Confirmer l\'encaissement ?',
-      description: 'Ce mouvement sera marqué comme réglé et impactera immédiatement le solde de trésorerie.',
+      description: 'Ce mouvement sera marqué comme réglé et impactera immédiatement le solde du coffre.',
       confirmText: 'Confirmer',
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
@@ -796,7 +796,7 @@ export default function MoneyHubApp({
     setConfirmModal({
       isOpen: true,
       title: 'Supprimer ce mouvement ?',
-      description: 'Ce mouvement de trésorerie TND sera retiré du journal.',
+      description: 'Ce mouvement du coffre TND sera retiré du journal.',
       confirmText: 'Supprimer',
       isDanger: true,
       onConfirm: async () => {
@@ -1164,7 +1164,7 @@ export default function MoneyHubApp({
               )}
 
               <div className="grid sm:grid-cols-3 gap-2.5">
-                <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Coffre Fort Administration</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
+                <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Vault className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Coffre Fort Administration</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
                 <button onClick={() => navigateTo('currencies')} className="text-left p-4 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.985] transition shadow-lg shadow-emerald-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Position Globale USD</p></div><span className="text-[7px] font-black text-emerald-300 uppercase tracking-widest shrink-0">Live·USD</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-300">{formatUSD(metrics.totalAvoirs || 0)} encaissé</span><span className="text-neutral-500">{activePartners} actif{activePartners > 1 ? 's' : ''}</span></div></button>
                 <button onClick={() => navigateTo('archive')} className="text-left p-4 rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.985] transition shadow-lg shadow-amber-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Caisse Archive</p></div><span className="text-[7px] font-black text-amber-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(metrics.archiveBalance || 0) >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.archiveTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.archiveTodayOut || 0, 'TND')}</span></div></button>
                 {bankAccounts.map((a: any) => (
@@ -1264,7 +1264,7 @@ export default function MoneyHubApp({
                   <div className="flex items-start gap-4 mb-4">
                     <div className="p-3 bg-amber-500/20 rounded-2xl ring-1 ring-amber-500/40 animate-pulse"><Bell className="h-5 w-5 text-amber-300" /></div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.25em]">Rappel Trésorerie</p>
+                      <p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.25em]">Rappel Coffre</p>
                       <h3 className="text-xl font-black text-white leading-tight mt-1">
                         {tndOverdue.length > 0 ? `${tndOverdue.length} mouvement${tndOverdue.length>1?'s':''} en retard` : `${tndDueSoon.length} mouvement${tndDueSoon.length>1?'s':''} prévu${tndDueSoon.length>1?'s':''} sous 24h`}
                       </h3>
@@ -1302,8 +1302,8 @@ export default function MoneyHubApp({
 
               {/* HERO — balance + today + forecast */}
               <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Coins className="h-48 w-48" /></div>
-                <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Trésorerie TND Disponible</p>
+                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Vault className="h-48 w-48" /></div>
+                <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Coffre TND Disponible</p>
                 <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
                   <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées Aujourd'hui</p><p className="text-emerald-400 font-black text-base tracking-tighter">+{formatRawCurrency(metrics.tndTodayIn, 'TND')}</p></div>
@@ -1410,7 +1410,7 @@ export default function MoneyHubApp({
                   <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4>
                   <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {optimisticTndMovements.length}</span>
                 </div>
-                {filtered.length === 0 && <EmptyState icon={<Coins className="h-10 w-10" />} title={optimisticTndMovements.length === 0 ? 'Coffre-fort vide' : 'Aucun résultat'} subtitle={optimisticTndMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
+                {filtered.length === 0 && <EmptyState icon={<Vault className="h-10 w-10" />} title={optimisticTndMovements.length === 0 ? 'Coffre-fort vide' : 'Aucun résultat'} subtitle={optimisticTndMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
                 <div className="flex flex-col gap-3">
                   {filtered.map((m: any) => {
                     const running = balanceById[m.id] ?? 0;
@@ -1777,7 +1777,7 @@ export default function MoneyHubApp({
                         <div className="p-4 rounded-2xl border-2 border-neutral-800 bg-neutral-950 text-center transition peer-checked:border-emerald-500 peer-checked:bg-emerald-500/10 peer-checked:text-emerald-300">
                           <p className="text-2xl mb-1">👤</p>
                           <p className="text-[10px] font-black uppercase tracking-widest">Assistant</p>
-                          <p className="text-[9px] text-neutral-500 mt-1">Trésorerie seule</p>
+                          <p className="text-[9px] text-neutral-500 mt-1">Coffre seul</p>
                         </div>
                       </label>
                       <label className="cursor-pointer">
@@ -1842,7 +1842,7 @@ export default function MoneyHubApp({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
-            { id: 'treasury', label: 'Trésorerie', icon: <Coins className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'treasury', label: 'Coffre', icon: <Vault className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'banque', label: 'Banque', icon: <Landmark className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'archive', label: 'Archive', icon: <Archive className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
@@ -1860,7 +1860,7 @@ export default function MoneyHubApp({
       {tndNoteEdit && (
         <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setTndNoteEdit(null); }}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-blue-300 uppercase tracking-[0.2em]">Trésorerie</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setTndNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-blue-300 uppercase tracking-[0.2em]">Coffre</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setTndNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
             <div className="grid grid-cols-2 gap-3"><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant verrouillé</p><p className={`text-lg font-black mt-1 ${tndNoteEdit.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{tndNoteEdit.type === 'IN' ? '+' : '-'}{formatRawCurrency(tndNoteEdit.amount, 'TND')}</p></div><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type verrouillé</p><p className="text-lg font-black mt-1 text-neutral-200">{tndNoteEdit.type === 'IN' ? 'Entrée' : 'Sortie'}</p></div></div>
             <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">Seule la note peut être corrigée. Le montant, le type, la date et l’état du mouvement ne peuvent pas être modifiés.</p>
             <form onSubmit={handleSaveTndNote} className="flex flex-col gap-3"><textarea autoFocus required maxLength={1000} value={tndNoteEdit.note} onChange={e => setTndNoteEdit(current => current ? { ...current, note: e.target.value } : current)} className="min-h-28 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-sm text-white font-bold outline-none focus:border-blue-500/50" placeholder="Note du mouvement" />{tndNoteEditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{tndNoteEditError}</p>}<div className="flex gap-3"><button type="button" onClick={() => setTndNoteEdit(null)} disabled={isPending} className="flex-1 py-3.5 bg-neutral-900 border border-neutral-800 text-neutral-400 font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition">Annuler</button><button type="submit" disabled={isPending || !tndNoteEdit.note.trim()} className="flex-1 py-3.5 bg-blue-500 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition disabled:opacity-50">{isPending ? 'Enregistrement…' : 'Enregistrer'}</button></div></form>
@@ -1918,8 +1918,8 @@ export default function MoneyHubApp({
             {/* COFFRE FORT ADMINISTRATION — expand to choose direction */}
             <div className="rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 overflow-hidden transition">
               <button onClick={() => setChooserExpand(chooserExpand === 'treasury' ? null : 'treasury')} className="w-full text-left p-5 hover:border-blue-500/50 active:scale-[0.98] transition flex items-center gap-4">
-                <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Coins className="h-5 w-5" /></div>
-                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Coffre Fort Administration</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Trésorerie en dinars</p></div>
+                <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Vault className="h-5 w-5" /></div>
+                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Coffre Fort Administration</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Coffre en dinars</p></div>
                 <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'treasury' ? 'rotate-90' : ''}`} />
               </button>
               {chooserExpand === 'treasury' && (
@@ -1941,7 +1941,7 @@ export default function MoneyHubApp({
             <div className="rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 overflow-hidden transition">
               <button onClick={() => setChooserExpand(chooserExpand === 'archive' ? null : 'archive')} className="w-full text-left p-5 hover:border-amber-500/50 active:scale-[0.98] transition flex items-center gap-4">
                 <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
-                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Trésorerie archive en dinars</p></div>
+                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Coffre archive en dinars</p></div>
                 <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'archive' ? 'rotate-90' : ''}`} />
               </button>
               {chooserExpand === 'archive' && (
@@ -2254,7 +2254,7 @@ export default function MoneyHubApp({
               {/* TND scheduled movements — admin only */}
               {currentUser.role === 'admin' && (tndDueSoon.length > 0 || tndOverdue.length > 0) && (
                 <div className="flex flex-col gap-3 mb-2">
-                  <div className="flex items-center gap-2 px-1"><Coins className="h-4 w-4 text-blue-400" /><h4 className="text-[10px] font-black text-blue-300 uppercase tracking-[0.25em]">Trésorerie TND</h4></div>
+                  <div className="flex items-center gap-2 px-1"><Vault className="h-4 w-4 text-blue-400" /><h4 className="text-[10px] font-black text-blue-300 uppercase tracking-[0.25em]">Coffre TND</h4></div>
                   {[...tndOverdue, ...tndDueSoon.filter(m => !tndOverdue.some(o => o.id === m.id))].map((m: any) => {
                     const isOverdue = m.scheduledFor && new Date(m.scheduledFor).getTime() < Date.now();
                     return (
@@ -2270,7 +2270,7 @@ export default function MoneyHubApp({
                         </div>
                         <div className="flex gap-2.5">
                           <button onClick={() => { setShowNotifications(false); handleSettleTndMovement(m.id); }} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Confirmer</button>
-                          <button onClick={() => { setShowNotifications(false); setActiveSection('treasury'); }} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Coins className="h-4 w-4" /> Voir</button>
+                          <button onClick={() => { setShowNotifications(false); setActiveSection('treasury'); }} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Vault className="h-4 w-4" /> Voir</button>
                         </div>
                       </div>
                     );
