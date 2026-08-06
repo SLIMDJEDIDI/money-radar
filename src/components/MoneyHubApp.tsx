@@ -43,6 +43,11 @@ const bankPalette = (id: string) => {
   return BANK_PALETTES[h % BANK_PALETTES.length];
 };
 
+// BIAT-branded bank account: show the BIAT logo as a small badge right before the name,
+// sized to the surrounding text so it reads as part of the account title.
+const BIAT_LOGO_SRC = '/biat-logo.jpg';
+const isBiatAccount = (name?: string) => !!name && name.toUpperCase().includes('BIAT');
+
 // Sentinel prefix (must match TREASURY_ARCHIVE_TAG in actions.ts) marking a Coffre→Archive
 // transfer so both journals can highlight these special admin-only movements.
 const TREASURY_ARCHIVE_TAG = '⇄ TRANSFERT COFFRE→ARCHIVE';
@@ -476,6 +481,26 @@ export default function MoneyHubApp({
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   };
+
+  // One-time rename: "VOLTROP INDUSTRIES" -> "BIAT VOLTROP INDUSTRIES". Idempotent and
+  // guarded by a localStorage flag so it only fires once per browser. Reuses the existing
+  // renameBankAccount server action (no local DATABASE_URL needed).
+  useEffect(() => {
+    if (!currentUser) return;
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_biat_rename_done') === '1') return;
+    const target = (bankAccounts || []).find((a: any) => (a.name || '').trim().toUpperCase() === 'VOLTROP INDUSTRIES');
+    if (!target) return;
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append('id', target.id);
+        fd.append('name', 'BIAT VOLTROP INDUSTRIES');
+        const res: any = await renameBankAccount(fd);
+        if (res?.success) { localStorage.setItem('hub_bank_biat_rename_done', '1'); await refreshHubState(); }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, bankAccounts]);
 
   const openAddNote = (contactId: string, contactName: string) => { setNoteForm({ direction: 'THEY_OWE', amount: '', currencyCode: 'TND', text: '' }); setNoteModal({ open: true, contactId, contactName }); };
   const openEditNote = (n: any, contactName: string) => { setNoteForm({ direction: n.direction, amount: String(n.amount || ''), currencyCode: n.currencyCode || 'TND', text: n.text }); setNoteModal({ open: true, contactId: n.contactId, contactName, editId: n.id }); };
@@ -1474,7 +1499,7 @@ export default function MoneyHubApp({
                           const p = bankPalette(a.id); const on = account?.id === a.id;
                           return (
                             <button key={a.id} onClick={() => setSelectedBankId(a.id)} className={`shrink-0 text-left px-4 py-3 rounded-2xl border transition min-w-[150px] relative ${on ? `${p.bgSoft} ${p.border} ring-2 ${p.ring} scale-[1.02] shadow-lg` : 'bg-neutral-900/50 border-neutral-800 hover:border-neutral-700 opacity-70'}`}>
-                              <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${p.dot}`} /><p className={`text-sm font-black uppercase tracking-tight truncate ${on ? 'text-white' : 'text-neutral-300'}`}>{a.name}</p>{on && <CheckCircle className={`h-3.5 w-3.5 ml-auto ${p.text}`} />}</div>
+                              <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${p.dot}`} />{isBiatAccount(a.name) && <img src={BIAT_LOGO_SRC} alt="BIAT" className="h-[1.1em] w-auto rounded-sm shrink-0 bg-white/95 p-px" />}<p className={`text-sm font-black uppercase tracking-tight truncate ${on ? 'text-white' : 'text-neutral-300'}`}>{a.name}</p>{on && <CheckCircle className={`h-3.5 w-3.5 ml-auto ${p.text}`} />}</div>
                               <p className={`text-lg font-black tracking-tighter mt-1 ${(a.balance || 0) >= 0 ? (on ? p.text : 'text-neutral-400') : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p>
                             </button>
                           );
@@ -1490,7 +1515,10 @@ export default function MoneyHubApp({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1"><span className={`h-3 w-3 rounded-full ${p.dot}`} /><p className={`text-[10px] font-black ${p.text} uppercase tracking-[0.3em]`}>Compte actif</p></div>
-                        <h2 className={`text-4xl sm:text-5xl font-black tracking-tighter break-words leading-[0.95] ${p.text}`}>{account.name}</h2>
+                        <h2 className={`text-4xl sm:text-5xl font-black tracking-tighter break-words leading-[0.95] ${p.text} flex items-center gap-2.5`}>
+                          {isBiatAccount(account.name) && <img src={BIAT_LOGO_SRC} alt="BIAT" className="h-[1em] w-auto rounded-md shrink-0 bg-white/95 p-0.5 ring-1 ring-white/20" />}
+                          <span className="break-words min-w-0">{account.name}</span>
+                        </h2>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button onClick={() => { setRenameAccountId(account.id); setRenameAccountName(account.name); setActiveModal('rename_bank_account'); }} className="p-2 rounded-xl bg-neutral-900/70 border border-neutral-800 text-blue-300 active:scale-90 transition"><Edit className="h-4 w-4" /></button>
@@ -2042,7 +2070,7 @@ export default function MoneyHubApp({
           <div className={`w-full ${bankForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border-2 ${bp.border} rounded-[48px] p-7 sm:p-10 flex flex-col gap-6 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className={`flex justify-between items-center border-b border-neutral-900 pb-5 ${bp.text} px-1`}><h3 className="font-black uppercase tracking-[0.2em] text-sm flex items-center gap-2">{bankForm.type === 'IN' ? <ArrowUpRight className="h-4 w-4 rotate-180" /> : <ArrowUpRight className="h-4 w-4" />} {bankForm.type === 'IN' ? 'Entrée' : 'Sortie'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             {/* Prominent account banner — always visible during the transaction */}
-            <div className={`flex items-center gap-3 p-4 rounded-[24px] ${bp.bgSoft} border-2 ${bp.border}`}><span className={`h-3.5 w-3.5 rounded-full ${bp.dot} shrink-0`} /><div className="min-w-0"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte concerné</p><p className={`text-xl font-black uppercase tracking-tight truncate ${bp.text}`}>{bAcc?.name || 'Compte'}</p></div><p className="ml-auto text-right text-sm font-black text-white tracking-tighter shrink-0">{formatRawCurrency(bAcc?.balance || 0, bAcc?.currencyCode || 'TND')}</p></div>
+            <div className={`flex items-center gap-3 p-4 rounded-[24px] ${bp.bgSoft} border-2 ${bp.border}`}><span className={`h-3.5 w-3.5 rounded-full ${bp.dot} shrink-0`} /><div className="min-w-0"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte concerné</p><p className={`text-xl font-black uppercase tracking-tight truncate ${bp.text} flex items-center gap-2`}>{isBiatAccount(bAcc?.name) && <img src={BIAT_LOGO_SRC} alt="BIAT" className="h-[1em] w-auto rounded-sm shrink-0 bg-white/95 p-px" />}<span className="truncate">{bAcc?.name || 'Compte'}</span></p></div><p className="ml-auto text-right text-sm font-black text-white tracking-tighter shrink-0">{formatRawCurrency(bAcc?.balance || 0, bAcc?.currencyCode || 'TND')}</p></div>
             {bankForm.type === 'OUT' ? (
               <form onSubmit={handleAddBankBatchDisbursement} className="flex flex-col gap-5">
                 <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Sorties multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant a sa propre note.</p></div><div className="px-4 py-2.5 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-lg font-black">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(bankBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))}</div></div>
@@ -2337,7 +2365,7 @@ export default function MoneyHubApp({
             {/* Account — the most prominent element */}
             <div className={`flex items-center gap-3 p-4 rounded-[24px] ${bp.bgSoft} border-2 ${bp.border}`}>
               <span className={`h-3.5 w-3.5 rounded-full ${bp.dot} shrink-0`} />
-              <div className="min-w-0 text-left"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte affecté</p><p className={`text-2xl font-black uppercase tracking-tight truncate ${bp.text}`}>{bankConfirm.accountName}</p></div>
+              <div className="min-w-0 text-left"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Compte affecté</p><p className={`text-2xl font-black uppercase tracking-tight truncate ${bp.text} flex items-center gap-2`}>{isBiatAccount(bankConfirm.accountName) && <img src={BIAT_LOGO_SRC} alt="BIAT" className="h-[1em] w-auto rounded-sm shrink-0 bg-white/95 p-px" />}<span className="truncate">{bankConfirm.accountName}</span></p></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 text-center"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type</p><p className={`text-sm font-black uppercase mt-1 ${isIn ? 'text-emerald-400' : 'text-rose-400'}`}>{bankConfirm.count ? `${bankConfirm.count} sorties` : isIn ? 'Entrée' : 'Sortie'}</p></div>
