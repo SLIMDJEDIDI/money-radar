@@ -1376,37 +1376,53 @@ export default function MoneyHubApp({
                 <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
               )}
 
-              <button onClick={() => { setReceivableForm({ amount: '', note: '' }); setActiveModal('add_receivable'); }} className="w-full p-4 bg-gradient-to-r from-sky-500/10 to-cyan-500/10 border border-sky-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-sky-500/60"><Bell className="h-5 w-5 text-sky-300" /><p className="text-[11px] font-black uppercase tracking-widest text-sky-200">On me doit de l'argent</p><span className="text-[8px] font-black uppercase tracking-widest text-sky-300 bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 rounded-md">Hors solde</span></button>
-
-              {/* À RÉCUPÉRER — money owed to you: visible, noted, NOT counted in the balance */}
-              {receivables.length > 0 && (
-                <div className="relative overflow-hidden bg-gradient-to-br from-sky-500/12 via-sky-500/5 to-cyan-500/10 border-2 border-sky-500/30 rounded-[36px] p-6 shadow-2xl shadow-sky-950/10">
-                  <div className="absolute -top-12 -right-12 opacity-[0.07] pointer-events-none text-sky-400"><Bell className="h-40 w-40" /></div>
-                  <div className="flex items-center justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="p-3 bg-sky-500/20 rounded-2xl ring-1 ring-sky-500/40"><Bell className="h-5 w-5 text-sky-300" /></div>
-                      <div className="min-w-0"><p className="text-[10px] font-black text-sky-300 uppercase tracking-[0.25em]">À récupérer</p><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">On me doit — hors solde</p></div>
+              {/* CRÉANCES — one connected module: action + list share the same visual container */}
+              <div className="relative overflow-hidden rounded-[36px] border-2 border-sky-500/30 bg-gradient-to-br from-sky-500/12 via-sky-500/5 to-cyan-500/10 shadow-2xl shadow-sky-950/10">
+                <div className="absolute -top-12 -right-12 opacity-[0.07] pointer-events-none text-sky-400"><Bell className="h-40 w-40" /></div>
+                <button onClick={() => { setReceivableForm({ amount: '', note: '' }); setActiveModal('add_receivable'); }} className="relative w-full p-5 flex items-center justify-between gap-4 text-left active:scale-[0.99] transition hover:bg-sky-500/10 border-b border-sky-500/20">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-3 bg-sky-500/20 rounded-2xl ring-1 ring-sky-500/40 shrink-0"><Bell className="h-5 w-5 text-sky-300" /></div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-sky-300 uppercase tracking-[0.25em]">Créances · On me doit de l'argent</p>
+                      <p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">Même module que « À récupérer » · hors solde</p>
                     </div>
-                    <p className="text-2xl font-black text-sky-300 tracking-tighter shrink-0">{formatRawCurrency(receivablesTotal, 'TND')}</p>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    {receivables.map((m: any) => (
-                      <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-sky-500/20 rounded-2xl">
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <p className="text-sm font-black text-white truncate">{cleanReceivableNote(m.note)}</p>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{m.performedBy ? ` · ${m.performedBy}` : ''}</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <p className="text-base font-black text-sky-300 tracking-tighter">{formatRawCurrency(m.amount, 'TND')}</p>
-                          <button onClick={() => { setTndNoteEdit({ id: m.id, note: cleanReceivableNote(m.note), amount: m.amount, type: m.type }); setTndNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90" title="Modifier la note"><Edit className="h-4 w-4" /></button>
-                          <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Marquer comme récupéré (ajoute au solde)">✓ Récupéré</button>
-                          {currentUser.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/30 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="hidden sm:inline-flex text-[8px] font-black uppercase tracking-widest text-sky-300 bg-sky-500/15 border border-sky-500/30 px-2 py-1 rounded-lg">Hors solde</span>
+                    <span className="h-9 w-9 rounded-xl bg-white text-black flex items-center justify-center shadow-lg"><Plus className="h-4 w-4 stroke-[3]" /></span>
                   </div>
-                </div>
-              )}
+                </button>
+
+                {/* À RÉCUPÉRER — money owed to you: visible, noted, NOT counted in the balance */}
+                {receivables.length > 0 ? (
+                  <div className="relative p-5 sm:p-6">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div className="min-w-0"><p className="text-[10px] font-black text-sky-300 uppercase tracking-[0.25em]">À récupérer</p><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">Total des créances hors solde</p></div>
+                      <p className="text-2xl font-black text-sky-300 tracking-tighter shrink-0">{formatRawCurrency(receivablesTotal, 'TND')}</p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {receivables.map((m: any) => (
+                        <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-sky-500/20 rounded-2xl">
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <p className="text-sm font-black text-white truncate">{cleanReceivableNote(m.note)}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{m.performedBy ? ` · ${m.performedBy}` : ''}</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <p className="text-base font-black text-sky-300 tracking-tighter">{formatRawCurrency(m.amount, 'TND')}</p>
+                            <button onClick={() => { setTndNoteEdit({ id: m.id, note: cleanReceivableNote(m.note), amount: m.amount, type: m.type }); setTndNoteEditError(''); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90" title="Modifier la note"><Edit className="h-4 w-4" /></button>
+                            <button onClick={() => handleSettleTndMovement(m.id)} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95" title="Marquer comme récupéré (ajoute au solde)">✓ Récupéré</button>
+                            {currentUser.role === 'admin' && <button onClick={() => handleDeleteTndMovement(m.id)} className="p-2 text-rose-500/30 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative px-5 pb-5 pt-4 border-t border-sky-500/10">
+                    <p className="text-[10px] font-bold text-neutral-500 text-center">Aucune somme à récupérer. Utilise le bouton au-dessus pour ajouter une créance hors solde.</p>
+                  </div>
+                )}
+              </div>
 
               {/* SEARCH + FILTERS */}
               <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
