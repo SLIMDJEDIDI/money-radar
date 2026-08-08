@@ -43,10 +43,13 @@ const bankPalette = (id: string) => {
   return BANK_PALETTES[h % BANK_PALETTES.length];
 };
 
-// BIAT-branded bank account: show the BIAT logo as a small badge right before the name,
-// sized to the surrounding text so it reads as part of the account title.
+// BIAT-branded bank accounts: keep the BIAT logo as a visual bank badge, but do not
+// force the word BIAT inside the account name itself.
 const BIAT_LOGO_SRC = '/biat-logo.jpg';
-const isBiatAccount = (name?: string) => !!name && name.toUpperCase().includes('BIAT');
+const isBiatAccount = (name?: string) => {
+  const n = (name || '').trim().toUpperCase();
+  return n.includes('BIAT') || n === 'VLT MOTORS' || n === 'VOLTROP INDUSTRIES';
+};
 
 // Sentinel prefix (must match TREASURY_ARCHIVE_TAG in actions.ts) marking a Coffre→Archive
 // transfer so both journals can highlight these special admin-only movements.
@@ -482,21 +485,27 @@ export default function MoneyHubApp({
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   };
 
-  // One-time rename: "VOLTROP INDUSTRIES" -> "BIAT VOLTROP INDUSTRIES". Idempotent and
-  // guarded by a localStorage flag so it only fires once per browser. Reuses the existing
-  // renameBankAccount server action (no local DATABASE_URL needed).
+  // One-time cleanup: remove the word "BIAT" from the two bank account names while keeping
+  // the BIAT logo badge as the visual bank identifier.
   useEffect(() => {
     if (!currentUser) return;
-    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_biat_rename_done') === '1') return;
-    const target = (bankAccounts || []).find((a: any) => (a.name || '').trim().toUpperCase() === 'VOLTROP INDUSTRIES');
-    if (!target) return;
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_remove_biat_word_done') === '1') return;
+    const renamePairs: Record<string, string> = {
+      'BIAT VLT MOTORS': 'VLT MOTORS',
+      'BIAT VOLTROP INDUSTRIES': 'VOLTROP INDUSTRIES',
+    };
+    const targets = (bankAccounts || []).filter((a: any) => renamePairs[(a.name || '').trim().toUpperCase()]);
+    if (targets.length === 0) return;
     (async () => {
       try {
-        const fd = new FormData();
-        fd.append('id', target.id);
-        fd.append('name', 'BIAT VOLTROP INDUSTRIES');
-        const res: any = await renameBankAccount(fd);
-        if (res?.success) { localStorage.setItem('hub_bank_biat_rename_done', '1'); await refreshHubState(); }
+        for (const target of targets) {
+          const fd = new FormData();
+          fd.append('id', target.id);
+          fd.append('name', renamePairs[(target.name || '').trim().toUpperCase()]);
+          await renameBankAccount(fd);
+        }
+        localStorage.setItem('hub_bank_remove_biat_word_done', '1');
+        await refreshHubState();
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
