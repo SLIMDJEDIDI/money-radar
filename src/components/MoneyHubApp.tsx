@@ -1773,26 +1773,33 @@ export default function MoneyHubApp({
           return (
             <div className="flex flex-col gap-6 pb-20">
               <div className="flex items-center justify-between px-1">
-                <div><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.22em]">À payer plus tard</p><h2 className="text-2xl font-black tracking-[-0.06em] text-white leading-none mt-0.5 flex items-center gap-2"><Receipt className="h-6 w-6 text-amber-300" /> Crédit</h2></div>
-                <button onClick={() => { setCreditForm({ amount: '', beneficiary: '', note: '' }); setCreditError(''); setActiveModal('add_credit'); }} className="shrink-0 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/30 rounded-2xl text-amber-200 text-[10px] font-black uppercase tracking-widest active:scale-95 transition flex items-center gap-1.5"><Plus className="h-4 w-4" /> Crédit</button>
+                <div><p className="text-[9px] font-black text-rose-300 uppercase tracking-[0.22em]">À payer plus tard</p><h2 className="text-2xl font-black tracking-[-0.06em] text-white leading-none mt-0.5 flex items-center gap-2"><Receipt className="h-6 w-6 text-rose-300" /> Crédit</h2></div>
               </div>
 
-              {/* HERO — le TOTAL CREDIT actif, impossible à manquer */}
-              <div className="bg-gradient-to-br from-[#2a2109] to-black border-2 border-amber-500/60 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-                <div className="absolute -top-10 -right-10 opacity-[0.06] pointer-events-none text-amber-300"><Receipt className="h-48 w-48" /></div>
-                <div className="flex items-center gap-2 mb-1"><span className="h-3 w-3 rounded-full bg-amber-400" /><p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.3em]">Total crédit à payer</p></div>
+              {/* HERO — le TOTAL CREDIT actif, impossible à manquer. Même structure que le hero
+                  Banque / Archive (pastille + libellé + montant géant + ligne de stats). */}
+              <div className="bg-gradient-to-br from-[#2a0c14] to-black border-2 border-rose-500/60 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                <div className="absolute -top-10 -right-10 opacity-[0.06] pointer-events-none text-rose-300"><Receipt className="h-48 w-48" /></div>
+                <div className="flex items-center gap-2 mb-1"><span className="h-3 w-3 rounded-full bg-rose-400" /><p className="text-[10px] font-black text-rose-300 uppercase tracking-[0.3em]">Total crédit à payer</p></div>
                 <h3 className="text-5xl sm:text-6xl font-black tracking-tighter text-white break-words leading-none mt-3">{formatRawCurrency(creditTotal, 'TND')}</h3>
                 <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-3">{openCredits.length} crédit{openCredits.length > 1 ? 's' : ''} en attente · sans échéance</p>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
                   <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Déjà payé</p><p className="text-emerald-400 font-black text-base tracking-tighter">{formatRawCurrency(paidTotal, 'TND')}</p></div>
                   <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées payées</p><p className="text-neutral-300 font-black text-base tracking-tighter">{paidCredits.length}</p></div>
-                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-amber-300 uppercase tracking-widest">Indépendant</p><p className="text-[10px] text-neutral-400 font-bold leading-tight max-w-[190px]">N&apos;affecte aucun autre solde ni total.</p></div>
+                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-rose-300 uppercase tracking-widest">Indépendant</p><p className="text-[10px] text-neutral-400 font-bold leading-tight max-w-[190px]">N&apos;affecte aucun autre solde ni total.</p></div>
                 </div>
+              </div>
+
+              {/* QUICK ACTIONS — même traitement que « Encaisser TND » / « Entrée » ailleurs :
+                  carte p-6, coin [32px], icône dans un carré qui grossit au survol. Le Crédit n'a
+                  qu'un seul sens (on enregistre une dette), donc une seule carte pleine largeur. */}
+              <div className="grid grid-cols-1 gap-4">
+                <button onClick={() => { setCreditForm({ amount: '', beneficiary: '', note: '' }); setCreditError(''); setActiveModal('add_credit'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Nouveau crédit</p></button>
               </div>
 
               {/* FILTRES */}
               <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
-                <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="Rechercher bénéficiaire, description…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-amber-500/40" /></div>
+                <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="Rechercher bénéficiaire, description…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-rose-500/40" /></div>
                 <div className="flex flex-wrap gap-2">
                   {[{ id: 'open', label: `À payer (${openCredits.length})` }, { id: 'paid', label: `Payés (${paidCredits.length})` }, { id: 'all', label: 'Tout' }].map(v => (
                     <button key={v.id} onClick={() => setCreditView(v.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${creditView === v.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{v.label}</button>
@@ -1806,8 +1813,8 @@ export default function MoneyHubApp({
                 {filtered.length === 0 && <EmptyState icon={<Receipt className="h-10 w-10" />} title={credits.length === 0 ? 'Aucun crédit' : 'Aucun résultat'} subtitle={credits.length === 0 ? 'Ajoute une somme à payer plus tard.' : 'Modifie la recherche ou le filtre.'} />}
                 <div className="flex flex-col gap-3">
                   {filtered.map((c: any) => (
-                    <div key={c.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${c.isPaid ? 'bg-neutral-900/30 border-neutral-800/70 opacity-70' : 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50'}`}>
-                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${c.isPaid ? 'bg-emerald-500/60' : 'bg-amber-400'}`} />
+                    <div key={c.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${c.isPaid ? 'bg-neutral-900/30 border-neutral-800/70 opacity-70' : 'bg-rose-500/5 border-rose-500/30 hover:border-rose-500/50'}`}>
+                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${c.isPaid ? 'bg-emerald-500/60' : 'bg-rose-400'}`} />
                       <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           {c.isPaid && <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CheckCircle className="h-2.5 w-2.5" /> Payé</span>}
@@ -1816,16 +1823,16 @@ export default function MoneyHubApp({
                         <p className={`text-sm font-bold leading-snug break-words ${c.isPaid ? 'text-neutral-500' : 'text-neutral-300'}`}>{c.note}</p>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(c.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                          {c.createdBy && <p className="text-[9px] text-amber-400/80 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {c.createdBy}</p>}
+                          {c.createdBy && <p className="text-[9px] text-rose-400/80 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {c.createdBy}</p>}
                           {c.isPaid && c.paidAt && <p className="text-[9px] text-emerald-400 font-black uppercase flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Payé le {new Date(c.paidAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{c.paidBy ? ` · ${c.paidBy}` : ''}</p>}
                         </div>
                       </div>
                       <div className="text-right shrink-0 flex items-center gap-2">
-                        <p className={`text-lg font-black tracking-tighter ${c.isPaid ? 'text-neutral-500 line-through' : 'text-amber-300'}`}>{formatRawCurrency(c.amount, c.currencyCode || 'TND')}</p>
+                        <p className={`text-lg font-black tracking-tighter ${c.isPaid ? 'text-neutral-500 line-through' : 'text-rose-300'}`}>{formatRawCurrency(c.amount, c.currencyCode || 'TND')}</p>
                         {!c.isPaid ? (
                           <button onClick={() => handleToggleCreditPaid(c)} disabled={isPending} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95 disabled:opacity-40">Payé</button>
                         ) : (
-                          <button onClick={() => handleToggleCreditPaid(c)} disabled={isPending} title="Annuler le marquage payé" className="p-2 text-neutral-500 hover:text-amber-300 hover:bg-amber-500/10 rounded-xl transition active:scale-90 disabled:opacity-40"><Undo2 className="h-4 w-4" /></button>
+                          <button onClick={() => handleToggleCreditPaid(c)} disabled={isPending} title="Annuler le marquage payé" className="p-2 text-neutral-500 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition active:scale-90 disabled:opacity-40"><Undo2 className="h-4 w-4" /></button>
                         )}
                         {!c.isPaid && <button onClick={() => { setCreditForm({ id: c.id, amount: String(c.amount), beneficiary: c.beneficiary, note: c.note }); setCreditError(''); setActiveModal('add_credit'); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90"><Edit className="h-4 w-4" /></button>}
                         {currentUser.role === 'admin' && <button onClick={() => handleDeleteCredit(c.id, c.beneficiary)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
@@ -2364,30 +2371,31 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_credit' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in" onClick={() => { if (!isPending) setActiveModal(null); }}>
-          <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border-2 border-amber-500/60 rounded-t-[36px] sm:rounded-[48px] p-7 sm:p-10 flex flex-col gap-6 animate-slide-up sm:animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-300 px-1">
-              <h3 className="font-black uppercase tracking-[0.2em] text-sm flex items-center gap-2"><Receipt className="h-4 w-4" /> {creditForm.id ? 'Modifier le crédit' : 'Nouveau crédit'}</h3>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => { if (!isPending) setActiveModal(null); }}>
+          <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border border-rose-500/40 rounded-[48px] p-7 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-rose-400 px-1">
+              <h3 className="font-black uppercase tracking-[0.2em] text-sm">{creditForm.id ? 'Modifier le crédit' : 'Nouveau crédit'}</h3>
               <button onClick={() => setActiveModal(null)} disabled={isPending} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button>
             </div>
-            <p className="text-[10px] text-neutral-500 font-bold leading-relaxed -mt-2">Somme à payer plus tard. Aucune date requise. Ce registre reste indépendant de tous les autres soldes.</p>
+            {/* Bandeau de contexte — même rôle que le bandeau « Compte concerné » de Banque :
+                rappeler sur quoi on agit et le total en cours pendant la saisie. */}
+            <div className="flex items-center gap-3 p-4 rounded-[24px] bg-rose-500/15 border-2 border-rose-500/40">
+              <span className="h-3.5 w-3.5 rounded-full bg-rose-400 shrink-0" />
+              <div className="min-w-0"><p className="text-[8px] font-black text-neutral-400 uppercase tracking-[0.25em]">Registre concerné</p><p className="text-xl font-black uppercase tracking-tight truncate text-rose-300">Crédit</p></div>
+              <p className="ml-auto text-right text-sm font-black text-white tracking-tighter shrink-0">{formatRawCurrency(credits.filter((c: any) => !c.isPaid).reduce((s: number, c: any) => s + (c.amount || 0), 0), 'TND')}</p>
+            </div>
             <form onSubmit={handleSaveCredit} className="flex flex-col gap-5">
               <div className="flex gap-3 w-full">
-                <input type="number" step="any" required autoFocus className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-amber-500/50 outline-none shadow-inner tracking-tighter" placeholder="0" value={creditForm.amount} onChange={e => setCreditForm(p => ({ ...p, amount: e.target.value }))} />
-                <div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-amber-300 font-black text-lg shadow-inner">TND</div>
+                <input type="number" step="any" required autoFocus className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-rose-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={creditForm.amount} onChange={e => setCreditForm(p => ({ ...p, amount: e.target.value }))} />
+                <div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-rose-300 font-black text-lg shadow-inner">TND</div>
               </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1">Bénéficiaire</label>
-                <input type="text" required maxLength={120} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" placeholder="NOM DU BÉNÉFICIAIRE" value={creditForm.beneficiary} onChange={e => setCreditForm(p => ({ ...p, beneficiary: e.target.value }))} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1">Description</label>
-                <textarea required maxLength={1000} className="min-h-24 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-bold outline-none focus:border-amber-500/50 shadow-inner" placeholder="Motif du crédit" value={creditForm.note} onChange={e => setCreditForm(p => ({ ...p, note: e.target.value }))} />
-              </div>
+              <input type="text" required maxLength={120} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-rose-500/50 shadow-inner" placeholder="BÉNÉFICIAIRE OBLIGATOIRE" value={creditForm.beneficiary} onChange={e => setCreditForm(p => ({ ...p, beneficiary: e.target.value }))} />
+              <input type="text" required maxLength={1000} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-rose-500/50 shadow-inner" placeholder="DESCRIPTION OBLIGATOIRE" value={creditForm.note} onChange={e => setCreditForm(p => ({ ...p, note: e.target.value }))} />
+              <p className="text-[10px] font-black text-rose-400/90 px-2 flex items-center gap-1.5"><Receipt className="h-3 w-3 shrink-0" /> Aucune date requise. N&apos;affecte aucun solde ni total.</p>
               {creditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{creditError}</p>}
-              <div className="flex gap-4 mt-1">
+              <div className="flex gap-4 mt-2">
                 <button type="button" onClick={() => setActiveModal(null)} disabled={isPending} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
-                <button type="submit" disabled={isPending || !creditForm.amount || !creditForm.beneficiary.trim() || !creditForm.note.trim()} className="flex-[2] py-5 bg-amber-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-amber-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{isPending ? 'Enregistrement…' : creditForm.id ? 'Enregistrer' : 'Ajouter'}</button>
+                <button type="submit" disabled={isPending || !creditForm.amount || !creditForm.beneficiary.trim() || !creditForm.note.trim()} className="flex-[2] py-5 bg-rose-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-rose-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{isPending ? 'Enregistrement…' : creditForm.id ? 'Enregistrer' : 'Confirmer'}</button>
               </div>
             </form>
           </div>
