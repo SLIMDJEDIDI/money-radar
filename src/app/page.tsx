@@ -53,6 +53,7 @@ export default async function Page() {
         initialPartnerNotes={data.partnerNotes}
         initialBankAccounts={data.bankAccounts}
         initialBankMovements={data.bankMovements}
+        initialCredits={data.credits}
       />
     </main>
   );

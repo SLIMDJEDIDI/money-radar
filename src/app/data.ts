@@ -96,6 +96,21 @@ export async function getHubDashboardData(searchQuery: string = '') {
       bankMovements = [];
     }
 
+    // CREDIT — sommes à payer plus tard (sans échéance). Registre TOTALEMENT INDÉPENDANT :
+    // ses totaux ne sont injectés dans AUCUN autre solde/calcul ci-dessous. Requête défensive
+    // pour que l'app charge normalement si la table n'est pas encore provisionnée.
+    let credits: any[] = [];
+    try {
+      credits = await prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } });
+    } catch {
+      credits = [];
+    }
+    // Total CREDIT ACTIF = uniquement les entrées non payées. Une entrée marquée PAYÉE
+    // quitte ce total mais reste dans l'historique.
+    const creditTotal = credits.reduce((s, c) => (c.isPaid ? s : s + (c.amount || 0)), 0);
+    const creditPaidTotal = credits.reduce((s, c) => (c.isPaid ? s + (c.amount || 0) : s), 0);
+    const creditOpenCount = credits.filter(c => !c.isPaid).length;
+
     const activeCurrencies = currencies.filter(c => c.isActive);
 
     // TND Treasury Logic
@@ -257,6 +272,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       partnerNotes,
       bankAccounts: bankAccountsWithStats,
       bankMovements,
+      credits,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,
@@ -272,6 +288,11 @@ export async function getHubDashboardData(searchQuery: string = '') {
         archiveTodayOut,
         archivePendingIn,
         archivePendingOut,
+        // CREDIT — exposé uniquement pour la section CREDIT. Volontairement absent de
+        // netPosition, tndBalance, TOTAL TND et de tout autre agrégat.
+        creditTotal,
+        creditPaidTotal,
+        creditOpenCount,
       },
     };
   } catch (error) {

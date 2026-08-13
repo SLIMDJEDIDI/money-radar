@@ -812,6 +812,150 @@ export async function deletePartnerNote(id: string) {
   }
 }
 
+// ----------------------------------------------------
+// 5d. CREDIT — sommes à payer plus tard, sans date d'échéance
+// ----------------------------------------------------
+// Registre TOTALEMENT INDÉPENDANT : n'entre dans aucun autre solde, total ou calcul.
+// Provisioning non destructif : crée la table uniquement si elle est absente.
+export async function ensureCreditTable() {
+  try {
+    await requireSession();
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "HubCredit" (
+        "id" TEXT NOT NULL,
+        "amount" DOUBLE PRECISION NOT NULL,
+        "currencyCode" TEXT NOT NULL DEFAULT 'TND',
+        "beneficiary" TEXT NOT NULL,
+        "note" TEXT NOT NULL,
+        "isPaid" BOOLEAN NOT NULL DEFAULT false,
+        "paidAt" TIMESTAMP(3),
+        "paidBy" TEXT,
+        "createdBy" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "HubCredit_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubCredit_isPaid_idx" ON "HubCredit" ("isPaid");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubCredit_createdAt_idx" ON "HubCredit" ("createdAt");`);
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };
+    return { success: false, error: 'Provisioning crédit impossible' };
+  }
+}
+
+export async function createCredit(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const amount = parseFloat(formData.get('amount') as string);
+    const beneficiary = (formData.get('beneficiary') as string || '').trim();
+    const note = (formData.get('note') as string || '').trim();
+    const currencyCode = (formData.get('currencyCode') as string || 'TND').trim() || 'TND';
+
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+    if (!beneficiary) return { success: false, error: 'Le bénéficiaire est obligatoire' };
+    if (!note) return { success: false, error: 'La description est obligatoire' };
+
+    await ensureCreditTable();
+    await prisma.$transaction(async (tx) => {
+      const credit = await tx.hubCredit.create({
+        data: { amount, currencyCode, beneficiary, note, createdBy: session.username },
+      });
+      await logAudit(tx, {
+        entityType: 'CREDIT', entityId: credit.id, action: 'CREATE',
+        details: `Crédit ajouté: ${amount} ${currencyCode} — ${beneficiary} (${note})`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de l\'ajout du crédit' };
+  }
+}
+
+export async function updateCredit(formData: FormData) {
+  try {
+    const session = await requireSession();
+    const id = (formData.get('id') as string || '').trim();
+    const amount = parseFloat(formData.get('amount') as string);
+    const beneficiary = (formData.get('beneficiary') as string || '').trim();
+    const note = (formData.get('note') as string || '').trim();
+
+    if (!id) return { success: false, error: 'Crédit manquant' };
+    if (!isFinite(amount) || amount <= 0) return { success: false, error: 'Montant invalide' };
+    if (!beneficiary) return { success: false, error: 'Le bénéficiaire est obligatoire' };
+    if (!note) return { success: false, error: 'La description est obligatoire' };
+
+    await prisma.$transaction(async (tx) => {
+      const before = await tx.hubCredit.findUnique({ where: { id } });
+      await tx.hubCredit.update({ where: { id }, data: { amount, beneficiary, note } });
+      await logAudit(tx, {
+        entityType: 'CREDIT', entityId: id, action: 'UPDATE',
+        details: `Crédit modifié: ${amount} — ${beneficiary} (${note})`,
+        oldValue: before ? `${before.amount} — ${before.beneficiary} (${before.note})` : undefined,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors de la modification' };
+  }
+}
+
+// Marque un crédit comme PAYÉ (sort du total actif) ou annule ce marquage.
+// L'entrée reste TOUJOURS dans l'historique — rien n'est supprimé.
+export async function setCreditPaid(id: string, isPaid: boolean) {
+  try {
+    const session = await requireSession();
+    if (!id) return { success: false, error: 'Crédit manquant' };
+    await prisma.$transaction(async (tx) => {
+      const credit = await tx.hubCredit.update({
+        where: { id },
+        data: isPaid
+          ? { isPaid: true, paidAt: new Date(), paidBy: session.username }
+          : { isPaid: false, paidAt: null, paidBy: null },
+      });
+      await logAudit(tx, {
+        entityType: 'CREDIT', entityId: id, action: isPaid ? 'CREDIT_PAID' : 'CREDIT_UNPAID',
+        details: `${isPaid ? 'Crédit marqué PAYÉ' : 'Crédit remis en attente'}: ${credit.amount} ${credit.currencyCode} — ${credit.beneficiary}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    return { success: false, error: 'Erreur lors du marquage' };
+  }
+}
+
+// Suppression définitive — réservée à l'administrateur. Le flux normal est "marquer PAYÉ",
+// qui conserve l'entrée dans l'historique.
+export async function deleteCredit(id: string) {
+  try {
+    const session = await requireAdmin();
+    await prisma.$transaction(async (tx) => {
+      const credit = await tx.hubCredit.findUnique({ where: { id } });
+      await tx.hubCredit.delete({ where: { id } });
+      await logAudit(tx, {
+        entityType: 'CREDIT', entityId: id, action: 'DELETE',
+        details: `Crédit supprimé: ${credit?.amount ?? ''} ${credit?.currencyCode ?? ''} — ${credit?.beneficiary ?? ''}`,
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
+    return { success: false, error: 'Erreur lors de la suppression' };
+  }
+}
+
 export async function createArchiveMovement(formData: FormData) {
   try {
     const session = await requireAdmin();

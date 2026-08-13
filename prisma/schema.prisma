@@ -214,3 +214,25 @@ model HubPanicLock {
   @@index([isLocked])
 }
 
+// CREDIT — money we must pay at some point in the future, with NO due date required.
+// Deliberately and completely INDEPENDENT: never summed into any other balance, total,
+// sale, payment or calculation anywhere in the platform. Marking an entry PAID removes it
+// from the active CREDIT total but KEEPS the row as history (never deleted).
+// Additive table provisioned via CREATE TABLE IF NOT EXISTS (zero risk).
+model HubCredit {
+  id           String    @id @default(cuid())
+  amount       Float
+  currencyCode String    @default("TND")
+  beneficiary  String    // Nom / bénéficiaire à payer
+  note         String    // Description / motif
+  isPaid       Boolean   @default(false)
+  paidAt       DateTime?
+  paidBy       String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([isPaid])
+  @@index([createdAt])
+}
+

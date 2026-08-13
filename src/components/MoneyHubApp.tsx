@@ -5,7 +5,7 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Vault
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Vault, Receipt, Undo2
 } from 'lucide-react';
 import {
   createContact, updateContact, deleteContact,
@@ -18,6 +18,7 @@ import {
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
   transferTreasuryToArchive,
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
+  ensureCreditTable, createCredit, updateCredit, setCreditPaid, deleteCredit,
   ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
   createBankMovement, createBankBatchDisbursement, settleBankMovement, updateBankMovementNote, deleteBankMovement,
   activatePanicLock, unlockPanicLock
@@ -194,6 +195,7 @@ export default function MoneyHubApp({
   initialArchiveMovements = [], initialArchiveUpcoming = [], initialArchiveDueSoon = [], initialArchiveOverdue = [],
   initialPartnerNotes = [],
   initialBankAccounts = [], initialBankMovements = [],
+  initialCredits = [],
   initialPanicState = { isLocked: false, emergencyUsername: null, emergencySession: false }
 }: any) {
   // --- AUTH & THEME ---
@@ -223,7 +225,7 @@ export default function MoneyHubApp({
     })();
   }, []);
 
-  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive' | 'banque';
+  type AppSection = 'dashboard' | 'currencies' | 'contacts' | 'transactions' | 'reminders' | 'history' | 'settings' | 'treasury' | 'archive' | 'banque' | 'credit';
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
   // Assistants land directly on Treasury (only section they can access) and can never reach ARCHIVE.
@@ -270,6 +272,19 @@ export default function MoneyHubApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
+  // CREDIT table provisioning — idempotent CREATE TABLE IF NOT EXISTS, once per browser.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_credit_table_done') === '1') return;
+    (async () => {
+      try {
+        const res: any = await ensureCreditTable();
+        if (res?.success) { localStorage.setItem('hub_credit_table_done', '1'); await refreshHubState(); }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
   // --- DATA STATES ---
   const [contacts, setContacts] = useState(initialContacts);
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
@@ -300,6 +315,14 @@ export default function MoneyHubApp({
   const [bankSearch, setBankSearch] = useState('');
   const [bankPeriod, setBankPeriod] = useState<'today' | '7d' | '30d' | 'all'>('all');
   const [bankTypeFilter, setBankTypeFilter] = useState<'all' | 'IN' | 'OUT'>('all');
+  // CREDIT — sommes à payer plus tard, sans échéance. Registre 100% indépendant :
+  // n'alimente aucun autre total de la plateforme.
+  const hydrateCredit = (c: any) => ({ ...c, createdAt: new Date(c.createdAt), paidAt: c.paidAt ? new Date(c.paidAt) : null });
+  const [credits, setCredits] = useState<any[]>((initialCredits || []).map(hydrateCredit));
+  const [creditForm, setCreditForm] = useState<{ id?: string; amount: string; beneficiary: string; note: string }>({ amount: '', beneficiary: '', note: '' });
+  const [creditError, setCreditError] = useState('');
+  const [creditSearch, setCreditSearch] = useState('');
+  const [creditView, setCreditView] = useState<'open' | 'paid' | 'all'>('open');
   const [newAccountForm, setNewAccountForm] = useState<{ name: string; currencyCode: string }>({ name: '', currencyCode: 'TND' });
   const [renameAccountId, setRenameAccountId] = useState<string | null>(null);
   const [renameAccountName, setRenameAccountName] = useState('');
@@ -480,6 +503,7 @@ export default function MoneyHubApp({
         setPartnerNotes(data.partnerNotes || []);
         setBankAccounts(data.bankAccounts || []);
         setBankMovements((data.bankMovements || []).map(hydrateTnd));
+        setCredits((data.credits || []).map((c: any) => ({ ...c, createdAt: new Date(c.createdAt), paidAt: c.paidAt ? new Date(c.paidAt) : null })));
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
@@ -811,6 +835,61 @@ export default function MoneyHubApp({
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
         startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+      },
+    });
+  };
+
+  // ---------- CREDIT handlers (registre indépendant, sans échéance) ----------
+  const handleSaveCredit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(creditForm.amount);
+    if (!isFinite(amount) || amount <= 0) { setCreditError('Montant invalide.'); return; }
+    if (!creditForm.beneficiary.trim()) { setCreditError('Le bénéficiaire est obligatoire.'); return; }
+    if (!creditForm.note.trim()) { setCreditError('La description est obligatoire.'); return; }
+    setCreditError('');
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('amount', creditForm.amount);
+      data.append('beneficiary', creditForm.beneficiary.trim());
+      data.append('note', creditForm.note.trim());
+      const isEdit = !!creditForm.id;
+      if (isEdit) data.append('id', creditForm.id as string);
+      const res: any = isEdit ? await updateCredit(data) : await createCredit(data);
+      if (res?.success) {
+        setActiveModal(null);
+        setCreditForm({ amount: '', beneficiary: '', note: '' });
+        await refreshHubState();
+        showToast('success', isEdit ? 'Crédit modifié.' : 'Crédit ajouté.');
+      } else {
+        setCreditError(res?.error || 'Erreur.');
+      }
+    });
+  };
+
+  // Marquer PAYÉ / annuler — l'entrée reste toujours dans l'historique.
+  const handleToggleCreditPaid = (credit: any) => {
+    startTransition(async () => {
+      const res: any = await setCreditPaid(credit.id, !credit.isPaid);
+      if (res?.success) {
+        await refreshHubState();
+        showToast('success', credit.isPaid ? 'Crédit remis en attente.' : 'Crédit marqué payé.');
+      } else {
+        showToast('error', res?.error || 'Erreur.');
+      }
+    });
+  };
+
+  const handleDeleteCredit = (id: string, beneficiary: string) => {
+    setConfirmModal({
+      isOpen: true, isDanger: true, title: 'Supprimer le crédit',
+      description: `Le crédit de ${beneficiary} sera définitivement retiré de l'historique. Pour un crédit réglé, préfère « Marquer payé » qui le conserve.`,
+      confirmText: 'Supprimer',
+      onConfirm: async () => {
+        startTransition(async () => {
+          const res: any = await deleteCredit(id);
+          if (res?.success) { await refreshHubState(); showToast('success', 'Crédit supprimé.'); }
+          else showToast('error', res?.error || 'Erreur.');
+        });
       },
     });
   };
@@ -1665,6 +1744,85 @@ export default function MoneyHubApp({
           );
         })()}
 
+        {activeSection === 'credit' && (() => {
+          const openCredits = credits.filter((c: any) => !c.isPaid);
+          const paidCredits = credits.filter((c: any) => c.isPaid);
+          const creditTotal = openCredits.reduce((s: number, c: any) => s + (c.amount || 0), 0);
+          const paidTotal = paidCredits.reduce((s: number, c: any) => s + (c.amount || 0), 0);
+          const q = creditSearch.trim().toLowerCase();
+          const base = creditView === 'open' ? openCredits : creditView === 'paid' ? paidCredits : credits;
+          const filtered = base.filter((c: any) => {
+            if (!q) return true;
+            return `${c.beneficiary || ''} ${c.note || ''} ${c.amount}`.toLowerCase().includes(q);
+          });
+          return (
+            <div className="flex flex-col gap-6 pb-20">
+              <div className="flex items-center justify-between px-1">
+                <div><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.22em]">À payer plus tard</p><h2 className="text-2xl font-black tracking-[-0.06em] text-white leading-none mt-0.5 flex items-center gap-2"><Receipt className="h-6 w-6 text-amber-300" /> Crédit</h2></div>
+                <button onClick={() => { setCreditForm({ amount: '', beneficiary: '', note: '' }); setCreditError(''); setActiveModal('add_credit'); }} className="shrink-0 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/30 rounded-2xl text-amber-200 text-[10px] font-black uppercase tracking-widest active:scale-95 transition flex items-center gap-1.5"><Plus className="h-4 w-4" /> Crédit</button>
+              </div>
+
+              {/* HERO — le TOTAL CREDIT actif, impossible à manquer */}
+              <div className="bg-gradient-to-br from-[#2a2109] to-black border-2 border-amber-500/60 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
+                <div className="absolute -top-10 -right-10 opacity-[0.06] pointer-events-none text-amber-300"><Receipt className="h-48 w-48" /></div>
+                <div className="flex items-center gap-2 mb-1"><span className="h-3 w-3 rounded-full bg-amber-400" /><p className="text-[10px] font-black text-amber-300 uppercase tracking-[0.3em]">Total crédit à payer</p></div>
+                <h3 className="text-5xl sm:text-6xl font-black tracking-tighter text-white break-words leading-none mt-3">{formatRawCurrency(creditTotal, 'TND')}</h3>
+                <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-3">{openCredits.length} crédit{openCredits.length > 1 ? 's' : ''} en attente · sans échéance</p>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Déjà payé</p><p className="text-emerald-400 font-black text-base tracking-tighter">{formatRawCurrency(paidTotal, 'TND')}</p></div>
+                  <div className="flex flex-col"><p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Entrées payées</p><p className="text-neutral-300 font-black text-base tracking-tighter">{paidCredits.length}</p></div>
+                  <div className="flex flex-col border-l border-white/10 pl-6"><p className="text-[9px] font-black text-amber-300 uppercase tracking-widest">Indépendant</p><p className="text-[10px] text-neutral-400 font-bold leading-tight max-w-[190px]">N&apos;affecte aucun autre solde ni total.</p></div>
+                </div>
+              </div>
+
+              {/* FILTRES */}
+              <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
+                <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="Rechercher bénéficiaire, description…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-amber-500/40" /></div>
+                <div className="flex flex-wrap gap-2">
+                  {[{ id: 'open', label: `À payer (${openCredits.length})` }, { id: 'paid', label: `Payés (${paidCredits.length})` }, { id: 'all', label: 'Tout' }].map(v => (
+                    <button key={v.id} onClick={() => setCreditView(v.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${creditView === v.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{v.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* LISTE */}
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-neutral-900 pb-3 px-1"><h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Registre crédit</h4><span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {credits.length}</span></div>
+                {filtered.length === 0 && <EmptyState icon={<Receipt className="h-10 w-10" />} title={credits.length === 0 ? 'Aucun crédit' : 'Aucun résultat'} subtitle={credits.length === 0 ? 'Ajoute une somme à payer plus tard.' : 'Modifie la recherche ou le filtre.'} />}
+                <div className="flex flex-col gap-3">
+                  {filtered.map((c: any) => (
+                    <div key={c.id} className={`group relative p-5 pl-6 border rounded-[32px] flex justify-between items-center gap-4 transition ${c.isPaid ? 'bg-neutral-900/30 border-neutral-800/70 opacity-70' : 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50'}`}>
+                      <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${c.isPaid ? 'bg-emerald-500/60' : 'bg-amber-400'}`} />
+                      <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {c.isPaid && <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CheckCircle className="h-2.5 w-2.5" /> Payé</span>}
+                          <p className={`text-sm font-black uppercase tracking-tight break-words ${c.isPaid ? 'text-neutral-400 line-through' : 'text-white'}`}>{c.beneficiary}</p>
+                        </div>
+                        <p className={`text-sm font-bold leading-snug break-words ${c.isPaid ? 'text-neutral-500' : 'text-neutral-300'}`}>{c.note}</p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(c.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                          {c.createdBy && <p className="text-[9px] text-amber-400/80 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {c.createdBy}</p>}
+                          {c.isPaid && c.paidAt && <p className="text-[9px] text-emerald-400 font-black uppercase flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Payé le {new Date(c.paidAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{c.paidBy ? ` · ${c.paidBy}` : ''}</p>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 flex items-center gap-2">
+                        <p className={`text-lg font-black tracking-tighter ${c.isPaid ? 'text-neutral-500 line-through' : 'text-amber-300'}`}>{formatRawCurrency(c.amount, c.currencyCode || 'TND')}</p>
+                        {!c.isPaid ? (
+                          <button onClick={() => handleToggleCreditPaid(c)} disabled={isPending} className="px-3 py-2 bg-emerald-500 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-400 transition active:scale-95 disabled:opacity-40">Payé</button>
+                        ) : (
+                          <button onClick={() => handleToggleCreditPaid(c)} disabled={isPending} title="Annuler le marquage payé" className="p-2 text-neutral-500 hover:text-amber-300 hover:bg-amber-500/10 rounded-xl transition active:scale-90 disabled:opacity-40"><Undo2 className="h-4 w-4" /></button>
+                        )}
+                        {!c.isPaid && <button onClick={() => { setCreditForm({ id: c.id, amount: String(c.amount), beneficiary: c.beneficiary, note: c.note }); setCreditError(''); setActiveModal('add_credit'); }} className="p-2 text-blue-400/60 hover:text-blue-300 hover:bg-blue-500/10 rounded-xl transition active:scale-90"><Edit className="h-4 w-4" /></button>}
+                        {currentUser.role === 'admin' && <button onClick={() => handleDeleteCredit(c.id, c.beneficiary)} className="p-2 text-rose-500/20 hover:text-rose-500 transition active:scale-90"><Trash2 className="h-4 w-4" /></button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {activeSection === 'archive' && currentUser.role === 'admin' && (() => {
           const balanceById: Record<string, number> = {};
           {
@@ -1917,6 +2075,7 @@ export default function MoneyHubApp({
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'treasury', label: 'Coffre', icon: <Vault className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'banque', label: 'Banque', icon: <Landmark className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'credit', label: 'Crédit', icon: <Receipt className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'archive', label: 'Archive', icon: <Archive className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'contacts', label: 'Contacts', icon: <Users className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'history', label: 'Audit', icon: <History className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
@@ -2134,6 +2293,36 @@ export default function MoneyHubApp({
             <form onSubmit={handleRenameBankAccount} className="flex flex-col gap-5">
               <input type="text" required autoFocus value={renameAccountName} onChange={e => setRenameAccountName(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" />
               <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !renameAccountName.trim()} className="flex-[2] py-5 bg-teal-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      {activeModal === 'add_credit' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in" onClick={() => { if (!isPending) setActiveModal(null); }}>
+          <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border-2 border-amber-500/60 rounded-t-[36px] sm:rounded-[48px] p-7 sm:p-10 flex flex-col gap-6 animate-slide-up sm:animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-300 px-1">
+              <h3 className="font-black uppercase tracking-[0.2em] text-sm flex items-center gap-2"><Receipt className="h-4 w-4" /> {creditForm.id ? 'Modifier le crédit' : 'Nouveau crédit'}</h3>
+              <button onClick={() => setActiveModal(null)} disabled={isPending} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="text-[10px] text-neutral-500 font-bold leading-relaxed -mt-2">Somme à payer plus tard. Aucune date requise. Ce registre reste indépendant de tous les autres soldes.</p>
+            <form onSubmit={handleSaveCredit} className="flex flex-col gap-5">
+              <div className="flex gap-3 w-full">
+                <input type="number" step="any" required autoFocus className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-amber-500/50 outline-none shadow-inner tracking-tighter" placeholder="0" value={creditForm.amount} onChange={e => setCreditForm(p => ({ ...p, amount: e.target.value }))} />
+                <div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-amber-300 font-black text-lg shadow-inner">TND</div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1">Bénéficiaire</label>
+                <input type="text" required maxLength={120} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" placeholder="NOM DU BÉNÉFICIAIRE" value={creditForm.beneficiary} onChange={e => setCreditForm(p => ({ ...p, beneficiary: e.target.value }))} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1">Description</label>
+                <textarea required maxLength={1000} className="min-h-24 w-full resize-none bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-bold outline-none focus:border-amber-500/50 shadow-inner" placeholder="Motif du crédit" value={creditForm.note} onChange={e => setCreditForm(p => ({ ...p, note: e.target.value }))} />
+              </div>
+              {creditError && <p className="text-rose-400 text-[10px] font-black uppercase text-center tracking-wider">{creditError}</p>}
+              <div className="flex gap-4 mt-1">
+                <button type="button" onClick={() => setActiveModal(null)} disabled={isPending} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button>
+                <button type="submit" disabled={isPending || !creditForm.amount || !creditForm.beneficiary.trim() || !creditForm.note.trim()} className="flex-[2] py-5 bg-amber-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-amber-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{isPending ? 'Enregistrement…' : creditForm.id ? 'Enregistrer' : 'Ajouter'}</button>
+              </div>
             </form>
           </div>
         </div>
