@@ -353,8 +353,9 @@ export default function MoneyHubApp({
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  // In the account chooser, which TND caisse is expanded to pick a direction (IN/OUT).
-  const [chooserExpand, setChooserExpand] = useState<null | 'treasury' | 'archive'>(null);
+  // In the account chooser, which entry is expanded to pick a direction (IN/OUT).
+  // 'treasury' | 'archive' | `bank:<accountId>` — bank accounts are per-account.
+  const [chooserExpand, setChooserExpand] = useState<string | null>(null);
   const [selectedContact, setSelectedContact] = useState<any>(null);
   const [contactFilterType, setContactFilterType] = useState<'ALL' | 'HELD' | 'RECEIVABLE' | 'PAYABLE'>('ALL');
   const [confirmModal, setConfirmModal] = useState<any>({ isOpen: false });
@@ -1217,18 +1218,23 @@ export default function MoneyHubApp({
               <button onClick={handleLogout} className="p-2.5 rounded-xl bg-neutral-900/80 border border-neutral-800 text-rose-500 transition active:scale-90"><LogOut className="h-4 w-4" /></button>
             </div>
           </div>
-          {currentUser.role === 'admin' && (
-            <>
-              <div className="flex gap-2 px-1">
-                <button onClick={() => setActiveModal('choose_account')} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
+          {/* « Nouvelle Opération » est proposé à TOUS les rôles : le sélecteur n'affiche que
+              les caisses autorisées pour l'utilisateur connecté. Les assistants n'avaient aucun
+              point d'entrée et devaient naviguer à la main jusqu'au Coffre ou à la Banque. */}
+          <>
+            <div className="flex gap-2 px-1">
+              <button onClick={() => { setChooserExpand(null); setActiveModal('choose_account'); }} className="flex-1 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-[0.98] transition"> <Plus className="h-5 w-5 stroke-[3]" /> Nouvelle Opération </button>
+              {currentUser.role === 'admin' && (
                 <button onClick={() => setActiveModal('add_contact')} className="px-5 py-4 bg-neutral-900 border border-neutral-800 text-white font-black uppercase text-xs rounded-2xl active:scale-[0.98] transition shadow-md"> <UserPlus className="h-5 w-5" /> </button>
-              </div>
+              )}
+            </div>
+            {currentUser.role === 'admin' && (
               <div className="relative px-1">
                 <Search className="absolute left-4.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
                 <input type="text" placeholder="Rechercher par nom, note ou montant..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl py-4 pl-12 pr-10 text-sm focus:border-emerald-500/40 transition outline-none text-white shadow-inner" />
               </div>
-            </>
-          )}
+            )}
+          </>
         </div>
       </header>
 
@@ -1245,6 +1251,10 @@ export default function MoneyHubApp({
           const bankTndTotal = tndBankAccounts.reduce((s: number, a: any) => s + (a.balance || 0), 0);
           const informalTndTotal = (metrics.tndBalance || 0) + (metrics.archiveBalance || 0);
           const grandTndTotal = bankTndTotal + informalTndTotal;
+          // CREDIT — dette à payer, volontairement EXCLUE de grandTndTotal ci-dessus.
+          // Visible sur le dashboard, mais jamais additionnée à une caisse.
+          const creditOpen = credits.filter((c: any) => !c.isPaid);
+          const creditDashTotal = creditOpen.reduce((s: number, c: any) => s + (c.amount || 0), 0);
           return (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-3 px-1">
@@ -1265,6 +1275,10 @@ export default function MoneyHubApp({
                 {bankAccounts.map((a: any) => (
                   <button key={a.id} onClick={() => { setSelectedBankId(a.id); navigateTo('banque'); }} className="text-left p-4 rounded-2xl border border-teal-500/25 bg-gradient-to-br from-teal-500/10 to-neutral-950 hover:border-teal-500/50 active:scale-[0.985] transition shadow-lg shadow-teal-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-teal-500/15 text-teal-300 flex items-center justify-center shrink-0"><Landmark className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">{a.name}</p></div><span className="text-[7px] font-black text-teal-300 uppercase tracking-widest shrink-0">Live·{a.currencyCode}</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(a.balance || 0) >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(a.todayIn || 0, a.currencyCode)}</span><span className="text-rose-400">− {formatRawCurrency(a.todayOut || 0, a.currencyCode)}</span></div></button>
                 ))}
+                {/* CRÉDIT — dette, pas de la trésorerie. Même format que les autres cartes pour
+                    rester repérable, mais couleur rose + tag "hors totaux" pour qu'on ne la lise
+                    JAMAIS comme de l'argent disponible. Exclue de Total TND par construction. */}
+                <button onClick={() => navigateTo('credit')} className="text-left p-4 rounded-2xl border border-rose-500/25 bg-gradient-to-br from-rose-500/10 to-neutral-950 hover:border-rose-500/50 active:scale-[0.985] transition shadow-lg shadow-rose-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-rose-500/15 text-rose-300 flex items-center justify-center shrink-0"><Receipt className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Crédit à payer</p></div><span className="text-[7px] font-black text-rose-300 uppercase tracking-widest shrink-0">Hors totaux</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${creditDashTotal > 0 ? 'text-rose-400' : 'text-neutral-500'}`}>{formatRawCurrency(creditDashTotal, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-neutral-400">{creditOpen.length} en attente</span>{credits.length - creditOpen.length > 0 && <span className="text-emerald-400">{credits.length - creditOpen.length} payé{credits.length - creditOpen.length > 1 ? 's' : ''}</span>}</div></button>
               </div>
 
               {/* TOTAL TND — sum of every TND pool except DEVISES partner positions */}
@@ -1745,7 +1759,7 @@ export default function MoneyHubApp({
           );
         })()}
 
-        {activeSection === 'credit' && (() => {
+        {activeSection === 'credit' && currentUser.role === 'admin' && (() => {
           const openCredits = credits.filter((c: any) => !c.isPaid);
           const paidCredits = credits.filter((c: any) => c.isPaid);
           const creditTotal = openCredits.reduce((s: number, c: any) => s + (c.amount || 0), 0);
@@ -2143,17 +2157,30 @@ export default function MoneyHubApp({
         </div>
       )}
 
-      {activeModal === 'choose_account' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => { setActiveModal(null); setChooserExpand(null); }}>
-          <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[40px] p-8 flex flex-col gap-5 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 px-1"><div><h3 className="font-black uppercase tracking-[0.2em] text-sm text-white">Quelle caisse ?</h3><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1">Choisis où faire l'opération</p></div><button onClick={() => { setActiveModal(null); setChooserExpand(null); }} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
+      {/* SÉLECTEUR D'OPÉRATION — propose TOUTES les fonctionnalités disponibles pour le rôle
+          connecté. Un assistant ne voit que Coffre + Banque (ce qu'il a le droit de faire) ;
+          l'admin voit en plus Devises, Archive et Crédit. Chaque entrée affiche son solde en
+          direct pour éviter de se tromper de caisse, et demande le sens (Entrée/Sortie) avant
+          d'ouvrir le formulaire. */}
+      {activeModal === 'choose_account' && (() => {
+        const isAdmin = currentUser.role === 'admin';
+        const closeChooser = () => { setActiveModal(null); setChooserExpand(null); };
+        return (
+        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={closeChooser}>
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[40px] p-6 sm:p-8 flex flex-col gap-4 animate-slide-up sm:animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4 px-1 sticky top-0 bg-[#080808] z-10 -mt-1 pt-1">
+              <div><h3 className="font-black uppercase tracking-[0.2em] text-sm text-white">Nouvelle opération</h3><p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1">{isAdmin ? "Choisis la caisse ou l'action" : 'Tes caisses autorisées'}</p></div>
+              <button onClick={closeChooser} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800 shrink-0"><X className="h-5 w-5" /></button>
+            </div>
 
-            {/* COFFRE FORT ADMINISTRATION — expand to choose direction */}
+            <p className="text-[9px] font-black text-neutral-600 uppercase tracking-[0.2em] px-1">Caisses en dinars</p>
+
+            {/* COFFRE FORT ADMINISTRATION — tous les rôles */}
             <div className="rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 overflow-hidden transition">
-              <button onClick={() => setChooserExpand(chooserExpand === 'treasury' ? null : 'treasury')} className="w-full text-left p-5 hover:border-blue-500/50 active:scale-[0.98] transition flex items-center gap-4">
+              <button onClick={() => setChooserExpand(chooserExpand === 'treasury' ? null : 'treasury')} className="w-full text-left p-5 active:scale-[0.98] transition flex items-center gap-4">
                 <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Vault className="h-5 w-5" /></div>
-                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Coffre Fort Administration</p><p className="text-[10px] font-black text-blue-300/80 uppercase tracking-widest mt-1">Coffre en dinars</p></div>
-                <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'treasury' ? 'rotate-90' : ''}`} />
+                <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight truncate">Coffre Fort Administration</p><p className="text-[11px] font-black text-blue-300 tracking-tight mt-0.5">{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p></div>
+                <ChevronRight className={`h-5 w-5 text-neutral-600 shrink-0 transition-transform ${chooserExpand === 'treasury' ? 'rotate-90' : ''}`} />
               </button>
               {chooserExpand === 'treasury' && (
                 <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
@@ -2163,30 +2190,68 @@ export default function MoneyHubApp({
               )}
             </div>
 
-            {/* POSITION GLOBALE USD — direction already inside its modal */}
-            <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); navigateTo('currencies'); setActiveModal('add_tx'); setChooserExpand(null); }} className="text-left p-5 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center gap-4">
-              <div className="h-11 w-11 rounded-2xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-5 w-5" /></div>
-              <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Position Globale USD</p><p className="text-[10px] font-black text-emerald-300/80 uppercase tracking-widest mt-1">Encaisser / décaisser un partenaire</p></div>
-              <ChevronRight className="h-5 w-5 text-neutral-600 ml-auto shrink-0" />
-            </button>
+            {/* BANQUE — une entrée par compte, tous les rôles. Couleur propre à chaque compte. */}
+            {bankAccounts.map((a: any) => { const p = bankPalette(a.id); const key = `bank:${a.id}`; return (
+              <div key={a.id} className={`rounded-[28px] border ${p.borderSoft} bg-gradient-to-br ${p.grad} to-neutral-950 overflow-hidden transition`}>
+                <button onClick={() => setChooserExpand(chooserExpand === key ? null : key)} className="w-full text-left p-5 active:scale-[0.98] transition flex items-center gap-4">
+                  <div className={`h-11 w-11 rounded-2xl ${p.bgSoft} ${p.text} flex items-center justify-center shrink-0`}><Landmark className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight truncate flex items-center gap-1.5">{isBiatAccount(a.name) && <img src={BIAT_LOGO_SRC} alt="BIAT" className="h-[1em] w-auto rounded-sm shrink-0 bg-white/95 p-px" />}<span className="truncate">{a.name}</span></p><p className={`text-[11px] font-black ${p.text} tracking-tight mt-0.5`}>{formatRawCurrency(a.balance || 0, a.currencyCode)}</p></div>
+                  <ChevronRight className={`h-5 w-5 text-neutral-600 shrink-0 transition-transform ${chooserExpand === key ? 'rotate-90' : ''}`} />
+                </button>
+                {chooserExpand === key && (
+                  <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
+                    <button onClick={() => { setSelectedBankId(a.id); setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); navigateTo('banque'); setActiveModal('add_bank'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-emerald-500 text-black font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 rotate-180 stroke-[3]" /> Entrée</button>
+                    <button onClick={() => { setSelectedBankId(a.id); setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setBankBatchItems([{ amount: '', note: '' }]); navigateTo('banque'); setActiveModal('add_bank'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-rose-500 text-white font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Sortie</button>
+                  </div>
+                )}
+              </div>
+            ); })}
 
-            {/* CAISSE ARCHIVE — expand to choose direction */}
-            <div className="rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 overflow-hidden transition">
-              <button onClick={() => setChooserExpand(chooserExpand === 'archive' ? null : 'archive')} className="w-full text-left p-5 hover:border-amber-500/50 active:scale-[0.98] transition flex items-center gap-4">
-                <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
-                <div className="min-w-0"><p className="text-sm font-black text-white uppercase tracking-tight">Caisse Archive</p><p className="text-[10px] font-black text-amber-300/80 uppercase tracking-widest mt-1">Coffre archive en dinars</p></div>
-                <ChevronRight className={`h-5 w-5 text-neutral-600 ml-auto shrink-0 transition-transform ${chooserExpand === 'archive' ? 'rotate-90' : ''}`} />
-              </button>
-              {chooserExpand === 'archive' && (
-                <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
-                  <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-emerald-500 text-black font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 rotate-180 stroke-[3]" /> Encaisser</button>
-                  <button onClick={() => { setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-rose-500 text-white font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Décaissement</button>
-                </div>
-              )}
-            </div>
+            {/* CAISSE ARCHIVE — admin uniquement */}
+            {isAdmin && (
+              <div className="rounded-[28px] border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 overflow-hidden transition">
+                <button onClick={() => setChooserExpand(chooserExpand === 'archive' ? null : 'archive')} className="w-full text-left p-5 active:scale-[0.98] transition flex items-center gap-4">
+                  <div className="h-11 w-11 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight truncate">Caisse Archive</p><p className="text-[11px] font-black text-amber-300 tracking-tight mt-0.5">{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</p></div>
+                  <ChevronRight className={`h-5 w-5 text-neutral-600 shrink-0 transition-transform ${chooserExpand === 'archive' ? 'rotate-90' : ''}`} />
+                </button>
+                {chooserExpand === 'archive' && (
+                  <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
+                    <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-emerald-500 text-black font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 rotate-180 stroke-[3]" /> Encaisser</button>
+                    <button onClick={() => { setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); navigateTo('archive'); setActiveModal('add_archive'); setChooserExpand(null); }} className="py-4 rounded-2xl bg-rose-500 text-white font-black uppercase text-[11px] tracking-widest flex flex-col items-center gap-1 active:scale-95 transition"><ArrowUpRight className="h-4 w-4 stroke-[3]" /> Décaissement</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Actions qui ne sont PAS des mouvements de caisse — admin uniquement */}
+            {isAdmin && (
+              <>
+                <p className="text-[9px] font-black text-neutral-600 uppercase tracking-[0.2em] px-1 mt-1">Autres opérations</p>
+
+                {/* DEVISES — le sens est demandé dans le formulaire lui-même */}
+                <button onClick={() => { setTransactionForm({ contactId: '', amount: '', currencyCode: 'USD', type: 'HELD', category: 'Virement', note: '', isPostponed: false, dueDate: '', reminderEmail: '', plannedType: 'RECEIVABLE' }); navigateTo('currencies'); setActiveModal('add_tx'); setChooserExpand(null); }} className="text-left p-5 rounded-[28px] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center gap-4">
+                  <div className="h-11 w-11 rounded-2xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight">Devises · Partenaire</p><p className="text-[10px] font-black text-emerald-300/80 uppercase tracking-widest mt-1">Encaisser / décaisser un partenaire</p></div>
+                  <ChevronRight className="h-5 w-5 text-neutral-600 shrink-0" />
+                </button>
+
+                {/* CRÉDIT — une dette, pas un mouvement de caisse : c'est dit explicitement */}
+                <button onClick={() => { setCreditForm({ amount: '', beneficiary: '', note: '' }); setCreditError(''); navigateTo('credit'); setActiveModal('add_credit'); setChooserExpand(null); }} className="text-left p-5 rounded-[28px] border border-rose-500/25 bg-gradient-to-br from-rose-500/10 to-neutral-950 hover:border-rose-500/50 active:scale-[0.98] transition flex items-center gap-4">
+                  <div className="h-11 w-11 rounded-2xl bg-rose-500/15 text-rose-300 flex items-center justify-center shrink-0"><Receipt className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight">Crédit à payer</p><p className="text-[10px] font-black text-rose-300/80 uppercase tracking-widest mt-1">Dette sans échéance · hors totaux</p></div>
+                  <ChevronRight className="h-5 w-5 text-neutral-600 shrink-0" />
+                </button>
+              </>
+            )}
+
+            {!isAdmin && bankAccounts.length === 0 && (
+              <p className="text-[11px] font-bold text-neutral-500 text-center py-2">Seul le Coffre est disponible pour ton compte.</p>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
       {noteModal.open && (
         <div className="fixed inset-0 z-[170] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setNoteModal({ open: false })}>
           <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
@@ -2298,7 +2363,7 @@ export default function MoneyHubApp({
           </div>
         </div>
       )}
-      {activeModal === 'add_credit' && (
+      {activeModal === 'add_credit' && currentUser.role === 'admin' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in" onClick={() => { if (!isPending) setActiveModal(null); }}>
           <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border-2 border-amber-500/60 rounded-t-[36px] sm:rounded-[48px] p-7 sm:p-10 flex flex-col gap-6 animate-slide-up sm:animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-300 px-1">
