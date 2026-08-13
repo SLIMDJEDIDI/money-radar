@@ -273,8 +273,9 @@ export default function MoneyHubApp({
   }, [currentUser?.id]);
 
   // CREDIT table provisioning — idempotent CREATE TABLE IF NOT EXISTS, once per browser.
+  // Admin uniquement : l'action exige requireAdmin(), inutile de la déclencher chez un assistant.
   useEffect(() => {
-    if (!currentUser) return;
+    if (currentUser?.role !== 'admin') return;
     if (typeof window !== 'undefined' && localStorage.getItem('hub_credit_table_done') === '1') return;
     (async () => {
       try {

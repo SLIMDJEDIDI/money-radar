@@ -1,4 +1,5 @@
 import { prisma } from '../lib/db';
+import { getSession } from '../lib/auth';
 
 export interface HubMetrics {
   totalAvoirs: number;
@@ -97,13 +98,22 @@ export async function getHubDashboardData(searchQuery: string = '') {
     }
 
     // CREDIT — sommes à payer plus tard (sans échéance). Registre TOTALEMENT INDÉPENDANT :
-    // ses totaux ne sont injectés dans AUCUN autre solde/calcul ci-dessous. Requête défensive
-    // pour que l'app charge normalement si la table n'est pas encore provisionnée.
+    // ses totaux ne sont injectés dans AUCUN autre solde/calcul ci-dessous.
+    //
+    // CONFIDENTIALITÉ : réservé à l'administrateur. Les données ne sont même pas ENVOYÉES
+    // au navigateur d'un assistant (ex. soumaya) — masquer le bouton dans le menu ne suffit
+    // pas, le payload de la page et /api/dashboard-data resteraient lisibles. getSession()
+    // est mis en cache par React : aucun coût de requête supplémentaire ici.
+    // Requête défensive pour que l'app charge normalement si la table n'est pas provisionnée.
+    const session = await getSession();
+    const isAdmin = session?.role === 'admin';
     let credits: any[] = [];
-    try {
-      credits = await prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } });
-    } catch {
-      credits = [];
+    if (isAdmin) {
+      try {
+        credits = await prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } });
+      } catch {
+        credits = [];
+      }
     }
     // Total CREDIT ACTIF = uniquement les entrées non payées. Une entrée marquée PAYÉE
     // quitte ce total mais reste dans l'historique.

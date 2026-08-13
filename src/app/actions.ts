@@ -816,10 +816,13 @@ export async function deletePartnerNote(id: string) {
 // 5d. CREDIT — sommes à payer plus tard, sans date d'échéance
 // ----------------------------------------------------
 // Registre TOTALEMENT INDÉPENDANT : n'entre dans aucun autre solde, total ou calcul.
+// RÉSERVÉ À L'ADMINISTRATEUR : invisible et inaccessible aux assistants (ex. soumaya).
+// Toutes les actions ci-dessous exigent requireAdmin() — masquer la section côté client ne
+// protège rien, un assistant pourrait sinon appeler ces server actions directement.
 // Provisioning non destructif : crée la table uniquement si elle est absente.
 export async function ensureCreditTable() {
   try {
-    await requireSession();
+    await requireAdmin();
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "HubCredit" (
         "id" TEXT NOT NULL,
@@ -847,7 +850,7 @@ export async function ensureCreditTable() {
 
 export async function createCredit(formData: FormData) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const amount = parseFloat(formData.get('amount') as string);
     const beneficiary = (formData.get('beneficiary') as string || '').trim();
     const note = (formData.get('note') as string || '').trim();
@@ -871,14 +874,14 @@ export async function createCredit(formData: FormData) {
     revalidatePath('/');
     return { success: true };
   } catch (error: any) {
-    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
     return { success: false, error: 'Erreur lors de l\'ajout du crédit' };
   }
 }
 
 export async function updateCredit(formData: FormData) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     const id = (formData.get('id') as string || '').trim();
     const amount = parseFloat(formData.get('amount') as string);
     const beneficiary = (formData.get('beneficiary') as string || '').trim();
@@ -902,7 +905,7 @@ export async function updateCredit(formData: FormData) {
     revalidatePath('/');
     return { success: true };
   } catch (error: any) {
-    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
     return { success: false, error: 'Erreur lors de la modification' };
   }
 }
@@ -911,7 +914,7 @@ export async function updateCredit(formData: FormData) {
 // L'entrée reste TOUJOURS dans l'historique — rien n'est supprimé.
 export async function setCreditPaid(id: string, isPaid: boolean) {
   try {
-    const session = await requireSession();
+    const session = await requireAdmin();
     if (!id) return { success: false, error: 'Crédit manquant' };
     await prisma.$transaction(async (tx) => {
       const credit = await tx.hubCredit.update({
@@ -929,7 +932,7 @@ export async function setCreditPaid(id: string, isPaid: boolean) {
     revalidatePath('/');
     return { success: true };
   } catch (error: any) {
-    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
     return { success: false, error: 'Erreur lors du marquage' };
   }
 }
