@@ -8,10 +8,9 @@ export const metadata: Metadata = {
   description: "Private financial command center.",
   applicationName: "Money Hub",
   manifest: "/manifest.webmanifest",
-  icons: {
-    icon: [{ url: "/icon?size=192", type: "image/png", sizes: "192x192" }],
-    apple: [{ url: "/apple-icon?size=180", type: "image/png", sizes: "180x180" }],
-  },
+  // Pas de bloc `icons` ici : un bloc explicite ÉCRASE les fichiers icon.jpg /
+  // apple-icon.jpg de src/app. Next génère les balises <link> tout seul à partir
+  // de ces fichiers, avec un hash de version qui casse le cache du navigateur.
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
