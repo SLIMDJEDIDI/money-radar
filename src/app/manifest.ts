@@ -14,11 +14,13 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#000000',
     orientation: 'portrait-primary',
     categories: ['finance', 'business', 'productivity'],
+    // Icône = la pièce dorée (public/coin-icon.jpg, source 1920x1920, redimensionnée par le
+    // navigateur). Les anciennes entrées pointaient sur les routes générées /icon?size=…
+    // qui n'existent plus depuis le passage à un fichier image statique.
     icons: [
-      { src: '/icon?size=192', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon?size=512', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon?size=512', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-      { src: '/apple-icon?size=180', sizes: '180x180', type: 'image/png', purpose: 'any' },
+      { src: '/coin-icon.jpg', sizes: '192x192', type: 'image/jpeg', purpose: 'any' },
+      { src: '/coin-icon.jpg', sizes: '512x512', type: 'image/jpeg', purpose: 'any' },
+      { src: '/coin-icon.jpg', sizes: '512x512', type: 'image/jpeg', purpose: 'maskable' },
     ],
   };
 }
