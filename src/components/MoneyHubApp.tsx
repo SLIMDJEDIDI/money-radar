@@ -5,8 +5,10 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Vault, Receipt, Undo2
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Receipt, Undo2
 } from 'lucide-react';
+// Logo Coffre Fort Administration (remplace l'icône Vault de lucide).
+import CoffreIcon from './CoffreIcon';
 import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
@@ -1269,7 +1271,7 @@ export default function MoneyHubApp({
               )}
 
               <div className="grid sm:grid-cols-3 gap-2.5">
-                <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Vault className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Coffre Fort Administration</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
+                <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><CoffreIcon className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Coffre Fort Administration</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
                 <button onClick={() => navigateTo('currencies')} className="text-left p-4 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.985] transition shadow-lg shadow-emerald-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Position Globale USD</p></div><span className="text-[7px] font-black text-emerald-300 uppercase tracking-widest shrink-0">Live·USD</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-300">{formatUSD(metrics.totalAvoirs || 0)} encaissé</span><span className="text-neutral-500">{activePartners} actif{activePartners > 1 ? 's' : ''}</span></div></button>
                 <button onClick={() => navigateTo('archive')} className="text-left p-4 rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 to-neutral-950 hover:border-amber-500/50 active:scale-[0.985] transition shadow-lg shadow-amber-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0"><Archive className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Caisse Archive</p></div><span className="text-[7px] font-black text-amber-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${(metrics.archiveBalance || 0) >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.archiveTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.archiveTodayOut || 0, 'TND')}</span></div></button>
                 {bankAccounts.map((a: any) => (
@@ -1310,7 +1312,7 @@ export default function MoneyHubApp({
                       </div>
                       {/* Informal — coffre + archive */}
                       <div className="p-4 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/12 to-neutral-950">
-                        <div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0"><Vault className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Argent non formel</p><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Coffre + Archive</p></div></div>
+                        <div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0"><CoffreIcon className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Argent non formel</p><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Coffre + Archive</p></div></div>
                         <p className={`text-2xl font-black tracking-tighter mt-2.5 ${informalTndTotal >= 0 ? 'text-amber-300' : 'text-rose-400'}`}>{formatRawCurrency(informalTndTotal, 'TND')}</p>
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-1"><span>Coffre {formatRawCurrency(metrics.tndBalance || 0, 'TND')}</span><span>Archive {formatRawCurrency(metrics.archiveBalance || 0, 'TND')}</span></div>
                       </div>
@@ -1453,7 +1455,7 @@ export default function MoneyHubApp({
 
               {/* HERO — balance + today + forecast */}
               <div className="bg-gradient-to-br from-[#0f172a] to-black border border-blue-500/20 p-8 rounded-[48px] shadow-2xl relative overflow-hidden ring-1 ring-white/5">
-                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><Vault className="h-48 w-48" /></div>
+                <div className="absolute -top-10 -right-10 opacity-[0.05] pointer-events-none text-blue-400"><CoffreIcon className="h-48 w-48" /></div>
                 <p className="text-[11px] font-black text-blue-300 uppercase tracking-[0.3em] mb-2">Coffre TND Disponible</p>
                 <h2 className="text-6xl font-black tracking-tighter text-white break-words leading-none">{formatRawCurrency(metrics.tndBalance, 'TND')}</h2>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-7 pt-6 border-t border-white/5">
@@ -1577,7 +1579,7 @@ export default function MoneyHubApp({
                   <h4 className="text-[11px] font-black text-neutral-300 uppercase tracking-[0.25em] flex items-center gap-2"><Clock className="h-4 w-4" /> Journal de Caisse</h4>
                   <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">{filtered.length} / {optimisticTndMovements.length}</span>
                 </div>
-                {filtered.length === 0 && <EmptyState icon={<Vault className="h-10 w-10" />} title={optimisticTndMovements.length === 0 ? 'Coffre-fort vide' : 'Aucun résultat'} subtitle={optimisticTndMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
+                {filtered.length === 0 && <EmptyState icon={<CoffreIcon className="h-10 w-10" />} title={optimisticTndMovements.length === 0 ? 'Coffre-fort vide' : 'Aucun résultat'} subtitle={optimisticTndMovements.length === 0 ? 'Enregistrez votre premier mouvement.' : 'Essayez de modifier les filtres.'} />}
                 <div className="flex flex-col gap-3">
                   {filtered.map((m: any) => {
                     const running = balanceById[m.id] ?? 0;
@@ -2095,7 +2097,7 @@ export default function MoneyHubApp({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
-            { id: 'treasury', label: 'Coffre', icon: <Vault className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
+            { id: 'treasury', label: 'Coffre', icon: <CoffreIcon className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'banque', label: 'Banque', icon: <Landmark className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: false },
             { id: 'credit', label: 'Crédit', icon: <Receipt className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
             { id: 'archive', label: 'Archive', icon: <Archive className="h-4 w-4 sm:h-5 sm:w-5" />, adminOnly: true },
@@ -2185,7 +2187,7 @@ export default function MoneyHubApp({
             {/* COFFRE FORT ADMINISTRATION — tous les rôles */}
             <div className="rounded-[28px] border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 overflow-hidden transition">
               <button onClick={() => setChooserExpand(chooserExpand === 'treasury' ? null : 'treasury')} className="w-full text-left p-5 active:scale-[0.98] transition flex items-center gap-4">
-                <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><Vault className="h-5 w-5" /></div>
+                <div className="h-11 w-11 rounded-2xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><CoffreIcon className="h-5 w-5" /></div>
                 <div className="min-w-0 flex-1"><p className="text-sm font-black text-white uppercase tracking-tight truncate">Coffre Fort Administration</p><p className="text-[11px] font-black text-blue-300 tracking-tight mt-0.5">{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p></div>
                 <ChevronRight className={`h-5 w-5 text-neutral-600 shrink-0 transition-transform ${chooserExpand === 'treasury' ? 'rotate-90' : ''}`} />
               </button>
@@ -2590,7 +2592,7 @@ export default function MoneyHubApp({
               {/* TND scheduled movements — admin only */}
               {currentUser.role === 'admin' && (tndDueSoon.length > 0 || tndOverdue.length > 0) && (
                 <div className="flex flex-col gap-3 mb-2">
-                  <div className="flex items-center gap-2 px-1"><Vault className="h-4 w-4 text-blue-400" /><h4 className="text-[10px] font-black text-blue-300 uppercase tracking-[0.25em]">Coffre TND</h4></div>
+                  <div className="flex items-center gap-2 px-1"><CoffreIcon className="h-4 w-4 text-blue-400" /><h4 className="text-[10px] font-black text-blue-300 uppercase tracking-[0.25em]">Coffre TND</h4></div>
                   {[...tndOverdue, ...tndDueSoon.filter(m => !tndOverdue.some(o => o.id === m.id))].map((m: any) => {
                     const isOverdue = m.scheduledFor && new Date(m.scheduledFor).getTime() < Date.now();
                     return (
@@ -2606,7 +2608,7 @@ export default function MoneyHubApp({
                         </div>
                         <div className="flex gap-2.5">
                           <button onClick={() => { setShowNotifications(false); handleSettleTndMovement(m.id); }} className="flex-1 py-3.5 bg-emerald-500 text-black font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest shadow-lg shadow-emerald-500/20"><CheckCircle className="h-4 w-4" /> Confirmer</button>
-                          <button onClick={() => { setShowNotifications(false); setActiveSection('treasury'); }} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><Vault className="h-4 w-4" /> Voir</button>
+                          <button onClick={() => { setShowNotifications(false); setActiveSection('treasury'); }} className="flex-1 py-3.5 bg-neutral-800 border border-neutral-700 text-blue-400 font-black uppercase text-[10px] rounded-2xl flex items-center justify-center gap-2 active:scale-[0.97] transition tracking-widest"><CoffreIcon className="h-4 w-4" /> Voir</button>
                         </div>
                       </div>
                     );
