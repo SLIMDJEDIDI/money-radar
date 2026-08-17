@@ -1078,6 +1078,13 @@ export async function ensureBankTables() {
     `);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_accountId_idx" ON "HubBankMovement" ("accountId");`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_isSettled_idx" ON "HubBankMovement" ("isSettled");`);
+    // Ces deux index sont déclarés dans schema.prisma mais n'avaient jamais été créés :
+    // la table est provisionnée par CREATE TABLE brut, pas par une migration Prisma, donc
+    // seuls les index écrits ici existent réellement. `createdAt` est justement la colonne
+    // de tri de chaque chargement (orderBy createdAt desc), et `scheduledFor` filtre les
+    // mouvements planifiés. Ajout idempotent, sans effet sur les données.
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_createdAt_idx" ON "HubBankMovement" ("createdAt");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "HubBankMovement_scheduledFor_idx" ON "HubBankMovement" ("scheduledFor");`);
     return { success: true };
   } catch (error: any) {
     if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action non autorisée', code: error.message };

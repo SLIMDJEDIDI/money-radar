@@ -264,11 +264,14 @@ export default function MoneyHubApp({
   // Idempotent CREATE TABLE IF NOT EXISTS, guarded by a localStorage flag (runs once per browser).
   useEffect(() => {
     if (!currentUser) return;
-    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_tables_done') === '1') return;
+    // Clé bumpée en v2 : l'ancien drapeau empêchait ensureBankTables() de tourner à
+    // nouveau, donc les deux index manquants n'auraient jamais été créés sur un
+    // navigateur déjà marqué. Un passage unique de plus, puis plus rien.
+    if (typeof window !== 'undefined' && localStorage.getItem('hub_bank_tables_v2_done') === '1') return;
     (async () => {
       try {
         const res: any = await ensureBankTables();
-        if (res?.success) { localStorage.setItem('hub_bank_tables_done', '1'); await refreshHubState(); }
+        if (res?.success) { localStorage.setItem('hub_bank_tables_v2_done', '1'); await refreshHubState(); }
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

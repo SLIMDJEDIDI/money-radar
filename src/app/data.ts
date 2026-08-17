@@ -34,27 +34,34 @@ export async function getHubDashboardData(searchQuery: string = '') {
     // Idempotent, non-destructive, and now runs only once per server instance (see above).
     await ensurePlannedTypeColumn();
 
-    // Ensure core currencies exist
     const coreCodes = ['USD', 'RMB', 'EURO', 'TND'];
-    const existingCurrencies = await prisma.hubCurrency.findMany({
-      where: { code: { in: coreCodes } }
-    });
-    
-    if (existingCurrencies.length < coreCodes.length) {
-      const existingCodes = existingCurrencies.map(c => c.code);
-      const missing = coreCodes.filter(c => !existingCodes.includes(c));
-      
-      for (const code of missing) {
-        let symbol = '$', rate = 1.0;
-        if (code === 'RMB') { symbol = '¥'; rate = 0.14; }
-        else if (code === 'EURO') { symbol = '€'; rate = 1.08; }
-        else if (code === 'TND') { symbol = 'DT'; rate = 0.32; }
-        await prisma.hubCurrency.create({ data: { code, symbol, rateToUsd: rate } });
-      }
-    }
 
-    // Parallel fetch for speed
-    const [currencies, categories, contacts, transactions, reminders, auditTrails, users, tndMovements] = await Promise.all([
+    // ------------------------------------------------------------------
+    // UN SEUL ALLER-RETOUR PARALLÈLE.
+    // Avant : les 8 requêtes ci-dessous étaient bien en Promise.all, mais ARCHIVE,
+    // notes partenaires, BANQUE (2 requêtes) et CRÉDIT suivaient en `await`
+    // séquentiels — soit 5 allers-retours Supabase supplémentaires, l'un après
+    // l'autre, sur CHAQUE chargement de page et CHAQUE rafraîchissement.
+    // Tout part maintenant en même temps. Les tables additives gardent leur
+    // tolérance aux pannes via .catch(() => []) au lieu d'un try/await.
+    //
+    // CRÉDIT — réservé à l'administrateur : les données ne sont même pas ENVOYÉES
+    // au navigateur d'un assistant (masquer le bouton ne suffirait pas, le payload
+    // de la page et /api/dashboard-data resteraient lisibles). getSession() est mis
+    // en cache par React et page.tsx l'a déjà appelé : résolution immédiate, donc la
+    // requête crédits démarre elle aussi tout de suite.
+    // ------------------------------------------------------------------
+    const sessionPromise = getSession();
+    const creditsPromise: Promise<any[]> = sessionPromise.then((s) =>
+      s?.role === 'admin'
+        ? prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[])
+        : ([] as any[])
+    );
+
+    const [
+      currenciesRaw, categories, contacts, transactions, reminders, auditTrails, users, tndMovements,
+      archiveMovements, partnerNotes, bankAccounts, bankMovements, session, credits,
+    ] = await Promise.all([
       prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } }),
       prisma.hubCategory.findMany({ orderBy: { name: 'asc' } }),
       prisma.hubContact.findMany(), // Manual sorting below
@@ -65,55 +72,33 @@ export async function getHubDashboardData(searchQuery: string = '') {
         orderBy: { username: 'asc' },
         select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true },
       }),
-      prisma.hubTndMovement.findMany({ orderBy: { createdAt: 'desc' } })
+      prisma.hubTndMovement.findMany({ orderBy: { createdAt: 'desc' } }),
+      // Tables additives : tolérantes si elles ne sont pas encore provisionnées.
+      prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
+      prisma.hubPartnerNote.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
+      prisma.hubBankAccount.findMany({ orderBy: { sortOrder: 'asc' } }).catch(() => [] as any[]),
+      prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
+      sessionPromise,
+      creditsPromise,
     ]);
 
-    // ARCHIVE ledger — independent cash box. Queried defensively so the app still
-    // loads (empty archive) if the table has not been provisioned yet.
-    let archiveMovements: any[] = [];
-    try {
-      archiveMovements = await prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } });
-    } catch {
-      archiveMovements = [];
-    }
-
-    // Partner notes — informal money owed, NEVER counted in any total. Defensive query.
-    let partnerNotes: any[] = [];
-    try {
-      partnerNotes = await prisma.hubPartnerNote.findMany({ orderBy: { createdAt: 'desc' } });
-    } catch {
-      partnerNotes = [];
-    }
-
-    // BANQUE — named bank accounts + their movements. Defensive so the app loads if the
-    // tables aren't provisioned yet. Independent from every other total.
-    let bankAccounts: any[] = [];
-    let bankMovements: any[] = [];
-    try {
-      bankAccounts = await prisma.hubBankAccount.findMany({ orderBy: { sortOrder: 'asc' } });
-      bankMovements = await prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } });
-    } catch {
-      bankAccounts = [];
-      bankMovements = [];
-    }
-
-    // CREDIT — sommes à payer plus tard (sans échéance). Registre TOTALEMENT INDÉPENDANT :
-    // ses totaux ne sont injectés dans AUCUN autre solde/calcul ci-dessous.
-    //
-    // CONFIDENTIALITÉ : réservé à l'administrateur. Les données ne sont même pas ENVOYÉES
-    // au navigateur d'un assistant (ex. soumaya) — masquer le bouton dans le menu ne suffit
-    // pas, le payload de la page et /api/dashboard-data resteraient lisibles. getSession()
-    // est mis en cache par React : aucun coût de requête supplémentaire ici.
-    // Requête défensive pour que l'app charge normalement si la table n'est pas provisionnée.
-    const session = await getSession();
     const isAdmin = session?.role === 'admin';
-    let credits: any[] = [];
-    if (isAdmin) {
-      try {
-        credits = await prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } });
-      } catch {
-        credits = [];
+
+    // Amorçage des devises de base. Avant, un findMany dédié tournait AVANT le batch
+    // pour vérifier leur présence — la table devises était donc lue DEUX fois à chaque
+    // chargement, dont une en série. On réutilise maintenant la lecture du batch, et on
+    // ne repasse en base que dans le cas rare où il manque vraiment une devise.
+    let currencies = currenciesRaw;
+    const missingCodes = coreCodes.filter((c) => !currencies.some((x: any) => x.code === c));
+    if (missingCodes.length > 0) {
+      for (const code of missingCodes) {
+        let symbol = '$', rate = 1.0;
+        if (code === 'RMB') { symbol = '¥'; rate = 0.14; }
+        else if (code === 'EURO') { symbol = '€'; rate = 1.08; }
+        else if (code === 'TND') { symbol = 'DT'; rate = 0.32; }
+        await prisma.hubCurrency.create({ data: { code, symbol, rateToUsd: rate } });
       }
+      currencies = await prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } });
     }
     // Total CREDIT ACTIF = uniquement les entrées non payées. Une entrée marquée PAYÉE
     // quitte ce total mais reste dans l'historique.
