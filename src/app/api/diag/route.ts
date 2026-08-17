@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { getPanicLockState, getSession } from '../../../lib/auth';
+import { prisma } from '../../../lib/db';
 
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
 // Minimal read-only diagnostic: just confirms DB reachability + counts.
 // No user list, no RBAC probing (those were used ad-hoc, now removed).
-const prisma: PrismaClient = (globalThis as any).__diagPrisma ||
-  ((globalThis as any).__diagPrisma = new PrismaClient({
-    datasourceUrl: process.env.DATABASE_URL,
-  }));
+//
+// Utilise le client Prisma PARTAGÉ de lib/db. Cette route créait auparavant son
+// propre PrismaClient à partir de process.env.DATABASE_URL brut, ce qui :
+//   1. contournait buildDatabaseUrl() — donc le garde-fou qui REFUSE de se
+//      connecter à la base carpet ne s'appliquait pas ici ;
+//   2. ouvrait un second pool de connexions sur un runtime serverless.
 
 async function safe<T>(label: string, fn: () => Promise<T>): Promise<{ label: string; ok: boolean; count?: number; error?: string }> {
   try {

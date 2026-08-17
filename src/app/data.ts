@@ -45,18 +45,22 @@ export async function getHubDashboardData(searchQuery: string = '') {
     // Tout part maintenant en même temps. Les tables additives gardent leur
     // tolérance aux pannes via .catch(() => []) au lieu d'un try/await.
     //
-    // CRÉDIT — réservé à l'administrateur : les données ne sont même pas ENVOYÉES
-    // au navigateur d'un assistant (masquer le bouton ne suffirait pas, le payload
-    // de la page et /api/dashboard-data resteraient lisibles). getSession() est mis
-    // en cache par React et page.tsx l'a déjà appelé : résolution immédiate, donc la
-    // requête crédits démarre elle aussi tout de suite.
+    // CRÉDIT et ARCHIVE — réservés à l'administrateur : les données ne sont même pas
+    // ENVOYÉES au navigateur d'un assistant. Masquer la section dans le menu ne suffit
+    // pas : le payload de la page et /api/dashboard-data resteraient lisibles dans les
+    // outils de développement. Le contrôle d'accès doit vivre ici, dans la couche de
+    // données, pas seulement dans l'interface.
+    // getSession() est mis en cache par React et page.tsx l'a déjà appelé : résolution
+    // immédiate, donc ces requêtes démarrent elles aussi tout de suite.
     // ------------------------------------------------------------------
     const sessionPromise = getSession();
-    const creditsPromise: Promise<any[]> = sessionPromise.then((s) =>
-      s?.role === 'admin'
-        ? prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[])
-        : ([] as any[])
-    );
+    const adminOnly = <T,>(query: () => Promise<T[]>): Promise<T[]> =>
+      sessionPromise.then((s) =>
+        s?.role === 'admin' ? query().catch(() => [] as T[]) : ([] as T[])
+      );
+
+    const creditsPromise = adminOnly(() => prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } }));
+    const archivePromise = adminOnly(() => prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } }));
 
     const [
       currenciesRaw, categories, contacts, transactions, reminders, auditTrails, users, tndMovements,
@@ -74,7 +78,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       }),
       prisma.hubTndMovement.findMany({ orderBy: { createdAt: 'desc' } }),
       // Tables additives : tolérantes si elles ne sont pas encore provisionnées.
-      prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
+      archivePromise,
       prisma.hubPartnerNote.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
       prisma.hubBankAccount.findMany({ orderBy: { sortOrder: 'asc' } }).catch(() => [] as any[]),
       prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),

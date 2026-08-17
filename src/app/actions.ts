@@ -1634,8 +1634,15 @@ export async function createReminder(formData: FormData) {
 }
 
 export async function toggleReminderCompleted(id: string, isCompleted: boolean) {
-    await requireAdmin();
-  await prisma.hubReminder.update({ where: { id }, data: { isCompleted } });
+  const session = await requireAdmin();
+  await prisma.$transaction(async (tx) => {
+    const r = await tx.hubReminder.update({ where: { id }, data: { isCompleted } });
+    await logAudit(tx, {
+      entityType: 'REMINDER', entityId: id, action: isCompleted ? 'REMINDER_COMPLETE' : 'REMINDER_REOPEN',
+      details: `Rappel ${isCompleted ? 'marqué terminé' : 'rouvert'} : ${r.amount} ${r.currencyCode}`,
+      modifiedBy: session.username,
+    });
+  });
   revalidatePath('/');
   return { success: true };
 }
@@ -1723,22 +1730,54 @@ export async function postponeReminder(id: string, newDate: string) {
 }
 
 export async function deleteReminder(id: string) {
-  await requireAdmin();
-  await prisma.hubReminder.delete({ where: { id } });
+  const session = await requireAdmin();
+  await prisma.$transaction(async (tx) => {
+    const r = await tx.hubReminder.findUnique({ where: { id }, include: { contact: true } });
+    await tx.hubReminder.delete({ where: { id } });
+    await logAudit(tx, {
+      entityType: 'REMINDER', entityId: id, action: 'DELETE',
+      details: `Rappel supprimé : ${r?.amount ?? ''} ${r?.currencyCode ?? ''} — ${r?.contact?.name ?? 'partenaire inconnu'}`,
+      oldValue: r?.note ?? undefined,
+      modifiedBy: session.username,
+    });
+  });
   revalidatePath('/');
   return { success: true };
 }
 
+// Un taux de change convertit TOUTES les positions partenaires en USD : le modifier
+// déplace la Position Globale du dashboard. C'est l'action la plus lourde de
+// conséquences qui ne laissait AUCUNE trace. L'ancienne valeur est enregistrée pour
+// pouvoir expliquer après coup un total qui a bougé.
 export async function updateCurrencyRate(id: string, rate: string) {
-  await requireAdmin();
-  await prisma.hubCurrency.update({ where: { id }, data: { rateToUsd: parseFloat(rate) } });
+  const session = await requireAdmin();
+  const parsed = parseFloat(rate);
+  if (!isFinite(parsed) || parsed <= 0) return { success: false, error: 'Taux invalide' };
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.hubCurrency.findUnique({ where: { id } });
+    const updated = await tx.hubCurrency.update({ where: { id }, data: { rateToUsd: parsed } });
+    await logAudit(tx, {
+      entityType: 'SETTING', entityId: id, action: 'CURRENCY_RATE_UPDATE',
+      details: `Taux ${updated.code} : ${before?.rateToUsd ?? '?'} → ${parsed}`,
+      oldValue: String(before?.rateToUsd ?? ''),
+      newValue: String(parsed),
+      modifiedBy: session.username,
+    });
+  });
   revalidatePath('/');
   return { success: true };
 }
 
 export async function toggleCurrencyActive(id: string, isActive: boolean) {
-  await requireAdmin();
-  await prisma.hubCurrency.update({ where: { id }, data: { isActive } });
+  const session = await requireAdmin();
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.hubCurrency.update({ where: { id }, data: { isActive } });
+    await logAudit(tx, {
+      entityType: 'SETTING', entityId: id, action: isActive ? 'CURRENCY_ENABLE' : 'CURRENCY_DISABLE',
+      details: `Devise ${updated.code} ${isActive ? 'activée' : 'désactivée'}`,
+      modifiedBy: session.username,
+    });
+  });
   revalidatePath('/');
   return { success: true };
 }
