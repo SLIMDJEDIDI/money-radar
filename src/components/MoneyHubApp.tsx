@@ -1302,13 +1302,24 @@ export default function MoneyHubApp({
                 </div>
               )}
 
-              {/* ALERTE D'OUVERTURE — paiements fournisseurs en devises.
-                  L'admin arrive sur le Dashboard ; la section CHINA TRACK, elle, vit
-                  dans DEVISES. Sans ce rappel, une échéance fournisseur peut rester
-                  invisible tant qu'on ne va pas volontairement dans DEVISES. Le bloc
-                  dit COMBIEN, QUAND et OÙ, et emmène directement au bon endroit. */}
+              {/* CARTE PAIEMENTS — conçue pour répondre à quatre questions SANS LIRE :
+                  1. « Est-ce qu'il y a des paiements ? »  -> le montant géant, l'élément
+                     le plus gros de la carte.
+                  2. « Pour quand ? »                      -> une tuile avec un compte à
+                     rebours en chiffres (7 J), pas une phrase.
+                  3. « Des marchandises dangereuses ? »    -> une tuile dédiée qui répond
+                     TOUJOURS, oui en rouge ou non en vert. L'absence de bloc ne serait pas
+                     une réponse : on ne saurait pas si c'est « non » ou « pas chargé ».
+                  4. « Combien pour ces marchandises ? »   -> le deuxième plus gros chiffre
+                     de la carte, dans cette même tuile.
+
+                  L'ancienne version empilait cinq phrases, dont un avertissement rose sur
+                  trois lignes et un nom de fournisseur coupé (« SHANDONG JINGPIN E... »).
+                  Ici : un chiffre dominant, deux tuiles scannables, et la couleur porte le
+                  niveau d'urgence. « Où : section Devises » a sauté — le bouton VOIR le dit
+                  déjà, et il emmène directement au bloc. */}
               {chinaTrack && chinaTrack.configured && !chinaTrack.error && ((Array.isArray(chinaTrack.payments) && chinaTrack.payments.length > 0) || (chinaTrack.dangerous?.count ?? 0) > 0) && (() => {
-                const rows: any[] = chinaTrack.payments;
+                const rows: any[] = Array.isArray(chinaTrack.payments) ? chinaTrack.payments : [];
                 const today = new Date(); today.setHours(0, 0, 0, 0);
                 const dueOf = (p: any) => (p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null);
                 const isLate = (p: any) => { const d = dueOf(p); return p.status === 'Late' || (!!d && d < today); };
@@ -1318,44 +1329,84 @@ export default function MoneyHubApp({
                 const next = [...rows.filter((p) => !isLate(p) && dueOf(p))].sort((a, b) => (dueOf(a)!.getTime() - dueOf(b)!.getTime()))[0];
                 const nextDate = next ? dueOf(next) : null;
                 const days = nextDate ? Math.round((nextDate.getTime() - today.getTime()) / 86400000) : null;
+                const shortDate = (d: Date | null) => (d ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null);
+
+                const dg = chinaTrack.dangerous || { count: 0, amountUsd: 0, soonestArrival: null, contracts: [] };
+                const hasDg = (dg.count ?? 0) > 0;
+                // La pire urgence commande la couleur : un conteneur déjà arrivé ne se lit
+                // pas comme un autre qui arrive dans trois semaines.
+                const rank: any = { watch: 0, urgent: 1, critical: 2, overdue: 3 };
+                const worstDg = (dg.contracts || []).reduce((w: string, c: any) => ((rank[c.urgency] ?? 0) > (rank[w] ?? -1) ? c.urgency : w), 'watch');
+                const dgHot = worstDg === 'critical' || worstDg === 'overdue';
+                const dgArrival = dg.soonestArrival ? shortDate(new Date(dg.soonestArrival + 'T00:00:00')) : null;
+
+                // Bordure de la carte = état le plus grave présent.
+                const alarm = lateRows.length > 0 || dgHot;
                 return (
                   <button
                     onClick={() => goToAnchor('currencies', 'china-track')}
-                    className="w-full text-left border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-rose-500/5 rounded-2xl p-4 shadow-lg shadow-amber-950/10 active:scale-[0.99] transition hover:border-amber-500/50"
+                    className={'w-full text-left rounded-[24px] p-4 sm:p-5 shadow-lg active:scale-[0.99] transition ' + (alarm
+                      ? 'border-2 border-rose-500/50 bg-gradient-to-br from-rose-500/15 to-neutral-950 shadow-rose-950/20 hover:border-rose-500/70'
+                      : 'border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-neutral-950 shadow-amber-950/10 hover:border-amber-500/50')}
                   >
+                    {/* En-tête : ce que c'est + le bouton, sur une seule ligne. */}
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="h-9 w-9 shrink-0 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300"><Coins className="h-4 w-4" /></div>
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Paiements fournisseurs en devises</p>
-                          {rows.length > 0 ? (
-                            <>
-                              <p className="text-sm font-black text-white mt-1">{formatUSD(total)} à payer · {rows.length} paiement{rows.length > 1 ? 's' : ''}</p>
-                              <p className="text-[10px] text-neutral-400 font-bold mt-1 truncate">
-                                {lateRows.length > 0
-                                  ? `${formatUSD(sum(lateRows))} en retard — ${lateRows.length} paiement${lateRows.length > 1 ? 's' : ''}`
-                                  : days !== null
-                                    ? `Prochain dans ${days} jour${days > 1 ? 's' : ''} · ${next.supplierName}`
-                                    : 'Dates à fixer'}
-                              </p>
-                            </>
-                          ) : (
-                            <p className="text-sm font-black text-white mt-1">Aucun échéancier saisi</p>
-                          )}
-                          {/* Demande d'argent : s'il y a des marchandises
-                              dangereuses, il faut le dire ICI. Le port ne les
-                              garde pas, donc ce montant n'est pas "a payer un
-                              jour" mais "a payer avant l'arrivee". */}
-                          {chinaTrack.dangerous?.count > 0 && (
-                            <p className="text-[10px] font-black text-rose-300 uppercase tracking-wider mt-1.5 leading-relaxed">
-                              &#9888; {chinaTrack.dangerous.count} contrat{chinaTrack.dangerous.count > 1 ? 's' : ''} de marchandises dangereuses
-                              {chinaTrack.dangerous.amountUsd > 0 ? ` · ${formatUSD(chinaTrack.dangerous.amountUsd)} avant l'arrivee` : ''}
-                            </p>
-                          )}
-                          <p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-1.5">Où : section Devises</p>
-                        </div>
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={'h-8 w-8 shrink-0 rounded-xl flex items-center justify-center ' + (alarm ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300')}><Coins className="h-4 w-4" /></div>
+                        <p className={'text-[9px] font-black uppercase tracking-[0.18em] truncate ' + (alarm ? 'text-rose-300' : 'text-amber-300')}>Paiements fournisseurs</p>
                       </div>
-                      <span className="shrink-0 px-3 py-2 rounded-xl bg-amber-500 text-black text-[9px] font-black uppercase tracking-widest">Voir</span>
+                      <span className={'shrink-0 px-3.5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest ' + (alarm ? 'bg-rose-500 text-white' : 'bg-amber-500 text-black')}>Voir</span>
+                    </div>
+
+                    {/* LE chiffre. Question 1 répondue d'un coup d'œil. */}
+                    <div className="mt-3">
+                      <p className="text-3xl sm:text-4xl font-black tracking-tighter text-white leading-none break-words">{formatUSD(total)}</p>
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mt-1">
+                        {rows.length > 0 ? `${rows.length} paiement${rows.length > 1 ? 's' : ''} à venir` : 'Aucun échéancier saisi'}
+                      </p>
+                    </div>
+
+                    {/* Deux tuiles : QUAND, et MARCHANDISES DANGEREUSES. */}
+                    <div className="grid grid-cols-2 gap-2.5 mt-4">
+                      {/* Q2 — quand ? Un nombre, pas une phrase. */}
+                      {lateRows.length > 0 ? (
+                        <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-rose-300">En retard</p>
+                          <p className="text-xl font-black tracking-tighter text-rose-300 leading-none mt-1.5 break-words">{formatUSD(sum(lateRows))}</p>
+                          <p className="text-[9px] font-bold text-neutral-400 mt-1">{lateRows.length} paiement{lateRows.length > 1 ? 's' : ''} dépassé{lateRows.length > 1 ? 's' : ''}</p>
+                        </div>
+                      ) : days !== null ? (
+                        <div className={'rounded-2xl border p-3 ' + (days <= 7 ? 'border-amber-500/40 bg-amber-500/10' : 'border-blue-500/30 bg-blue-500/10')}>
+                          <p className={'text-[8px] font-black uppercase tracking-[0.2em] ' + (days <= 7 ? 'text-amber-300' : 'text-blue-300')}>Prochain</p>
+                          <p className={'text-xl font-black tracking-tighter leading-none mt-1.5 ' + (days <= 7 ? 'text-amber-300' : 'text-blue-300')}>{days <= 0 ? "Aujourd'hui" : `${days} j`}</p>
+                          <p className="text-[9px] font-bold text-neutral-400 mt-1">{shortDate(nextDate) || ''}</p>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-neutral-800 bg-white/5 p-3">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-neutral-500">Prochain</p>
+                          <p className="text-xl font-black tracking-tighter text-neutral-500 leading-none mt-1.5">—</p>
+                          <p className="text-[9px] font-bold text-neutral-500 mt-1">Dates à fixer</p>
+                        </div>
+                      )}
+
+                      {/* Q3 + Q4 — la tuile répond TOUJOURS, oui comme non. */}
+                      {hasDg ? (
+                        <div className={'rounded-2xl border p-3 ' + (dgHot ? 'border-rose-500/60 bg-rose-500/15' : 'border-orange-500/40 bg-orange-500/10')}>
+                          <p className={'text-[8px] font-black uppercase tracking-[0.2em] flex items-center gap-1 ' + (dgHot ? 'text-rose-300' : 'text-orange-300')}>
+                            <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Dangereuses
+                          </p>
+                          <p className={'text-xl font-black tracking-tighter leading-none mt-1.5 break-words ' + (dgHot ? 'text-rose-300' : 'text-orange-300')}>{formatUSD(dg.amountUsd)}</p>
+                          <p className="text-[9px] font-bold text-neutral-400 mt-1">{dgArrival ? `avant le ${dgArrival}` : "avant l'arrivée"}</p>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-400/80 flex items-center gap-1">
+                            <CheckCircle className="h-2.5 w-2.5 shrink-0" /> Dangereuses
+                          </p>
+                          <p className="text-xl font-black tracking-tighter text-emerald-400/90 leading-none mt-1.5">Aucune</p>
+                          <p className="text-[9px] font-bold text-neutral-500 mt-1">Rien à payer avant arrivée</p>
+                        </div>
+                      )}
                     </div>
                   </button>
                 );
