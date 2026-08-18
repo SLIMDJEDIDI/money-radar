@@ -328,6 +328,11 @@ export default function MoneyHubApp({
   const [credits, setCredits] = useState<any[]>((initialCredits || []).map(hydrateCredit));
   // CHINA TRACK - paiements fournisseurs a venir (lecture seule, source la-bas).
   const [chinaTrack, setChinaTrack] = useState<any>(initialChinaTrack);
+  // Quel contrat CHINA TRACK est déplié (survol souris ou tap sur mobile).
+  const [ctOpen, setCtOpen] = useState<string | null>(null);
+  // Ancre à rejoindre APRÈS un changement de section : navigateTo() remet le
+  // scroll en haut, donc arriver « sur la bonne info » demande un second temps.
+  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [creditForm, setCreditForm] = useState<{ id?: string; amount: string; beneficiary: string; note: string }>({ amount: '', beneficiary: '', note: '' });
   const [creditError, setCreditError] = useState('');
   const [creditSearch, setCreditSearch] = useState('');
@@ -415,6 +420,20 @@ export default function MoneyHubApp({
   const canGoBack = navPos > 0;
   const canGoForward = navPos < navStack.length - 1;
 
+  // Va DANS la section, puis descend jusqu'à l'ancre demandée. Sans ce second
+  // temps, un clic depuis le Dashboard dépose l'utilisateur en haut de DEVISES,
+  // à lui de retrouver le bloc — exactement ce qu'on veut éviter.
+  useEffect(() => {
+    if (!pendingAnchor) return;
+    const id = pendingAnchor;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setPendingAnchor(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [pendingAnchor, activeSection]);
+
   const navigateTo = useCallback((section: string) => {
     // Every menu destination opens at its own top, never at the previous screen's scroll position.
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -427,6 +446,12 @@ export default function MoneyHubApp({
       return truncated;
     });
   }, [navPos]);
+
+  // Ouvre une section ET descend jusqu'au bloc voulu.
+  const goToAnchor = useCallback((section: string, anchorId: string) => {
+    setPendingAnchor(anchorId);
+    navigateTo(section);
+  }, [navigateTo]);
 
   const closeTopOverlay = useCallback(() => {
     if (tndNoteEdit) { setTndNoteEdit(null); return true; }
@@ -1295,7 +1320,7 @@ export default function MoneyHubApp({
                 const days = nextDate ? Math.round((nextDate.getTime() - today.getTime()) / 86400000) : null;
                 return (
                   <button
-                    onClick={() => navigateTo('currencies')}
+                    onClick={() => goToAnchor('currencies', 'china-track')}
                     className="w-full text-left border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-rose-500/5 rounded-2xl p-4 shadow-lg shadow-amber-950/10 active:scale-[0.99] transition hover:border-amber-500/50"
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -1405,14 +1430,12 @@ export default function MoneyHubApp({
                 La source de vérité est CHINA TRACK : un paiement enregistré là-bas
                 disparaît d'ici tout seul, rien n'est ressaisi.
 
-                Les totaux sont recalculés ICI à partir des lignes affichées, en
-                tranches QUI NE SE CHEVAUCHENT PAS. Le flux renvoie lateUsd /
-                next30Usd / totalUsd, mais ces trois-là se recouvrent : un retard
-                est aussi compté dans le total, et quand tout tombe sous 30 jours
-                « 30 jours » affiche exactement le même nombre que « Total ». Deux
-                chiffres identiques côte à côte se lisent comme une donnée en
-                double. Ici : en retard + sous 30 jours + plus tard = total, et la
-                somme des lignes visibles fait toujours le total affiché. */}
+                Totaux recalculés ICI depuis les lignes affichées, en tranches QUI NE
+                SE CHEVAUCHENT PAS : en retard + sous 30 jours + plus tard = total.
+
+                Survol (ou tap sur mobile) d'une ligne : le contrat se déplie et montre
+                tous ses versements encore dus — acompte, solde, terme, échéance — pour
+                éviter d'aller ouvrir CHINA TRACK juste pour lire un détail. */}
             {chinaTrack && chinaTrack.configured && (() => {
               const rows: any[] = Array.isArray(chinaTrack.payments) ? chinaTrack.payments : [];
               const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1425,14 +1448,17 @@ export default function MoneyHubApp({
               const soonRows = rows.filter(isSoon);
               const laterRows = rows.filter((p) => !isLate(p) && !isSoon(p));
               const totalUsd = sum(rows);
-              // En retard d'abord, puis la date la plus proche : on lit dans l'ordre où il faut payer.
+              const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'date à fixer');
               const ordered = [...rows].sort((a, b) => {
                 const la = isLate(a) ? 0 : 1, lb = isLate(b) ? 0 : 1;
                 if (la !== lb) return la - lb;
                 return (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity);
               });
+              const planOf = (orderNo: string) => rows
+                .filter((p) => p.orderNo === orderNo)
+                .sort((a, b) => (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity));
               return (
-              <div className="bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
+              <div id="china-track" className="scroll-mt-4 bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-black shadow-lg"><Coins className="h-5 w-5" /></div>
                   <div className="min-w-0">
@@ -1447,7 +1473,6 @@ export default function MoneyHubApp({
                   <p className="text-[11px] font-black uppercase tracking-widest text-neutral-500">Aucun paiement programmé — tout est réglé côté usines.</p>
                 ) : (
                   <>
-                    {/* UN SEUL chiffre à retenir, puis la répartition qui l'explique. */}
                     <div className="rounded-[24px] border border-white/10 bg-black/30 p-5">
                       <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.25em]">Reste à payer · total</p>
                       <p className="text-4xl font-black tracking-tighter text-white leading-none mt-1.5">{formatUSD(totalUsd)}</p>
@@ -1459,32 +1484,78 @@ export default function MoneyHubApp({
                       </div>
                     </div>
 
+                    <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest -mb-1">Survole une ligne pour voir le contrat · sur mobile, tape dessus</p>
+
                     <div className="flex flex-col gap-2">
                       {ordered.map((pmt: any, i: number) => {
                         const late = isLate(pmt);
                         const d = dueOf(pmt);
                         const paid = (Number(pmt.amountUsd) || 0) - (Number(pmt.remainingUsd) || 0);
+                        const open = ctOpen === pmt.orderNo;
+                        const plan = open ? planOf(pmt.orderNo) : [];
+                        const planTotal = open ? sum(plan) : 0;
                         return (
-                          <div key={`${pmt.orderNo}-${i}`} className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${late ? 'bg-rose-500/5 border-rose-500/25' : 'bg-neutral-950/60 border-neutral-800'}`}>
-                            {/* La date d'abord : c'est elle qui dicte l'ordre de paiement. */}
-                            <div className={`shrink-0 w-14 text-center rounded-xl py-1.5 border ${late ? 'bg-rose-500/15 border-rose-500/30' : 'bg-white/5 border-white/10'}`}>
-                              {d ? (<>
-                                <p className={`text-sm font-black leading-none ${late ? 'text-rose-300' : 'text-white'}`}>{d.getDate()}</p>
-                                <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{d.toLocaleDateString('fr-FR', { month: 'short' })}</p>
-                              </>) : (<p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>)}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
-                              <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
-                                {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
+                          <div
+                            key={pmt.orderNo + '-' + i}
+                            onMouseEnter={() => setCtOpen(pmt.orderNo)}
+                            onMouseLeave={() => setCtOpen(null)}
+                            onClick={() => setCtOpen(open ? null : pmt.orderNo)}
+                            className={'rounded-2xl border transition cursor-pointer ' + (late ? 'bg-rose-500/5 border-rose-500/25' : 'bg-neutral-950/60 border-neutral-800') + (open ? ' ring-1 ring-white/15 border-white/20' : '')}
+                          >
+                            <div className="flex items-center gap-3 px-4 py-3">
+                              <div className={'shrink-0 w-14 text-center rounded-xl py-1.5 border ' + (late ? 'bg-rose-500/15 border-rose-500/30' : 'bg-white/5 border-white/10')}>
+                                {d ? (<>
+                                  <p className={'text-sm font-black leading-none ' + (late ? 'text-rose-300' : 'text-white')}>{d.getDate()}</p>
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{d.toLocaleDateString('fr-FR', { month: 'short' })}</p>
+                                </>) : (<p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>)}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
+                                <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
+                                  {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={'text-base font-black tracking-tighter ' + (late ? 'text-rose-400' : 'text-white')}>{formatUSD(pmt.remainingUsd)}</p>
+                                {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5">déjà payé {formatUSD(paid)}</p>}
                               </div>
                             </div>
-                            <div className="text-right shrink-0">
-                              <p className={`text-base font-black tracking-tighter ${late ? 'text-rose-400' : 'text-white'}`}>{formatUSD(pmt.remainingUsd)}</p>
-                              {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5">déjà payé {formatUSD(paid)}</p>}
-                            </div>
+
+                            {open && (
+                              <div className="border-t border-white/10 px-4 py-3.5 bg-black/40 rounded-b-2xl animate-in fade-in duration-150">
+                                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.2em]">Contrat {pmt.orderNo}</p>
+                                    {pmt.productName && <p className="text-[11px] font-bold text-neutral-200 mt-0.5 break-words">{pmt.productName}</p>}
+                                  </div>
+                                  <p className="text-[10px] font-black text-white uppercase tracking-widest shrink-0">Reste {formatUSD(planTotal)}</p>
+                                </div>
+                                <p className="text-[9px] font-black text-neutral-600 uppercase tracking-[0.2em] mt-3 mb-1.5">Échéancier encore dû</p>
+                                <div className="flex flex-col gap-1">
+                                  {plan.map((st: any, k: number) => {
+                                    const sd = dueOf(st);
+                                    const stLate = isLate(st);
+                                    const stPaid = (Number(st.amountUsd) || 0) - (Number(st.remainingUsd) || 0);
+                                    const isThis = st.label === pmt.label && st.dueDate === pmt.dueDate;
+                                    return (
+                                      <div key={k} className={'flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 ' + (isThis ? 'bg-white/10' : '')}>
+                                        <div className="min-w-0 flex-1">
+                                          <p className={'text-[11px] font-black truncate ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
+                                          <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">{fmtDate(sd)}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                          <p className={'text-[11px] font-black ' + (stLate ? 'text-rose-300' : 'text-white')}>{formatUSD(st.remainingUsd)}</p>
+                                          {stPaid > 0.005 && <p className="text-[9px] font-bold text-emerald-400/70">payé {formatUSD(stPaid)}</p>}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <p className="text-[9px] font-bold text-neutral-600 mt-2.5 leading-relaxed">Seuls les versements encore dus apparaissent. La date de livraison n&apos;est pas fournie par China Track.</p>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
