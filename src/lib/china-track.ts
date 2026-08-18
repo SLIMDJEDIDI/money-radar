@@ -10,8 +10,25 @@
  *    china-track-pro ; sans lui, la section reste simplement absente)
  */
 
+export type ChinaTrackDangerous = {
+  count: number;
+  amountUsd: number;
+  soonestArrival: string | null;
+  contracts: {
+    orderNo: string;
+    supplierName: string;
+    urgency: 'watch' | 'urgent' | 'critical' | 'overdue';
+    daysToArrival: number | null;
+    balanceUsd: number;
+    outstanding: string[];
+    headline: string;
+  }[];
+};
+
 export type ChinaTrackPayment = {
   orderNo: string;
+  /** Marchandises dangereuses : le port ne les garde pas. */
+  isDangerousGoods?: boolean;
   supplierName: string;
   productName: string;
   label: string;
@@ -26,8 +43,11 @@ export type ChinaTrackFeed = {
   error: string | null;
   generatedAt: string | null;
   totals: { lateUsd: number; next30Usd: number; totalUsd: number };
+  dangerous: ChinaTrackDangerous;
   payments: ChinaTrackPayment[];
 };
+
+const EMPTY_DG: ChinaTrackDangerous = { count: 0, amountUsd: 0, soonestArrival: null, contracts: [] };
 
 const EMPTY_TOTALS = { lateUsd: 0, next30Usd: 0, totalUsd: 0 };
 
@@ -36,7 +56,7 @@ export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
   const url = process.env.CHINA_TRACK_FEED_URL || 'https://china-track-pro.vercel.app/api/upcoming-payments';
 
   if (!token) {
-    return { configured: false, error: null, generatedAt: null, totals: EMPTY_TOTALS, payments: [] };
+    return { configured: false, error: null, generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
   }
 
   try {
@@ -48,7 +68,7 @@ export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) {
-      return { configured: true, error: `HTTP ${res.status}`, generatedAt: null, totals: EMPTY_TOTALS, payments: [] };
+      return { configured: true, error: `HTTP ${res.status}`, generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
     }
     const data = await res.json();
     return {
@@ -60,9 +80,15 @@ export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
         next30Usd: Number(data.totals?.next30Usd) || 0,
         totalUsd: Number(data.totals?.totalUsd) || 0,
       },
+      dangerous: {
+        count: Number(data.dangerousGoods?.count) || 0,
+        amountUsd: Number(data.dangerousGoods?.amountUsd) || 0,
+        soonestArrival: data.dangerousGoods?.soonestArrival ?? null,
+        contracts: Array.isArray(data.dangerousGoods?.contracts) ? data.dangerousGoods.contracts : [],
+      },
       payments: Array.isArray(data.payments) ? data.payments : [],
     };
   } catch (e: any) {
-    return { configured: true, error: e?.name === 'TimeoutError' ? 'timeout' : 'unreachable', generatedAt: null, totals: EMPTY_TOTALS, payments: [] };
+    return { configured: true, error: e?.name === 'TimeoutError' ? 'timeout' : 'unreachable', generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
   }
 }

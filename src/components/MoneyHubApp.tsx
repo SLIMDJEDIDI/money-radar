@@ -1307,7 +1307,7 @@ export default function MoneyHubApp({
                   dans DEVISES. Sans ce rappel, une échéance fournisseur peut rester
                   invisible tant qu'on ne va pas volontairement dans DEVISES. Le bloc
                   dit COMBIEN, QUAND et OÙ, et emmène directement au bon endroit. */}
-              {chinaTrack && chinaTrack.configured && !chinaTrack.error && Array.isArray(chinaTrack.payments) && chinaTrack.payments.length > 0 && (() => {
+              {chinaTrack && chinaTrack.configured && !chinaTrack.error && ((Array.isArray(chinaTrack.payments) && chinaTrack.payments.length > 0) || (chinaTrack.dangerous?.count ?? 0) > 0) && (() => {
                 const rows: any[] = chinaTrack.payments;
                 const today = new Date(); today.setHours(0, 0, 0, 0);
                 const dueOf = (p: any) => (p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null);
@@ -1328,14 +1328,30 @@ export default function MoneyHubApp({
                         <div className="h-9 w-9 shrink-0 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300"><Coins className="h-4 w-4" /></div>
                         <div className="min-w-0">
                           <p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Paiements fournisseurs en devises</p>
-                          <p className="text-sm font-black text-white mt-1">{formatUSD(total)} à payer · {rows.length} paiement{rows.length > 1 ? 's' : ''}</p>
-                          <p className="text-[10px] text-neutral-400 font-bold mt-1 truncate">
-                            {lateRows.length > 0
-                              ? `${formatUSD(sum(lateRows))} en retard — ${lateRows.length} paiement${lateRows.length > 1 ? 's' : ''}`
-                              : days !== null
-                                ? `Prochain dans ${days} jour${days > 1 ? 's' : ''} · ${next.supplierName}`
-                                : 'Dates à fixer'}
-                          </p>
+                          {rows.length > 0 ? (
+                            <>
+                              <p className="text-sm font-black text-white mt-1">{formatUSD(total)} à payer · {rows.length} paiement{rows.length > 1 ? 's' : ''}</p>
+                              <p className="text-[10px] text-neutral-400 font-bold mt-1 truncate">
+                                {lateRows.length > 0
+                                  ? `${formatUSD(sum(lateRows))} en retard — ${lateRows.length} paiement${lateRows.length > 1 ? 's' : ''}`
+                                  : days !== null
+                                    ? `Prochain dans ${days} jour${days > 1 ? 's' : ''} · ${next.supplierName}`
+                                    : 'Dates à fixer'}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-sm font-black text-white mt-1">Aucun échéancier saisi</p>
+                          )}
+                          {/* Demande d'argent : s'il y a des marchandises
+                              dangereuses, il faut le dire ICI. Le port ne les
+                              garde pas, donc ce montant n'est pas "a payer un
+                              jour" mais "a payer avant l'arrivee". */}
+                          {chinaTrack.dangerous?.count > 0 && (
+                            <p className="text-[10px] font-black text-rose-300 uppercase tracking-wider mt-1.5 leading-relaxed">
+                              &#9888; {chinaTrack.dangerous.count} contrat{chinaTrack.dangerous.count > 1 ? 's' : ''} de marchandises dangereuses
+                              {chinaTrack.dangerous.amountUsd > 0 ? ` · ${formatUSD(chinaTrack.dangerous.amountUsd)} avant l'arrivee` : ''}
+                            </p>
+                          )}
                           <p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-1.5">Où : section Devises</p>
                         </div>
                       </div>
@@ -1467,10 +1483,49 @@ export default function MoneyHubApp({
                   </div>
                 </div>
 
+                {/* Marchandises dangereuses : le port ne les garde pas. Le
+                    solde ET le telex release doivent etre faits AVANT que le
+                    conteneur arrive, sinon la marchandise reste bloquee. */}
+                {chinaTrack.dangerous?.count > 0 && (
+                  <div className="rounded-[24px] border-2 border-rose-500/40 bg-rose-500/10 p-5 flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-rose-300">
+                        &#9888; Marchandises dangereuses · {chinaTrack.dangerous.count} contrat{chinaTrack.dangerous.count > 1 ? 's' : ''}
+                      </p>
+                      {chinaTrack.dangerous.amountUsd > 0 && (
+                        <span className="text-[10px] font-black uppercase tracking-wider text-rose-200 bg-rose-500/20 border border-rose-500/30 rounded-xl px-3 py-1.5">
+                          {formatUSD(chinaTrack.dangerous.amountUsd)} à payer avant l&apos;arrivée
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-rose-200/90 leading-relaxed">
+                      Le port ne garde pas ces conteneurs. Solde et telex release à finir AVANT l&apos;arrivée
+                      {chinaTrack.dangerous.soonestArrival ? ` · le plus proche : ${new Date(chinaTrack.dangerous.soonestArrival + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : ''}.
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {chinaTrack.dangerous.contracts.map((c: any) => (
+                        <div key={c.orderNo} className="flex items-center gap-3 rounded-2xl bg-black/30 border border-rose-500/20 px-4 py-2.5">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-black text-white uppercase tracking-tight truncate">
+                              {c.supplierName} <span className="text-[9px] text-rose-300/80">{c.orderNo}</span>
+                            </p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-rose-300/80 mt-0.5 truncate">{c.headline}</p>
+                          </div>
+                          {c.balanceUsd > 0 && <p className="text-xs font-black text-rose-300 shrink-0">{formatUSD(c.balanceUsd)}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {chinaTrack.error ? (
                   <p className="text-[11px] font-black uppercase tracking-widest text-amber-400">China Track injoignable ({chinaTrack.error}) — les montants reviendront au prochain chargement.</p>
                 ) : rows.length === 0 ? (
-                  <p className="text-[11px] font-black uppercase tracking-widest text-neutral-500">Aucun paiement programmé — tout est réglé côté usines.</p>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-neutral-500">
+                    {chinaTrack.dangerous?.count > 0
+                      ? 'Aucun échéancier saisi — voir les marchandises dangereuses ci-dessus.'
+                      : 'Aucun paiement programmé — tout est réglé côté usines.'}
+                  </p>
                 ) : (
                   <>
                     <div className="rounded-[24px] border border-white/10 bg-black/30 p-5">
@@ -1514,6 +1569,9 @@ export default function MoneyHubApp({
                                 <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
                                 <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
+                                  {pmt.isDangerousGoods && (
+                                    <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border text-rose-300 border-rose-500/40 bg-rose-500/15 shrink-0">&#9888; Dangereux</span>
+                                  )}
                                   {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
                                 </div>
                               </div>
