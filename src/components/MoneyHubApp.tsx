@@ -1465,10 +1465,19 @@ export default function MoneyHubApp({
               const laterRows = rows.filter((p) => !isLate(p) && !isSoon(p));
               const totalUsd = sum(rows);
               const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'date à fixer');
+              // Un solde « contre B/L » se paie quand le conteneur arrive au
+              // port : CHINA TRACK envoie cette date, on la montre à côté de
+              // l'argent. Sur des marchandises dangereuses, l'échéance est
+              // DEUX SEMAINES avant cette arrivée — le port ne les garde pas.
+              const arrivalOf = (p: any) => (p.arrivalDate ? new Date(p.arrivalDate + 'T00:00:00') : null);
+              const fmtShort = (d: Date | null) => (d ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '');
               const ordered = [...rows].sort((a, b) => {
                 const la = isLate(a) ? 0 : 1, lb = isLate(b) ? 0 : 1;
                 if (la !== lb) return la - lb;
-                return (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity);
+                const ta = dueOf(a)?.getTime() ?? Infinity, tb = dueOf(b)?.getTime() ?? Infinity;
+                if (ta !== tb) return ta - tb;
+                // Même jour : le dangereux passe devant, il ne peut pas attendre.
+                return (a.isDangerousGoods ? 0 : 1) - (b.isDangerousGoods ? 0 : 1);
               });
               const planOf = (orderNo: string) => rows
                 .filter((p) => p.orderNo === orderNo)
@@ -1567,6 +1576,17 @@ export default function MoneyHubApp({
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
                                 <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
+                                {arrivalOf(pmt) && (
+                                  pmt.isDangerousGoods ? (
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-400 mt-0.5 truncate">
+                                      Tout doit être payé avant l&apos;arrivée · conteneur le {fmtShort(arrivalOf(pmt))}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 mt-0.5 truncate">
+                                      Arrivée conteneur {fmtShort(arrivalOf(pmt))}
+                                    </p>
+                                  )
+                                )}
                                 <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
                                   {pmt.isDangerousGoods && (
@@ -1601,7 +1621,10 @@ export default function MoneyHubApp({
                                       <div key={k} className={'flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 ' + (isThis ? 'bg-white/10' : '')}>
                                         <div className="min-w-0 flex-1">
                                           <p className={'text-[11px] font-black truncate ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
-                                          <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">{fmtDate(sd)}</p>
+                                          <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
+                                            {fmtDate(sd)}
+                                            {arrivalOf(st) ? ` · arrivée ${fmtShort(arrivalOf(st))}` : ''}
+                                          </p>
                                         </div>
                                         <div className="text-right shrink-0">
                                           <p className={'text-[11px] font-black ' + (stLate ? 'text-rose-300' : 'text-white')}>{formatUSD(st.remainingUsd)}</p>
@@ -1611,7 +1634,7 @@ export default function MoneyHubApp({
                                     );
                                   })}
                                 </div>
-                                <p className="text-[9px] font-bold text-neutral-600 mt-2.5 leading-relaxed">Seuls les versements encore dus apparaissent. La date de livraison n&apos;est pas fournie par China Track.</p>
+                                <p className="text-[9px] font-bold text-neutral-600 mt-2.5 leading-relaxed">Seuls les versements encore dus apparaissent. Un solde « contre B/L » est daté sur l&apos;arrivée du conteneur au port ; sur des marchandises dangereuses il tombe deux semaines avant, tout doit être payé et le telex release obtenu avant que la boîte touche le quai.</p>
                               </div>
                             )}
                           </div>

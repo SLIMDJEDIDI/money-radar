@@ -36,6 +36,10 @@ export type ChinaTrackPayment = {
   remainingUsd: number;
   amountUsd: number;
   dueDate: string | null; // YYYY-MM-DD
+  /** Arrivée prévue du conteneur au port — seulement sur un solde « contre B/L ». */
+  arrivalDate?: string | null; // YYYY-MM-DD
+  /** D'où vient l'échéance : « before arrival » = marchandises dangereuses. */
+  dueSource?: string | null;
 };
 
 export type ChinaTrackFeed = {
