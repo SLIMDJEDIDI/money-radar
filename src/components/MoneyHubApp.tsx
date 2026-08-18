@@ -1577,14 +1577,14 @@ export default function MoneyHubApp({
                     </p>
                     <div className="flex flex-col gap-1.5">
                       {chinaTrack.dangerous.contracts.map((c: any) => (
-                        <div key={c.orderNo} className="flex items-center gap-3 rounded-2xl bg-black/30 border border-rose-500/20 px-4 py-2.5">
+                        <div key={c.orderNo} className="flex items-start gap-3 rounded-2xl bg-black/30 border border-rose-500/20 px-4 py-2.5">
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-black text-white uppercase tracking-tight truncate">
-                              {c.supplierName} <span className="text-[9px] text-rose-300/80">{c.orderNo}</span>
+                            <p className="text-xs font-black text-white uppercase tracking-tight leading-snug break-words">
+                              {c.supplierName} <span className="text-[9px] text-rose-300/80 whitespace-nowrap">{c.orderNo}</span>
                             </p>
-                            <p className="text-[9px] font-black uppercase tracking-widest text-rose-300/80 mt-0.5 truncate">{c.headline}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-rose-300/80 mt-0.5 break-words leading-relaxed">{c.headline}</p>
                           </div>
-                          {c.balanceUsd > 0 && <p className="text-xs font-black text-rose-300 shrink-0">{formatUSD(c.balanceUsd)}</p>}
+                          {c.balanceUsd > 0 && <p className="text-xs font-black text-rose-300 shrink-0 whitespace-nowrap">{formatUSD(c.balanceUsd)}</p>}
                         </div>
                       ))}
                     </div>
@@ -1612,7 +1612,7 @@ export default function MoneyHubApp({
                       </div>
                     </div>
 
-                    <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest -mb-1">Survole une ligne pour voir le contrat · sur mobile, tape dessus</p>
+                    <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest -mb-1">Touche une ligne pour voir le contrat</p>
 
                     <div className="flex flex-col gap-2">
                       {ordered.map((pmt: any, i: number) => {
@@ -1630,7 +1630,7 @@ export default function MoneyHubApp({
                             onClick={() => setCtOpen(open ? null : pmt.orderNo)}
                             className={'rounded-2xl border transition cursor-pointer ' + (late ? 'bg-rose-500/5 border-rose-500/25' : 'bg-neutral-950/60 border-neutral-800') + (open ? ' ring-1 ring-white/15 border-white/20' : '')}
                           >
-                            <div className="flex items-center gap-3 px-4 py-3">
+                            <div className="flex items-start gap-3 px-4 py-3">
                               <div className={'shrink-0 w-14 text-center rounded-xl py-1.5 border ' + (late ? 'bg-rose-500/15 border-rose-500/30' : 'bg-white/5 border-white/10')}>
                                 {d ? (<>
                                   <p className={'text-sm font-black leading-none ' + (late ? 'text-rose-300' : 'text-white')}>{d.getDate()}</p>
@@ -1638,30 +1638,35 @@ export default function MoneyHubApp({
                                 </>) : (<p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>)}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
-                                <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
+                                {/* Nom + montant sur la même ligne : le montant garde sa place à
+                                    droite, et le nom passe à la ligne au lieu d'être coupé. */}
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-sm font-black text-white uppercase tracking-tight leading-snug break-words min-w-0 flex-1">{pmt.supplierName}</p>
+                                  <div className="text-right shrink-0">
+                                    <p className={'text-base font-black tracking-tighter whitespace-nowrap ' + (late ? 'text-rose-400' : 'text-white')}>{formatUSD(pmt.remainingUsd)}</p>
+                                    {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5 whitespace-nowrap">déjà payé {formatUSD(paid)}</p>}
+                                  </div>
+                                </div>
+                                {/* Les descriptions occupent toute la largeur et s'enroulent. */}
+                                <p className="text-[10px] font-bold text-neutral-400 break-words mt-1">{pmt.label}</p>
                                 {arrivalOf(pmt) && (
                                   pmt.isDangerousGoods ? (
-                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-400 mt-0.5 truncate">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-400 mt-0.5 break-words leading-relaxed">
                                       Tout doit être payé avant l&apos;arrivée · conteneur le {fmtShort(arrivalOf(pmt))}
                                     </p>
                                   ) : (
-                                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 mt-0.5 truncate">
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 mt-0.5 break-words leading-relaxed">
                                       Arrivée conteneur {fmtShort(arrivalOf(pmt))}
                                     </p>
                                   )
                                 )}
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
+                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                  <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest whitespace-nowrap">{pmt.orderNo}</span>
                                   {pmt.isDangerousGoods && (
                                     <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border text-rose-300 border-rose-500/40 bg-rose-500/15 shrink-0">&#9888; Dangereux</span>
                                   )}
                                   {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
                                 </div>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <p className={'text-base font-black tracking-tighter ' + (late ? 'text-rose-400' : 'text-white')}>{formatUSD(pmt.remainingUsd)}</p>
-                                {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5">déjà payé {formatUSD(paid)}</p>}
                               </div>
                             </div>
 
@@ -1684,7 +1689,7 @@ export default function MoneyHubApp({
                                     return (
                                       <div key={k} className={'flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 ' + (isThis ? 'bg-white/10' : '')}>
                                         <div className="min-w-0 flex-1">
-                                          <p className={'text-[11px] font-black truncate ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
+                                          <p className={'text-[11px] font-black break-words leading-snug ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
                                           <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
                                             {fmtDate(sd)}
                                             {arrivalOf(st) ? ` · arrivée ${fmtShort(arrivalOf(st))}` : ''}
