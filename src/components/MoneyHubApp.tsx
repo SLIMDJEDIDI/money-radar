@@ -1277,6 +1277,49 @@ export default function MoneyHubApp({
                 </div>
               )}
 
+              {/* ALERTE D'OUVERTURE — paiements fournisseurs en devises.
+                  L'admin arrive sur le Dashboard ; la section CHINA TRACK, elle, vit
+                  dans DEVISES. Sans ce rappel, une échéance fournisseur peut rester
+                  invisible tant qu'on ne va pas volontairement dans DEVISES. Le bloc
+                  dit COMBIEN, QUAND et OÙ, et emmène directement au bon endroit. */}
+              {chinaTrack && chinaTrack.configured && !chinaTrack.error && Array.isArray(chinaTrack.payments) && chinaTrack.payments.length > 0 && (() => {
+                const rows: any[] = chinaTrack.payments;
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const dueOf = (p: any) => (p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null);
+                const isLate = (p: any) => { const d = dueOf(p); return p.status === 'Late' || (!!d && d < today); };
+                const sum = (a: any[]) => a.reduce((s, p) => s + (Number(p.remainingUsd) || 0), 0);
+                const lateRows = rows.filter(isLate);
+                const total = sum(rows);
+                const next = [...rows.filter((p) => !isLate(p) && dueOf(p))].sort((a, b) => (dueOf(a)!.getTime() - dueOf(b)!.getTime()))[0];
+                const nextDate = next ? dueOf(next) : null;
+                const days = nextDate ? Math.round((nextDate.getTime() - today.getTime()) / 86400000) : null;
+                return (
+                  <button
+                    onClick={() => navigateTo('currencies')}
+                    className="w-full text-left border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-rose-500/5 rounded-2xl p-4 shadow-lg shadow-amber-950/10 active:scale-[0.99] transition hover:border-amber-500/50"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="h-9 w-9 shrink-0 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300"><Coins className="h-4 w-4" /></div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.18em]">Paiements fournisseurs en devises</p>
+                          <p className="text-sm font-black text-white mt-1">{formatUSD(total)} à payer · {rows.length} paiement{rows.length > 1 ? 's' : ''}</p>
+                          <p className="text-[10px] text-neutral-400 font-bold mt-1 truncate">
+                            {lateRows.length > 0
+                              ? `${formatUSD(sum(lateRows))} en retard — ${lateRows.length} paiement${lateRows.length > 1 ? 's' : ''}`
+                              : days !== null
+                                ? `Prochain dans ${days} jour${days > 1 ? 's' : ''} · ${next.supplierName}`
+                                : 'Dates à fixer'}
+                          </p>
+                          <p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mt-1.5">Où : section Devises</p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 px-3 py-2 rounded-xl bg-amber-500 text-black text-[9px] font-black uppercase tracking-widest">Voir</span>
+                    </div>
+                  </button>
+                );
+              })()}
+
               <div className="grid sm:grid-cols-3 gap-2.5">
                 <button onClick={() => navigateTo('treasury')} className="text-left p-4 rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/10 to-neutral-950 hover:border-blue-500/50 active:scale-[0.985] transition shadow-lg shadow-blue-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0"><CoffreIcon className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Coffre Fort Administration</p></div><span className="text-[7px] font-black text-blue-300 uppercase tracking-widest shrink-0">Live·TND</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.tndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatRawCurrency(metrics.tndBalance || 0, 'TND')}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-400">+ {formatRawCurrency(metrics.tndTodayIn || 0, 'TND')}</span><span className="text-rose-400">− {formatRawCurrency(metrics.tndTodayOut || 0, 'TND')}</span></div></button>
                 <button onClick={() => navigateTo('currencies')} className="text-left p-4 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 to-neutral-950 hover:border-emerald-500/50 active:scale-[0.985] transition shadow-lg shadow-emerald-950/10 flex flex-col gap-1.5"><div className="flex justify-between items-center gap-2"><div className="flex items-center gap-2 min-w-0"><div className="h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center shrink-0"><WalletCards className="h-3.5 w-3.5" /></div><p className="text-[9px] font-black text-neutral-300 uppercase tracking-[0.12em] truncate">Position Globale USD</p></div><span className="text-[7px] font-black text-emerald-300 uppercase tracking-widest shrink-0">Live·USD</span></div><p className={`text-[26px] leading-none font-black tracking-[-0.07em] ${metrics.netPosition >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(metrics.netPosition || 0)}</p><div className="flex flex-wrap gap-x-3 text-[9px] font-black"><span className="text-emerald-300">{formatUSD(metrics.totalAvoirs || 0)} encaissé</span><span className="text-neutral-500">{activePartners} actif{activePartners > 1 ? 's' : ''}</span></div></button>
@@ -1360,49 +1403,97 @@ export default function MoneyHubApp({
             </div>
             {/* CHINA TRACK — paiements fournisseurs à venir (USD), en lecture seule.
                 La source de vérité est CHINA TRACK : un paiement enregistré là-bas
-                disparaît d'ici tout seul, rien n'est ressaisi. */}
-            {chinaTrack && chinaTrack.configured && (
-              <div className="bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-4 shadow-md">
-                <div className="flex flex-wrap justify-between items-center gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-black shadow-lg"><Coins className="h-5 w-5" /></div>
-                    <div className="min-w-0">
-                      <h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">China Track · Paiements à venir</h3>
-                      <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">USD · géré dans China Track — payé là-bas, disparaît ici</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {chinaTrack.totals.lateUsd > 0 && <span className="text-[10px] font-black uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-1.5">En retard {formatUSD(chinaTrack.totals.lateUsd)}</span>}
-                    <span className="text-[10px] font-black uppercase tracking-wider text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-1.5">30 jours {formatUSD(chinaTrack.totals.next30Usd)}</span>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-neutral-300 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5">Total {formatUSD(chinaTrack.totals.totalUsd)}</span>
+                disparaît d'ici tout seul, rien n'est ressaisi.
+
+                Les totaux sont recalculés ICI à partir des lignes affichées, en
+                tranches QUI NE SE CHEVAUCHENT PAS. Le flux renvoie lateUsd /
+                next30Usd / totalUsd, mais ces trois-là se recouvrent : un retard
+                est aussi compté dans le total, et quand tout tombe sous 30 jours
+                « 30 jours » affiche exactement le même nombre que « Total ». Deux
+                chiffres identiques côte à côte se lisent comme une donnée en
+                double. Ici : en retard + sous 30 jours + plus tard = total, et la
+                somme des lignes visibles fait toujours le total affiché. */}
+            {chinaTrack && chinaTrack.configured && (() => {
+              const rows: any[] = Array.isArray(chinaTrack.payments) ? chinaTrack.payments : [];
+              const today = new Date(); today.setHours(0, 0, 0, 0);
+              const in30 = new Date(today.getTime() + 30 * 86400000);
+              const dueOf = (p: any) => (p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null);
+              const isLate = (p: any) => { const d = dueOf(p); return p.status === 'Late' || (!!d && d < today); };
+              const isSoon = (p: any) => { const d = dueOf(p); return !isLate(p) && !!d && d <= in30; };
+              const sum = (a: any[]) => a.reduce((s, p) => s + (Number(p.remainingUsd) || 0), 0);
+              const lateRows = rows.filter(isLate);
+              const soonRows = rows.filter(isSoon);
+              const laterRows = rows.filter((p) => !isLate(p) && !isSoon(p));
+              const totalUsd = sum(rows);
+              // En retard d'abord, puis la date la plus proche : on lit dans l'ordre où il faut payer.
+              const ordered = [...rows].sort((a, b) => {
+                const la = isLate(a) ? 0 : 1, lb = isLate(b) ? 0 : 1;
+                if (la !== lb) return la - lb;
+                return (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity);
+              });
+              return (
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-black shadow-lg"><Coins className="h-5 w-5" /></div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">China Track · Paiements à venir</h3>
+                    <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">Fournisseurs USD · saisis dans China Track</p>
                   </div>
                 </div>
+
                 {chinaTrack.error ? (
                   <p className="text-[11px] font-black uppercase tracking-widest text-amber-400">China Track injoignable ({chinaTrack.error}) — les montants reviendront au prochain chargement.</p>
-                ) : chinaTrack.payments.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <p className="text-[11px] font-black uppercase tracking-widest text-neutral-500">Aucun paiement programmé — tout est réglé côté usines.</p>
                 ) : (
-                  <div className="flex flex-col gap-2">
-                    {chinaTrack.payments.map((pmt: any, i: number) => (
-                      <div key={`${pmt.orderNo}-${i}`} className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${pmt.status === 'Late' ? 'bg-rose-500/5 border-rose-500/20' : 'bg-neutral-950/60 border-neutral-800'}`}>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
-                            <span className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">{pmt.orderNo}</span>
-                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border ${pmt.status === 'Late' ? 'text-rose-400 border-rose-500/30 bg-rose-500/10' : pmt.status === 'Partly Paid' ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' : 'text-blue-400 border-blue-500/30 bg-blue-500/10'}`}>{pmt.status === 'Late' ? 'En retard' : pmt.status === 'Partly Paid' ? 'Partiel' : 'À venir'}</span>
-                          </div>
-                          <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-1 truncate">{pmt.label}{pmt.dueDate ? ` · ${new Date(pmt.dueDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}` : ' · date à fixer'}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className={`text-sm font-black ${pmt.status === 'Late' ? 'text-rose-400' : 'text-white'}`}>{formatUSD(pmt.remainingUsd)}</p>
-                          {pmt.remainingUsd < pmt.amountUsd - 0.005 && <p className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">sur {formatUSD(pmt.amountUsd)}</p>}
-                        </div>
+                  <>
+                    {/* UN SEUL chiffre à retenir, puis la répartition qui l'explique. */}
+                    <div className="rounded-[24px] border border-white/10 bg-black/30 p-5">
+                      <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.25em]">Reste à payer · total</p>
+                      <p className="text-4xl font-black tracking-tighter text-white leading-none mt-1.5">{formatUSD(totalUsd)}</p>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-neutral-600">dont</span>
+                        {lateRows.length > 0 && <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">{formatUSD(sum(lateRows))} en retard · {lateRows.length}</span>}
+                        {soonRows.length > 0 && <span className="text-[10px] font-black uppercase tracking-wider text-blue-400">{formatUSD(sum(soonRows))} sous 30 jours · {soonRows.length}</span>}
+                        {laterRows.length > 0 && <span className="text-[10px] font-black uppercase tracking-wider text-neutral-400">{formatUSD(sum(laterRows))} plus tard · {laterRows.length}</span>}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      {ordered.map((pmt: any, i: number) => {
+                        const late = isLate(pmt);
+                        const d = dueOf(pmt);
+                        const paid = (Number(pmt.amountUsd) || 0) - (Number(pmt.remainingUsd) || 0);
+                        return (
+                          <div key={`${pmt.orderNo}-${i}`} className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${late ? 'bg-rose-500/5 border-rose-500/25' : 'bg-neutral-950/60 border-neutral-800'}`}>
+                            {/* La date d'abord : c'est elle qui dicte l'ordre de paiement. */}
+                            <div className={`shrink-0 w-14 text-center rounded-xl py-1.5 border ${late ? 'bg-rose-500/15 border-rose-500/30' : 'bg-white/5 border-white/10'}`}>
+                              {d ? (<>
+                                <p className={`text-sm font-black leading-none ${late ? 'text-rose-300' : 'text-white'}`}>{d.getDate()}</p>
+                                <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{d.toLocaleDateString('fr-FR', { month: 'short' })}</p>
+                              </>) : (<p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-black text-white uppercase tracking-tight truncate">{pmt.supplierName}</p>
+                              <p className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{pmt.label}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">{pmt.orderNo}</span>
+                                {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className={`text-base font-black tracking-tighter ${late ? 'text-rose-400' : 'text-white'}`}>{formatUSD(pmt.remainingUsd)}</p>
+                              {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5">déjà payé {formatUSD(paid)}</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
-            )}
+              );
+            })()}
             <div className="flex flex-col gap-4"><div className="flex justify-between items-center px-1"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black shadow-lg"><Users className="h-5 w-5" /></div><h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">Partenaires actifs</h3></div><button onClick={() => navigateTo('contacts')} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Voir tout</button></div><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredContacts.map((c: any) => { const hasTnd = (c.heldBalanceTnd || 0) > 0.01; const cNotes = notesByContact[c.id] || []; const nAdj = noteAdjustByContact[c.id]; const nUsd = nAdj?.usd || 0; const hasNAdj = !!nAdj?.hasAny && Math.abs(nUsd) > 0.01; const shownUsd = c.netPositionUsd + (hasNAdj ? nUsd : 0); const hasUsd = Math.abs(shownUsd) > 0.01; return <div key={c.id} onClick={() => setSelectedContact(c)} className="bg-neutral-900/60 border border-neutral-800 p-5 rounded-[28px] flex flex-col gap-3 active:scale-[0.99] transition cursor-pointer hover:border-neutral-700 shadow-md"><div className="flex justify-between items-center"><div className="flex items-center gap-4"><span className="text-2xl p-2 bg-neutral-950 border border-neutral-800 rounded-xl">{c.emoji}</span><p className="font-black text-white text-base uppercase tracking-tight">{c.name}</p></div><div className="text-right flex flex-col items-end">{(hasUsd || !hasTnd) && <p className={`text-sm font-black ${shownUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatUSD(shownUsd)}{hasNAdj && <span className="text-[8px] text-neutral-500 ml-1">+notes</span>}</p>}{hasTnd && <p className="text-xs font-black text-amber-400 tracking-tighter">{formatRawCurrency(c.heldBalanceTnd, 'TND')}</p>}</div></div><div className="border-t border-neutral-800/70 pt-3"><PartnerNotes notes={cNotes} formatRawCurrency={formatRawCurrency} onAdd={() => openAddNote(c.id, c.name)} onEdit={(n: any) => openEditNote(n, c.name)} onDelete={handleDeleteNote} compact /></div></div>; })}</div></div>
           </div>
         )}
