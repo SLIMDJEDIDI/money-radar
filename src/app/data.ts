@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db';
 import { getSession } from '../lib/auth';
+import { fetchChinaTrackPayments } from '../lib/china-track';
 
 export interface HubMetrics {
   totalAvoirs: number;
@@ -60,11 +61,16 @@ export async function getHubDashboardData(searchQuery: string = '') {
       );
 
     const creditsPromise = adminOnly(() => prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } }));
+    // CHINA TRACK — paiements fournisseurs a venir. Reserve a l'admin comme le
+    // reste des donnees DEVISES : un assistant ne recoit jamais ce payload.
+    const chinaTrackPromise = sessionPromise
+      .then((s) => (s?.role === 'admin' ? fetchChinaTrackPayments() : null))
+      .catch(() => null);
     const archivePromise = adminOnly(() => prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } }));
 
     const [
       currenciesRaw, categories, contacts, transactions, reminders, auditTrails, users, tndMovements,
-      archiveMovements, partnerNotes, bankAccounts, bankMovements, session, credits,
+      archiveMovements, partnerNotes, bankAccounts, bankMovements, session, credits, chinaTrack,
     ] = await Promise.all([
       prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } }),
       prisma.hubCategory.findMany({ orderBy: { name: 'asc' } }),
@@ -84,6 +90,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
       sessionPromise,
       creditsPromise,
+      chinaTrackPromise,
     ]);
 
     const isAdmin = session?.role === 'admin';
@@ -272,6 +279,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       bankAccounts: bankAccountsWithStats,
       bankMovements,
       credits,
+      chinaTrack,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,
