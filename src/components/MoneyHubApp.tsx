@@ -1345,17 +1345,30 @@ export default function MoneyHubApp({
                 return (
                   <button
                     onClick={() => goToAnchor('currencies', 'china-track')}
-                    className={'w-full text-left rounded-[24px] p-4 sm:p-5 shadow-lg active:scale-[0.99] transition ' + (alarm
-                      ? 'border-2 border-rose-500/50 bg-gradient-to-br from-rose-500/15 to-neutral-950 shadow-rose-950/20 hover:border-rose-500/70'
-                      : 'border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-neutral-950 shadow-amber-950/10 hover:border-amber-500/50')}
+                    /* Le cadre jaune qui respire est l'IDENTITE de la carte, pas son
+                       niveau d'alerte : il dit "cet argent vit dans CHINA TRACK".
+                       Les cartes MONEY HUB ont un cadre fixe et discret ; celle-ci
+                       bouge lentement, donc l'oeil la separe des autres sans qu'on
+                       ait a la lire. L'urgence, elle, reste portee par les tuiles
+                       rouges en dessous — un cadre qui changerait aussi de couleur
+                       melangerait les deux messages. */
+                    className={'china-card w-full text-left rounded-[24px] border-2 p-4 sm:p-5 active:scale-[0.99] transition bg-gradient-to-br ' + (alarm ? 'from-rose-500/12 via-amber-500/5 to-neutral-950' : 'from-amber-500/12 to-neutral-950')}
                   >
                     {/* En-tête : ce que c'est + le bouton, sur une seule ligne. */}
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={'h-8 w-8 shrink-0 rounded-xl flex items-center justify-center ' + (alarm ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300')}><Coins className="h-4 w-4" /></div>
-                        <p className={'text-[9px] font-black uppercase tracking-[0.18em] truncate ' + (alarm ? 'text-rose-300' : 'text-amber-300')}>Paiements fournisseurs</p>
+                        <div className="h-8 w-8 shrink-0 rounded-xl flex items-center justify-center bg-amber-500/20 text-amber-300"><Coins className="h-4 w-4" /></div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-black uppercase tracking-[0.18em] truncate text-amber-300">Paiements fournisseurs</p>
+                          {/* Le drapeau est le meme que l'onglet CHINA TRACK dans le
+                              navigateur : on reconnait la provenance sans lire. */}
+                          <span className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-white/[0.07] border border-white/15 pl-1 pr-2 py-0.5">
+                            <img src="/china-track-icon.svg" alt="" aria-hidden="true" className="h-3.5 w-3.5 rounded-[3px] shrink-0" />
+                            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-neutral-300">China Track</span>
+                          </span>
+                        </div>
                       </div>
-                      <span className={'shrink-0 px-3.5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest ' + (alarm ? 'bg-rose-500 text-white' : 'bg-amber-500 text-black')}>Voir</span>
+                      <span className="shrink-0 self-start px-3.5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest bg-amber-500 text-black">Voir</span>
                     </div>
 
                     {/* LE chiffre. Question 1 répondue d'un coup d'œil. */}

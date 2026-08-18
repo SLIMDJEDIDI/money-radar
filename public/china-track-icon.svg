@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+  <defs>
+    <path id="s" fill="#ffde00"
+      d="M0,-1 0.2245,-0.309 0.9511,-0.309 0.3633,0.118 0.5878,0.809 0,0.382 -0.5878,0.809 -0.3633,0.118 -0.9511,-0.309 -0.2245,-0.309 Z"/>
+  </defs>
+  <rect width="20" height="20" fill="#de2910"/>
+  <!-- The five stars keep the official flag geometry and angles. The group is
+       only moved and scaled as one, so a square icon is filled instead of
+       leaving the stars stranded in the top-left corner. -->
+  <g transform="translate(10,10) scale(1.4) translate(-7.5733,-5.5)">
+    <use href="#s" transform="translate(5,5) scale(3)"/>
+    <use href="#s" transform="translate(10,2) rotate(-120.96)"/>
+    <use href="#s" transform="translate(12,4) rotate(-98.13)"/>
+    <use href="#s" transform="translate(12,7) rotate(-74.05)"/>
+    <use href="#s" transform="translate(10,9) rotate(-51.34)"/>
+  </g>
+</svg>
