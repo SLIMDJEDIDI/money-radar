@@ -1611,8 +1611,13 @@ export default function MoneyHubApp({
               const planOf = (orderNo: string) => rows
                 .filter((p) => p.orderNo === orderNo)
                 .sort((a, b) => (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity));
+              // Même cadre jaune qui respire que la carte du tableau de bord :
+              // il dit « cet argent vit dans CHINA TRACK ». Le bloc portait une
+              // bordure neutre invisible, donc rien ne le séparait des blocs
+              // MONEY HUB de la page. L'urgence reste portée par le rouge des
+              // marchandises dangereuses — le jaune n'est qu'une provenance.
               return (
-              <div id="china-track" className="scroll-mt-4 bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
+              <div id="china-track" className="china-card scroll-mt-4 bg-neutral-900/60 border-2 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-black shadow-lg"><Coins className="h-5 w-5" /></div>
                   <div className="min-w-0 flex-1">
