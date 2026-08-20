@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 // Logo Coffre Fort Administration (remplace l'icône Vault de lucide).
 import CoffreIcon from './CoffreIcon';
+// Nom affiche des utilisateurs. L'identifiant de connexion, lui, ne change pas.
+import { displayUser, displayNamesIn } from '../lib/display-name';
 import {
   createContact, updateContact, deleteContact,
   createHubTransaction, deleteHubTransaction,
@@ -1486,7 +1488,7 @@ export default function MoneyHubApp({
               </div>
 
               <div className="grid lg:grid-cols-[1.1fr_.9fr] gap-3">
-                <div className="p-4 sm:p-5 bg-neutral-900/55 border border-neutral-800 rounded-[28px] flex flex-col gap-3"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-emerald-300"><Activity className="h-3.5 w-3.5" /></div><h3 className="text-[10px] font-black text-white uppercase tracking-widest">Dernières actions</h3></div><button onClick={() => navigateTo('history')} className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Audit</button></div><div className="flex flex-col gap-1.5">{recentAudit.length === 0 ? <p className="py-4 text-center text-xs text-neutral-500 font-bold">Aucune action récente.</p> : recentAudit.slice(0, 3).map((a: any) => <div key={a.id} className="flex items-center gap-2.5 p-2.5 bg-black/20 border border-neutral-800/80 rounded-xl"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" /><div className="min-w-0 flex-1"><p className="text-[11px] text-neutral-200 font-bold truncate">{a.details || a.action}</p><p className="text-[9px] text-neutral-600 font-black uppercase mt-0.5">{a.modifiedBy} · {new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div></div>)}</div></div>
+                <div className="p-4 sm:p-5 bg-neutral-900/55 border border-neutral-800 rounded-[28px] flex flex-col gap-3"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-emerald-300"><Activity className="h-3.5 w-3.5" /></div><h3 className="text-[10px] font-black text-white uppercase tracking-widest">Dernières actions</h3></div><button onClick={() => navigateTo('history')} className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Audit</button></div><div className="flex flex-col gap-1.5">{recentAudit.length === 0 ? <p className="py-4 text-center text-xs text-neutral-500 font-bold">Aucune action récente.</p> : recentAudit.slice(0, 3).map((a: any) => <div key={a.id} className="flex items-center gap-2.5 p-2.5 bg-black/20 border border-neutral-800/80 rounded-xl"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" /><div className="min-w-0 flex-1"><p className="text-[11px] text-neutral-200 font-bold truncate">{displayNamesIn(a.details) || a.action}</p><p className="text-[9px] text-neutral-600 font-black uppercase mt-0.5">{displayUser(a.modifiedBy)} · {new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div></div>)}</div></div>
                 <div className="p-4 sm:p-5 bg-neutral-900/55 border border-neutral-800 rounded-[28px] flex flex-col gap-3"><div className="flex items-center gap-2"><div className="h-8 w-8 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-blue-300"><Users className="h-3.5 w-3.5" /></div><h3 className="text-[10px] font-black text-white uppercase tracking-widest">Vue rapide</h3></div><div className="flex flex-col gap-1.5"><button onClick={() => { setContactFilterType('HELD'); navigateTo('contacts'); }} className="flex items-center justify-between p-3 bg-emerald-500/5 border border-emerald-500/15 rounded-xl text-left hover:border-emerald-500/40 transition"><span className="text-[11px] font-bold text-neutral-300">Encaissé</span><span className="text-sm font-black text-emerald-300">{formatUSD(metrics.totalAvoirs || 0)}</span></button><button onClick={() => { setContactFilterType('PAYABLE'); navigateTo('contacts'); }} className="flex items-center justify-between p-3 bg-rose-500/5 border border-rose-500/15 rounded-xl text-left hover:border-rose-500/40 transition"><span className="text-[11px] font-bold text-neutral-300">Décaissé</span><span className="text-sm font-black text-rose-400">{formatUSD(metrics.totalPayables || 0)}</span></button><button onClick={() => { setContactFilterType('RECEIVABLE'); navigateTo('contacts'); }} className="flex items-center justify-between p-3 bg-blue-500/5 border border-blue-500/15 rounded-xl text-left hover:border-blue-500/40 transition"><span className="text-[11px] font-bold text-neutral-300">À recevoir</span><span className="text-sm font-black text-blue-400">{formatUSD(metrics.totalReceivables || 0)}</span></button></div>{lastAudit && <p className="text-[9px] text-neutral-600 font-bold">MAJ: {new Date(lastAudit.createdAt).toLocaleString('fr-FR')}</p>}</div>
               </div>
             </div>
@@ -1764,7 +1766,7 @@ export default function MoneyHubApp({
             if (!isNaN(min) && m.amount < min) return false;
             if (!isNaN(max) && m.amount > max) return false;
             if (q) {
-              const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase();
+              const hay = `${m.note || ''} ${m.performedBy || ''} ${displayUser(m.performedBy)} ${m.amount}`.toLowerCase();
               if (!hay.includes(q)) return false;
             }
             return true;
@@ -1874,7 +1876,7 @@ export default function MoneyHubApp({
                         <div key={m.id} className="flex items-center justify-between gap-3 p-3.5 bg-black/40 border border-sky-500/20 rounded-2xl">
                           <div className="flex flex-col min-w-0 flex-1">
                             <p className="text-sm font-black text-white truncate">{cleanReceivableNote(m.note)}</p>
-                            <p className="text-[9px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{m.performedBy ? ` · ${m.performedBy}` : ''}</p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{m.performedBy ? ` · ${displayUser(m.performedBy)}` : ''}</p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <p className="text-base font-black text-sky-300 tracking-tighter">{formatRawCurrency(m.amount, 'TND')}</p>
@@ -1920,7 +1922,7 @@ export default function MoneyHubApp({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <select value={tndUserFilter} onChange={e => setTndUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40">
                     <option value="all">Tous utilisateurs</option>
-                    {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                    {uniqueUsers.map(u => <option key={u} value={u}>{displayUser(u)}</option>)}
                   </select>
                   <input type="number" placeholder="Montant min" value={tndAmountMin} onChange={e => setTndAmountMin(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40" />
                   <input type="number" placeholder="Montant max" value={tndAmountMax} onChange={e => setTndAmountMax(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-blue-500/40" />
@@ -1967,7 +1969,7 @@ export default function MoneyHubApp({
                             ) : (
                               <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
                             )}
-                            {m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}
+                            {m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {displayUser(m.performedBy)}</p>}
                             {!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}
                           </div>
                         </div>
@@ -2009,7 +2011,7 @@ export default function MoneyHubApp({
           const filtered = accMovements.filter((m: any) => {
             if (bankTypeFilter !== 'all' && m.type !== bankTypeFilter) return false;
             if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
-            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
+            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${displayUser(m.performedBy)} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
             return true;
           });
           return (
@@ -2103,7 +2105,7 @@ export default function MoneyHubApp({
                               <div className="flex items-center gap-2 flex-wrap">{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{m.note}</p></div>
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 {isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}
-                                {m.performedBy && <p className="text-[9px] text-teal-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}
+                                {m.performedBy && <p className="text-[9px] text-teal-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {displayUser(m.performedBy)}</p>}
                                 {!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, cur)}</p>}
                               </div>
                             </div>
@@ -2189,8 +2191,8 @@ export default function MoneyHubApp({
                         <p className={`text-sm font-bold leading-snug break-words ${c.isPaid ? 'text-neutral-500' : 'text-neutral-300'}`}>{c.note}</p>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           <p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(c.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                          {c.createdBy && <p className="text-[9px] text-rose-400/80 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {c.createdBy}</p>}
-                          {c.isPaid && c.paidAt && <p className="text-[9px] text-emerald-400 font-black uppercase flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Payé le {new Date(c.paidAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{c.paidBy ? ` · ${c.paidBy}` : ''}</p>}
+                          {c.createdBy && <p className="text-[9px] text-rose-400/80 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {displayUser(c.createdBy)}</p>}
+                          {c.isPaid && c.paidAt && <p className="text-[9px] text-emerald-400 font-black uppercase flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Payé le {new Date(c.paidAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}{c.paidBy ? ` · ${displayUser(c.paidBy)}` : ''}</p>}
                         </div>
                       </div>
                       <div className="text-right shrink-0 flex items-center gap-2">
@@ -2229,7 +2231,7 @@ export default function MoneyHubApp({
             if (periodMs > 0 && (now - new Date(m.createdAt).getTime()) > periodMs) return false;
             if (!isNaN(min) && m.amount < min) return false;
             if (!isNaN(max) && m.amount > max) return false;
-            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
+            if (q) { const hay = `${m.note || ''} ${m.performedBy || ''} ${displayUser(m.performedBy)} ${m.amount}`.toLowerCase(); if (!hay.includes(q)) return false; }
             return true;
           });
           const uniqueUsers: string[] = Array.from(new Set(optimisticArchiveMovements.map((m: any) => m.performedBy).filter(Boolean))) as string[];
@@ -2272,7 +2274,7 @@ export default function MoneyHubApp({
                   {[{ id: 'all', label: 'Tous types' },{ id: 'IN', label: '+ Entrées' },{ id: 'OUT', label: '- Sorties' }].map(t => (<button key={t.id} onClick={() => setArchiveTypeFilter(t.id as any)} className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${archiveTypeFilter === t.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'}`}>{t.label}</button>))}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <select value={archiveUserFilter} onChange={e => setArchiveUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40"><option value="all">Tous utilisateurs</option>{uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}</select>
+                  <select value={archiveUserFilter} onChange={e => setArchiveUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40"><option value="all">Tous utilisateurs</option>{uniqueUsers.map(u => <option key={u} value={u}>{displayUser(u)}</option>)}</select>
                   <input type="number" placeholder="Montant min" value={archiveAmountMin} onChange={e => setArchiveAmountMin(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40" />
                   <input type="number" placeholder="Montant max" value={archiveAmountMax} onChange={e => setArchiveAmountMax(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-amber-500/40" />
                 </div>
@@ -2295,7 +2297,7 @@ export default function MoneyHubApp({
                         <span className={`absolute left-0 top-6 bottom-6 w-1 rounded-full ${isTransfer ? 'bg-violet-400 shadow-lg' : isPending ? 'bg-amber-400' : m.type === 'IN' ? 'bg-emerald-500 shadow-lg' : 'bg-rose-500'}`} />
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">{isTransfer && <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-500/40 text-violet-200 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><ArrowLeftRight className="h-2.5 w-2.5" /> Transfert Coffre</span>}{isPending && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><CalendarClock className="h-2.5 w-2.5" /> Prévu</span>}<p className={`text-sm font-bold leading-tight break-words ${isTransfer ? 'text-violet-100' : isPending ? 'text-amber-100' : 'text-neutral-200'}`}>{cleanNote}</p></div>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}{m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {m.performedBy}</p>}{!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}</div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{isPending && m.scheduledFor ? (<p className="text-[9px] text-amber-400 font-black uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> {new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}</p>) : (<p className="text-[9px] text-neutral-600 font-black uppercase">{new Date(m.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p>)}{m.performedBy && <p className="text-[9px] text-blue-400 font-black uppercase flex items-center gap-1"><Users className="h-3 w-3" /> {displayUser(m.performedBy)}</p>}{!isPending && <p className="text-[9px] text-neutral-500 font-black uppercase flex items-center gap-1.5"><History className="h-3 w-3" /> Solde: {formatRawCurrency(running, 'TND')}</p>}</div>
                         </div>
                         <div className="text-right shrink-0 flex items-center gap-3">
                           <p className={`text-lg font-black tracking-tighter ${isPending ? 'text-amber-300' : m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
@@ -2353,8 +2355,8 @@ export default function MoneyHubApp({
               {auditTrails.map((a: any) => (
                 <div key={a.id} className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-3xl flex flex-col gap-2.5 shadow-sm">
                   <div className="flex justify-between items-center"><div className="flex items-center gap-2"><span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${a.action === 'DELETE' || a.action === 'WIPE' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>{a.action}</span><span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">· {a.entityType}</span></div><p className="text-[9px] text-neutral-700 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div>
-                  <p className="text-[11px] font-bold text-neutral-300 leading-relaxed px-1">{a.details}</p>
-                  <p className="text-[9px] text-neutral-600 font-black uppercase px-1 tracking-wider italic text-right">Signature: {a.modifiedBy}</p>
+                  <p className="text-[11px] font-bold text-neutral-300 leading-relaxed px-1">{displayNamesIn(a.details)}</p>
+                  <p className="text-[9px] text-neutral-600 font-black uppercase px-1 tracking-wider italic text-right">Signature: {displayUser(a.modifiedBy)}</p>
                 </div>
               ))}
             </div>
@@ -2366,11 +2368,11 @@ export default function MoneyHubApp({
             {/* CURRENT USER + LOGOUT + CHANGE OWN PASSWORD */}
             <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[48px] flex justify-between items-center shadow-2xl">
               <div>
-                <p className="text-sm font-black text-white uppercase tracking-tighter">{currentUser.username}</p>
+                <p className="text-sm font-black text-white uppercase tracking-tighter">{displayUser(currentUser.username)}</p>
                 <p className="text-[10px] text-neutral-500 uppercase font-black tracking-[0.2em] mt-1.5">{currentUser.role === 'admin' ? '👑 Administrateur' : '👤 Assistant'}</p>
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={() => setPwdModal({ open: true, mode: 'self', targetId: currentUser.id, targetName: currentUser.username })} className="p-4 bg-neutral-950 text-neutral-300 rounded-3xl border border-neutral-800 transition hover:border-neutral-700 shadow-xl" title="Changer mon mot de passe"><KeyRound className="h-5 w-5" /></button>
+                <button onClick={() => setPwdModal({ open: true, mode: 'self', targetId: currentUser.id, targetName: displayUser(currentUser.username) })} className="p-4 bg-neutral-950 text-neutral-300 rounded-3xl border border-neutral-800 transition hover:border-neutral-700 shadow-xl" title="Changer mon mot de passe"><KeyRound className="h-5 w-5" /></button>
                 <button onClick={handleLogout} className="p-4 bg-rose-950/20 text-rose-400 rounded-3xl border border-rose-900/40 transition hover:bg-rose-900/40 shadow-xl"><LogOut className="h-6 w-6" /></button>
               </div>
             </div>
@@ -2418,10 +2420,15 @@ export default function MoneyHubApp({
                     {initialUsers.map((u: any) => (
                       <div key={u.id} className="p-5 bg-neutral-900/60 border border-neutral-800 rounded-[32px] flex justify-between items-center group hover:border-neutral-700 transition">
                         <div className="flex items-center gap-4">
-                          <div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{u.username[0].toUpperCase()}</div>
+                          <div className="h-12 w-12 rounded-2xl bg-neutral-950 border border-neutral-800 flex items-center justify-center text-neutral-400 font-black text-lg shadow-inner">{displayUser(u.username)[0].toUpperCase()}</div>
                           <div className="flex flex-col gap-1">
-                            <p className="text-base font-black text-white uppercase tracking-tight">{u.username}</p>
+                            <p className="text-base font-black text-white uppercase tracking-tight">{displayUser(u.username)}</p>
                             <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{u.role === 'admin' ? '👑 Admin' : '👤 Assistant'}</p>
+                            {/* Seule page ou l'on gere les comptes : on rappelle l'identifiant
+                                de connexion reel quand il differe du nom affiche. */}
+                            {displayUser(u.username) !== u.username && (
+                              <p className="text-[9px] font-bold text-neutral-600 tracking-wider normal-case">connexion : {u.username}</p>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -2431,10 +2438,10 @@ export default function MoneyHubApp({
                             return <>
                               {isProtected && <span className="px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[8px] font-black uppercase tracking-widest" title="Compte propriétaire — protégé">🔒 Owner</span>}
                               {!isSelf && !isProtected && (
-                                <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: u.username })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${u.username}`}><KeyRound className="h-5 w-5" /></button>
+                                <button onClick={() => setPwdModal({ open: true, mode: 'admin_reset', targetId: u.id, targetName: displayUser(u.username) })} className="p-3 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition" title={`Réinitialiser le mot de passe de ${displayUser(u.username)}`}><KeyRound className="h-5 w-5" /></button>
                               )}
                               {!isSelf && !isProtected && (
-                                <button onClick={() => handleDeleteAssistantLoc(u.id, u.username)} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition" title={`Supprimer ${u.username}`}><Trash2 className="h-5 w-5" /></button>
+                                <button onClick={() => handleDeleteAssistantLoc(u.id, displayUser(u.username))} className="p-3 text-rose-500/30 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition" title={`Supprimer ${displayUser(u.username)}`}><Trash2 className="h-5 w-5" /></button>
                               )}
                             </>;
                           })()}
@@ -2967,7 +2974,7 @@ export default function MoneyHubApp({
                             <p className="text-base font-black text-white uppercase tracking-tight mt-1.5 truncate">{m.note}</p>
                             <p className={`text-2xl font-black tracking-tighter mt-1 break-words ${m.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{m.type === 'IN' ? '+' : '-'}{formatRawCurrency(m.amount, 'TND')}</p>
                             <p className="text-[10px] text-neutral-400 font-black uppercase mt-2 tracking-wider">Prévu le {m.scheduledFor ? new Date(m.scheduledFor).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}</p>
-                            <p className="text-[10px] text-neutral-500 font-black mt-1">par {m.performedBy}</p>
+                            <p className="text-[10px] text-neutral-500 font-black mt-1">par {displayUser(m.performedBy)}</p>
                           </div>
                         </div>
                         <div className="flex gap-2.5">
