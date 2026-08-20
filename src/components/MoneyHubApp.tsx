@@ -1230,7 +1230,7 @@ export default function MoneyHubApp({
 
   return (
     <div className={`min-h-screen bg-black text-white font-sans selection:bg-emerald-500/30 ${theme}`}>
-      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-2xl border-b border-neutral-900/50 p-4 pt-6">
+      <header className="app-safe-top sticky top-0 z-40 bg-black/90 backdrop-blur-2xl border-b border-neutral-900/50 p-4">
         <div className="max-w-4xl mx-auto flex flex-col gap-4">
           <div className="flex justify-between items-center px-1">
             <div className="flex items-center gap-2.5">
@@ -2915,7 +2915,7 @@ export default function MoneyHubApp({
         return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={closeDrawer}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-400 shadow-2xl shadow-emerald-500/5" onClick={e => e.stopPropagation()}>
-            <div className={`relative overflow-hidden px-7 pt-7 pb-8 border-b border-white/5 ${positive ? 'bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent' : 'bg-gradient-to-br from-rose-500/10 via-transparent to-transparent'}`}>
+            <div className={`app-safe-top-drawer relative overflow-hidden px-7 pb-8 border-b border-white/5 ${positive ? 'bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent' : 'bg-gradient-to-br from-rose-500/10 via-transparent to-transparent'}`}>
               <div className={`absolute -top-8 -right-6 opacity-[0.07] pointer-events-none ${positive ? 'text-emerald-400' : 'text-rose-400'}`}><Coins className="h-40 w-40" /></div>
               <div className="flex justify-between items-start relative">
                 <div className="flex items-center gap-4 min-w-0"><span className="text-5xl p-2.5 bg-neutral-950/80 border border-neutral-800 rounded-3xl shadow-xl shrink-0">{selectedContact.emoji}</span><div className="min-w-0"><h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none truncate">{selectedContact.name}</h3><p className="text-[10px] text-neutral-400 uppercase font-black tracking-[0.25em] mt-2 truncate">{selectedContact.country || 'GLOBAL'}</p></div></div>
@@ -2958,7 +2958,7 @@ export default function MoneyHubApp({
       {showNotifications && (
         <div className="fixed inset-0 z-[210] bg-black/80 backdrop-blur-sm flex justify-end animate-in fade-in duration-300" onClick={() => setShowNotifications(false)}>
           <div className="w-full max-w-md bg-gradient-to-b from-[#0a0a0c] to-[#050505] border-l border-neutral-800 h-full overflow-y-auto animate-in slide-in-from-right duration-300 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="px-7 pt-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10"><div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{(dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)) > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)}</span>}</div><button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
+            <div className="app-safe-top-drawer px-7 pb-5 border-b border-white/5 flex justify-between items-center sticky top-0 bg-[#0a0a0c]/95 backdrop-blur z-10"><div className="flex items-center gap-3"><Bell className="h-5 w-5 text-amber-400" /><h3 className="text-lg font-black text-white uppercase tracking-tight">Notifications</h3>{(dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)) > 0 && <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-black">{dueReminders.length + (currentUser.role === 'admin' ? tndDueSoon.length + tndOverdue.length : 0)}</span>}</div><button onClick={() => setShowNotifications(false)} className="p-2.5 bg-neutral-950 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
             <div className="px-7 py-6 flex flex-col gap-4">
               {/* TND scheduled movements — admin only */}
               {currentUser.role === 'admin' && (tndDueSoon.length > 0 || tndOverdue.length > 0) && (

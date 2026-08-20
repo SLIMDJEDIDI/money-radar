@@ -114,6 +114,24 @@ body {
   bottom: calc(0.75rem + env(safe-area-inset-bottom));
 }
 
+/* HAUT DE L'ECRAN — barre d'etat du telephone (heure, camera, encoche).
+   L'application tourne en plein ecran : sans marge, la premiere rangee de
+   boutons passe SOUS l'heure et la camera, et devient impossible a toucher.
+
+   La formule prend le plus grand des deux :
+     - un minimum fixe (l'espace d'aujourd'hui, un peu plus sur telephone) ;
+     - la hauteur reelle de l'encoche renvoyee par le telephone, + une marge.
+   Sur ordinateur env(safe-area-inset-top) vaut 0 : rien ne bouge la-bas. */
+.app-safe-top {
+  padding-top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+}
+
+/* Memes regles pour les panneaux lateraux plein ecran (fiche partenaire,
+   notifications) : leur croix de fermeture est tout en haut. */
+.app-safe-top-drawer {
+  padding-top: max(1.75rem, calc(env(safe-area-inset-top) + 1rem));
+}
+
 @media (max-width: 430px) {
   body {
     overflow-x: hidden;
@@ -121,6 +139,16 @@ body {
 
   .app-main-safe-bottom {
     padding-bottom: calc(10.5rem + env(safe-area-inset-bottom));
+  }
+
+  /* Sur telephone on garantit un vide visible meme quand l'appareil ne
+     declare aucune encoche. */
+  .app-safe-top {
+    padding-top: max(2.25rem, calc(env(safe-area-inset-top) + 0.75rem));
+  }
+
+  .app-safe-top-drawer {
+    padding-top: max(2.5rem, calc(env(safe-area-inset-top) + 1rem));
   }
 }
 
