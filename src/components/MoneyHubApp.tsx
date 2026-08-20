@@ -1611,6 +1611,10 @@ export default function MoneyHubApp({
               const planOf = (orderNo: string) => rows
                 .filter((p) => p.orderNo === orderNo)
                 .sort((a, b) => (dueOf(a)?.getTime() ?? Infinity) - (dueOf(b)?.getTime() ?? Infinity));
+              // CHINA TRACK ouvre deja un contrat depuis son adresse
+              // (?order=CT-1008) : on n'a qu'a fabriquer le lien.
+              const ctApp = (chinaTrack as any)?.appUrl || 'https://china-track-pro.vercel.app';
+              const ctLink = (orderNo: string) => `${ctApp}/?order=${encodeURIComponent(orderNo)}`;
               // Même cadre jaune qui respire que la carte du tableau de bord :
               // il dit « cet argent vit dans CHINA TRACK ». Le bloc portait une
               // bordure neutre invisible, donc rien ne le séparait des blocs
@@ -1792,11 +1796,31 @@ export default function MoneyHubApp({
                                     </p>
                                   )}
                                 </div>
-                                {pmt.isDangerousGoods && (
-                                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                {/* Le contrat vit dans CHINA TRACK. On donnait son
+                                    numero, pas la porte : il fallait aller ouvrir l'autre
+                                    application a la main et le retrouver. Le drapeau et le
+                                    nom disent OU l'on va, le texte dit CE QU'on ouvre, et
+                                    la fleche dit que ca part dans un nouvel onglet. */}
+                                <div className="flex flex-wrap items-center gap-2 mt-2">
+                                  {pmt.isDangerousGoods && (
                                     <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border text-rose-300 border-rose-500/40 bg-rose-500/15 shrink-0">&#9888; Dangereux</span>
-                                  </div>
-                                )}
+                                  )}
+                                  <a
+                                    href={ctLink(pmt.orderNo)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    /* La ligne elle-meme se deplie au clic : sans ca, ouvrir
+                                       le contrat replierait le panneau au passage. */
+                                    onClick={(e) => e.stopPropagation()}
+                                    title={`Ouvrir la fiche du contrat ${pmt.orderNo} dans China Track — nouvel onglet`}
+                                    className="w-full sm:w-auto sm:ml-auto inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 hover:bg-amber-500/20 hover:border-amber-500/70 active:scale-95 transition"
+                                  >
+                                    <img src="/china-track-icon.svg" alt="" aria-hidden="true" className="h-3.5 w-3.5 rounded-[3px] shrink-0" />
+                                    <span className="text-[8px] font-black uppercase tracking-[0.18em] text-amber-200 whitespace-nowrap">China Track</span>
+                                    <span className="text-[8px] font-black uppercase tracking-[0.1em] text-neutral-300 whitespace-nowrap">Voir la fiche du contrat</span>
+                                    <ExternalLink className="h-3 w-3 text-amber-300 shrink-0" />
+                                  </a>
+                                </div>
                               </div>
                             </div>
 

@@ -49,6 +49,9 @@ export type ChinaTrackFeed = {
   configured: boolean;
   error: string | null;
   generatedAt: string | null;
+  /** L'adresse de l'APPLICATION CHINA TRACK (pas du flux). C'est elle qu'on
+   *  ouvre quand on clique « voir le contrat » sur une ligne de paiement. */
+  appUrl: string;
   totals: { lateUsd: number; next30Usd: number; totalUsd: number };
   dangerous: ChinaTrackDangerous;
   payments: ChinaTrackPayment[];
@@ -58,12 +61,28 @@ const EMPTY_DG: ChinaTrackDangerous = { count: 0, amountUsd: 0, soonestArrival: 
 
 const EMPTY_TOTALS = { lateUsd: 0, next30Usd: 0, totalUsd: 0 };
 
+/**
+ * L'adresse de l'application, deduite de celle du flux : une seule variable a
+ * changer le jour ou CHINA TRACK demenage. CHINA_TRACK_APP_URL peut forcer une
+ * autre valeur si les deux adresses divergent un jour.
+ */
+function appUrlFrom(feedUrl: string): string {
+  const forced = process.env.CHINA_TRACK_APP_URL;
+  if (forced) return forced.replace(/\/+$/, '');
+  try {
+    return new URL(feedUrl).origin;
+  } catch {
+    return 'https://china-track-pro.vercel.app';
+  }
+}
+
 export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
   const token = process.env.CHINA_TRACK_FEED_TOKEN;
   const url = process.env.CHINA_TRACK_FEED_URL || 'https://china-track-pro.vercel.app/api/upcoming-payments';
+  const appUrl = appUrlFrom(url);
 
   if (!token) {
-    return { configured: false, error: null, generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
+    return { configured: false, error: null, generatedAt: null, appUrl, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
   }
 
   try {
@@ -75,13 +94,14 @@ export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) {
-      return { configured: true, error: `HTTP ${res.status}`, generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
+      return { configured: true, error: `HTTP ${res.status}`, generatedAt: null, appUrl, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
     }
     const data = await res.json();
     return {
       configured: true,
       error: null,
       generatedAt: data.generatedAt ?? null,
+      appUrl,
       totals: {
         lateUsd: Number(data.totals?.lateUsd) || 0,
         next30Usd: Number(data.totals?.next30Usd) || 0,
@@ -96,6 +116,6 @@ export async function fetchChinaTrackPayments(): Promise<ChinaTrackFeed> {
       payments: Array.isArray(data.payments) ? data.payments : [],
     };
   } catch (e: any) {
-    return { configured: true, error: e?.name === 'TimeoutError' ? 'timeout' : 'unreachable', generatedAt: null, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
+    return { configured: true, error: e?.name === 'TimeoutError' ? 'timeout' : 'unreachable', generatedAt: null, appUrl, totals: EMPTY_TOTALS, dangerous: EMPTY_DG, payments: [] };
   }
 }
