@@ -1577,9 +1577,10 @@ export default function MoneyHubApp({
                 Totaux recalculés ICI depuis les lignes affichées, en tranches QUI NE
                 SE CHEVAUCHENT PAS : en retard + sous 30 jours + plus tard = total.
 
-                Survol (ou tap sur mobile) d'une ligne : le contrat se déplie et montre
-                tous ses versements encore dus — acompte, solde, terme, échéance — pour
-                éviter d'aller ouvrir CHINA TRACK juste pour lire un détail. */}
+                Chaque ligne porte elle-même ce qui commande le paiement : le TERME,
+                la DATE LIMITE et l'ARRIVÉE du conteneur. Survol (ou tap sur mobile) :
+                le contrat se déplie et montre les AUTRES versements encore dus — jamais
+                celui de la ligne, qui est déjà écrit au-dessus. */}
             {chinaTrack && chinaTrack.configured && (() => {
               const rows: any[] = Array.isArray(chinaTrack.payments) ? chinaTrack.payments : [];
               const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1692,16 +1693,22 @@ export default function MoneyHubApp({
                       </div>
                     </div>
 
-                    <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest -mb-1">Touche une ligne pour voir le contrat</p>
+                    <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest -mb-1">Touche une ligne pour voir les autres versements du contrat</p>
 
                     <div className="flex flex-col gap-2">
                       {ordered.map((pmt: any, i: number) => {
                         const late = isLate(pmt);
                         const d = dueOf(pmt);
+                        const arrival = arrivalOf(pmt);
+                        // Une date seule ne dit pas s'il faut bouger. Le délai, si.
+                        const daysTo = d ? Math.round((d.getTime() - today.getTime()) / 86400000) : null;
                         const paid = (Number(pmt.amountUsd) || 0) - (Number(pmt.remainingUsd) || 0);
                         const open = ctOpen === pmt.orderNo;
                         const plan = open ? planOf(pmt.orderNo) : [];
                         const planTotal = open ? sum(plan) : 0;
+                        // Le versement de la ligne est déjà écrit en entier au-dessus :
+                        // le panneau ne montre que les AUTRES.
+                        const others = plan.filter((st: any) => !(st.label === pmt.label && st.dueDate === pmt.dueDate));
                         return (
                           <div
                             key={pmt.orderNo + '-' + i}
@@ -1711,11 +1718,21 @@ export default function MoneyHubApp({
                             className={'rounded-2xl border transition cursor-pointer ' + (late ? 'bg-rose-500/5 border-rose-500/25' : 'bg-neutral-950/60 border-neutral-800') + (open ? ' ring-1 ring-white/15 border-white/20' : '')}
                           >
                             <div className="flex items-start gap-3 px-4 py-3">
+                              {/* La pastille disait la date, et la ligne la redisait en
+                                  entier juste à côté. Elle porte donc le COMPTE À REBOURS :
+                                  la date dit QUAND, la pastille dit s'il faut bouger. */}
                               <div className={'shrink-0 w-14 text-center rounded-xl py-1.5 border ' + (late ? 'bg-rose-500/15 border-rose-500/30' : 'bg-white/5 border-white/10')}>
-                                {d ? (<>
-                                  <p className={'text-sm font-black leading-none ' + (late ? 'text-rose-300' : 'text-white')}>{d.getDate()}</p>
-                                  <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 mt-0.5">{d.toLocaleDateString('fr-FR', { month: 'short' })}</p>
-                                </>) : (<p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>)}
+                                {daysTo === null ? (
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-tight">date à fixer</p>
+                                ) : daysTo < 0 ? (<>
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-rose-400/90 leading-none">Retard</p>
+                                  <p className="text-sm font-black leading-none text-rose-300 mt-1">{-daysTo} j</p>
+                                </>) : daysTo === 0 ? (
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-amber-300 leading-tight">Aujour<wbr />d&apos;hui</p>
+                                ) : (<>
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500 leading-none">Dans</p>
+                                  <p className={'text-sm font-black leading-none mt-1 ' + (daysTo <= 7 ? 'text-amber-300' : 'text-white')}>{daysTo} j</p>
+                                </>)}
                               </div>
                               <div className="min-w-0 flex-1">
                                 {/* Nom + montant sur la même ligne : le montant garde sa place à
@@ -1727,8 +1744,12 @@ export default function MoneyHubApp({
                                     {paid > 0.005 && <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mt-0.5 whitespace-nowrap">déjà payé {formatUSD(paid)}</p>}
                                   </div>
                                 </div>
-                                {/* Les descriptions occupent toute la largeur et s'enroulent. */}
-                                <p className="text-[10px] font-bold text-neutral-400 break-words mt-1">{pmt.label}</p>
+                                {/* Ce qu'on achète : le nom du produit était caché derrière
+                                    un clic alors qu'il dit de quoi on parle. */}
+                                <p className="text-[10px] font-bold text-neutral-400 break-words mt-1">
+                                  <span className="font-black uppercase tracking-widest text-neutral-500">{pmt.orderNo}</span>
+                                  {pmt.productName ? <> · {pmt.productName}</> : null}
+                                </p>
                                 {/* Le contrat, c'est la marchandise. Le fret maritime se paie
                                     avec le solde mais reste un cout separe : on ne le fond pas
                                     dans le montant de l'usine sans le dire. */}
@@ -1737,61 +1758,83 @@ export default function MoneyHubApp({
                                     Marchandise {formatUSD(pmt.amountUsd - pmt.freightUsd)} + fret maritime {formatUSD(pmt.freightUsd)}
                                   </p>
                                 )}
-                                {arrivalOf(pmt) && (
-                                  pmt.isDangerousGoods ? (
-                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-400 mt-0.5 break-words leading-relaxed">
-                                      Tout doit être payé avant l&apos;arrivée · conteneur le {fmtShort(arrivalOf(pmt))}
-                                    </p>
-                                  ) : (
-                                    <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 mt-0.5 break-words leading-relaxed">
-                                      Arrivée conteneur {fmtShort(arrivalOf(pmt))}
-                                    </p>
-                                  )
-                                )}
-                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                  <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest whitespace-nowrap">{pmt.orderNo}</span>
-                                  {pmt.isDangerousGoods && (
-                                    <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border text-rose-300 border-rose-500/40 bg-rose-500/15 shrink-0">&#9888; Dangereux</span>
+                                {/* LES TROIS FAITS QUI COMMANDENT CE PAIEMENT, nommés, sur
+                                    la ligne elle-même. Avant : le terme passait en petit gris
+                                    sous le nom, la date limite n'existait que comme pastille
+                                    « 26 AOÛT » sans dire ce qu'elle était, et l'arrivée était
+                                    collée à la consigne dangereux. */}
+                                <div className="mt-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 flex flex-col gap-2 sm:grid sm:grid-cols-[96px_1fr] sm:gap-x-3 sm:gap-y-1.5 sm:items-baseline">
+                                  {/* Sur téléphone la valeur n'a que ~165 px : l'étiquette
+                                      passe AU-DESSUS. À partir de sm: le sous-bloc disparaît
+                                      dans la grille et on retrouve deux colonnes. */}
+                                  <div className="sm:contents">
+                                    <p className="text-[8px] font-black uppercase tracking-[0.15em] text-neutral-500">Terme</p>
+                                    <p className="text-[11px] font-black text-white break-words leading-snug">{pmt.label}</p>
+                                  </div>
+                                  <div className="sm:contents">
+                                    <p className="text-[8px] font-black uppercase tracking-[0.15em] text-neutral-500">À payer avant</p>
+                                    <p className={'text-xs font-black break-words leading-snug ' + (late ? 'text-rose-300' : 'text-amber-300')}>{fmtDate(d)}</p>
+                                  </div>
+                                  {arrival && (
+                                    <div className="sm:contents">
+                                      <p className="text-[8px] font-black uppercase tracking-[0.15em] text-neutral-500">Arrivée port</p>
+                                      <p className="text-[11px] font-black text-neutral-200 break-words leading-snug">{fmtDate(arrival)}</p>
+                                    </div>
                                   )}
-                                  {late && <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">en retard</span>}
+                                  {pmt.isDangerousGoods && (
+                                    <p className="sm:col-span-2 text-[9px] font-black uppercase tracking-widest text-rose-300 leading-relaxed border-t border-rose-500/20 pt-1.5">
+                                      &#9888; Le port ne garde pas ce conteneur — tout doit être payé avant l&apos;arrivée.
+                                    </p>
+                                  )}
                                 </div>
+                                {pmt.isDangerousGoods && (
+                                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                    <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border text-rose-300 border-rose-500/40 bg-rose-500/15 shrink-0">&#9888; Dangereux</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
                             {open && (
                               <div className="border-t border-white/10 px-4 py-3.5 bg-black/40 rounded-b-2xl animate-in fade-in duration-150">
-                                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.2em]">Contrat {pmt.orderNo}</p>
-                                    {pmt.productName && <p className="text-[11px] font-bold text-neutral-200 mt-0.5 break-words">{pmt.productName}</p>}
-                                  </div>
-                                  <p className="text-[10px] font-black text-white uppercase tracking-widest shrink-0">Reste {formatUSD(planTotal)}</p>
-                                </div>
-                                <p className="text-[9px] font-black text-neutral-600 uppercase tracking-[0.2em] mt-3 mb-1.5">Échéancier encore dû</p>
-                                <div className="flex flex-col gap-1">
-                                  {plan.map((st: any, k: number) => {
-                                    const sd = dueOf(st);
-                                    const stLate = isLate(st);
-                                    const stPaid = (Number(st.amountUsd) || 0) - (Number(st.remainingUsd) || 0);
-                                    const isThis = st.label === pmt.label && st.dueDate === pmt.dueDate;
-                                    return (
-                                      <div key={k} className={'flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 ' + (isThis ? 'bg-white/10' : '')}>
-                                        <div className="min-w-0 flex-1">
-                                          <p className={'text-[11px] font-black break-words leading-snug ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
-                                          <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
-                                            {fmtDate(sd)}
-                                            {arrivalOf(st) ? ` · arrivée ${fmtShort(arrivalOf(st))}` : ''}
-                                          </p>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                          <p className={'text-[11px] font-black ' + (stLate ? 'text-rose-300' : 'text-white')}>{formatUSD(st.remainingUsd)}</p>
-                                          {stPaid > 0.005 && <p className="text-[9px] font-bold text-emerald-400/70">payé {formatUSD(stPaid)}</p>}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                                <p className="text-[9px] font-bold text-neutral-600 mt-2.5 leading-relaxed">Seuls les versements encore dus apparaissent. Un solde « contre B/L » est daté sur l&apos;arrivée du conteneur au port ; sur des marchandises dangereuses il tombe deux semaines avant, tout doit être payé et le telex release obtenu avant que la boîte touche le quai.</p>
+                                {/* La ligne au-dessus dit déjà le terme, la date limite,
+                                    l'arrivée et le montant. On ne les réécrit pas : ce
+                                    panneau n'ajoute que ce qui n'est pas encore visible. */}
+                                {others.length > 0 ? (
+                                  <>
+                                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                      <p className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.2em]">
+                                        {others.length} autre{others.length > 1 ? 's' : ''} versement{others.length > 1 ? 's' : ''} sur ce contrat
+                                      </p>
+                                      <p className="text-[10px] font-black text-white uppercase tracking-widest shrink-0">Contrat entier · reste {formatUSD(planTotal)}</p>
+                                    </div>
+                                    <div className="flex flex-col gap-1 mt-2">
+                                      {others.map((st: any, k: number) => {
+                                        const sd = dueOf(st);
+                                        const stLate = isLate(st);
+                                        const stPaid = (Number(st.amountUsd) || 0) - (Number(st.remainingUsd) || 0);
+                                        return (
+                                          <div key={k} className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 bg-white/[0.04]">
+                                            <div className="min-w-0 flex-1">
+                                              <p className={'text-[11px] font-black break-words leading-snug ' + (stLate ? 'text-rose-300' : 'text-neutral-200')}>{st.label}</p>
+                                              <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest break-words leading-relaxed">
+                                                à payer avant {fmtDate(sd)}
+                                                {arrivalOf(st) ? ` · arrivée ${fmtShort(arrivalOf(st))}` : ''}
+                                              </p>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                              <p className={'text-[11px] font-black ' + (stLate ? 'text-rose-300' : 'text-white')}>{formatUSD(st.remainingUsd)}</p>
+                                              {stPaid > 0.005 && <p className="text-[9px] font-bold text-emerald-400/70">payé {formatUSD(stPaid)}</p>}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest leading-relaxed">C&apos;est le dernier versement encore dû sur ce contrat.</p>
+                                )}
+                                <p className="text-[9px] font-bold text-neutral-600 mt-2.5 leading-relaxed">Un solde « contre B/L » est daté sur l&apos;arrivée du conteneur au port ; sur des marchandises dangereuses il tombe deux semaines avant, tout doit être payé et le telex release obtenu avant que la boîte touche le quai. Seuls les versements encore dus apparaissent.</p>
                               </div>
                             )}
                           </div>
