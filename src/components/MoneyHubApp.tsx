@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, memo } from 'react';
+import React, { useState, useTransition, useMemo, useEffect, useOptimistic, useCallback, useRef, memo } from 'react';
 import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
@@ -508,7 +508,12 @@ export default function MoneyHubApp({
     return `${symbol} ${amount}`;
   }, []);
 
+  // Quand la plateforme a relu les donnees pour la derniere fois. Sert a ne
+  // pas relancer un chargement complet a chaque fois que l'app repasse devant.
+  const lastRefreshRef = useRef<number>(Date.now());
+
   const refreshHubState = async () => {
+    lastRefreshRef.current = Date.now();
     setIsRefreshing(true);
     try {
       const res = await fetch(`/api/dashboard-data?t=${Date.now()}`);
@@ -546,6 +551,51 @@ export default function MoneyHubApp({
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   };
+
+  // RETOUR AU PREMIER PLAN = RELECTURE.
+  //
+  // Le bloc CHINA TRACK vient d'une AUTRE application et n'est jamais stocke
+  // ici : il n'existe que le temps d'un chargement. Sur telephone, l'app reste
+  // ouverte des heures ; on enregistrait donc un paiement chez CHINA TRACK,
+  // on revenait ici, et le montant affiche etait celui d'avant — sans erreur,
+  // sans avertissement, juste un chiffre perime sur un ecran d'argent.
+  //
+  // Une relecture par minute au maximum : rouvrir l'app dix fois de suite ne
+  // doit pas declencher dix chargements complets.
+  useEffect(() => {
+    if (!currentUser) return;
+    const wake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (Date.now() - lastRefreshRef.current < 60000) return;
+      refreshHubState();
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  // L'AGE DU CHIFFRE CHINA TRACK, ecrit noir sur blanc.
+  // generatedAt est l'heure a laquelle CHINA TRACK a calcule ces montants.
+  // Le compteur se reveille toutes les 30 s pour que le texte vieillisse tout
+  // seul a l'ecran, meme si personne ne touche a rien.
+  const [freshnessTick, setFreshnessTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFreshnessTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const chinaFresh = useMemo(() => {
+    void freshnessTick;
+    const raw = (chinaTrack as any)?.generatedAt;
+    const t = raw ? new Date(raw).getTime() : NaN;
+    if (!Number.isFinite(t)) return { label: null as string | null, stale: false };
+    const min = Math.max(0, Math.floor((Date.now() - t) / 60000));
+    const label = min < 1 ? "a l'instant" : min < 60 ? `il y a ${min} min` : `il y a ${Math.floor(min / 60)} h`;
+    return { label, stale: min >= 10 };
+  }, [chinaTrack, freshnessTick]);
 
   // One-time cleanup: remove the word "BIAT" from the two bank account names while keeping
   // the BIAT logo badge as the visual bank identifier.
@@ -1379,6 +1429,13 @@ export default function MoneyHubApp({
                       <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mt-1">
                         {rows.length > 0 ? `${rows.length} paiement${rows.length > 1 ? 's' : ''} à venir` : 'Aucun échéancier saisi'}
                       </p>
+                      {/* Ce montant vient de CHINA TRACK. Il date du dernier
+                          chargement, pas de maintenant : il faut le dire. */}
+                      {chinaFresh.label && (
+                        <p className={'text-[9px] font-black uppercase tracking-widest mt-1.5 ' + (chinaFresh.stale ? 'text-amber-400' : 'text-neutral-600')}>
+                          Chiffres lus {chinaFresh.label}
+                        </p>
+                      )}
                     </div>
 
                     {/* Deux tuiles : QUAND, et MARCHANDISES DANGEREUSES. */}
@@ -1552,10 +1609,26 @@ export default function MoneyHubApp({
               <div id="china-track" className="scroll-mt-4 bg-neutral-900/60 border border-neutral-800 rounded-[32px] p-6 flex flex-col gap-5 shadow-md">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-black shadow-lg"><Coins className="h-5 w-5" /></div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <h3 className="text-xs font-black text-neutral-300 uppercase tracking-[0.2em]">China Track · Paiements à venir</h3>
                     <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mt-0.5">Fournisseurs USD · saisis dans China Track</p>
+                    {/* Rien n'est stocke ici : ces montants datent de la derniere
+                        relecture chez China Track, pas de l'instant present. */}
+                    {chinaFresh.label && (
+                      <p className={'text-[9px] font-black uppercase tracking-widest mt-1 ' + (chinaFresh.stale ? 'text-amber-400' : 'text-neutral-600')}>
+                        Chiffres lus {chinaFresh.label}{chinaFresh.stale ? ' · à relire' : ''}
+                      </p>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => refreshHubState()}
+                    aria-label="Relire les paiements China Track"
+                    title="Relire les paiements China Track"
+                    className="shrink-0 p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-300 active:scale-90 transition"
+                  >
+                    <RefreshCw className={'h-4 w-4 ' + (isRefreshing ? 'animate-spin' : '')} />
+                  </button>
                 </div>
 
                 {/* Marchandises dangereuses : le port ne les garde pas. Le
