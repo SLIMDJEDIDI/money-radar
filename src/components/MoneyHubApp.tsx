@@ -2598,20 +2598,20 @@ export default function MoneyHubApp({
       </main>
 
       <nav className="app-bottom-nav fixed bottom-4 left-0 right-0 z-40 px-3 sm:px-4 flex justify-center pointer-events-none">
-        <div className="glass-panel w-full max-w-[680px] border border-neutral-800 rounded-[26px] sm:rounded-[36px] p-1.5 sm:p-2.5 shadow-2xl flex items-center gap-0.5 sm:gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl">
+        <div className="glass-panel w-full max-w-[680px] lg:max-w-[896px] border border-neutral-800 rounded-[26px] sm:rounded-[36px] p-1.5 sm:p-2.5 shadow-2xl flex flex-wrap lg:flex-nowrap items-center justify-center gap-1 lg:gap-1.5 pointer-events-auto shadow-emerald-500/5 ring-1 ring-white/10 backdrop-blur-3xl">
           {[
-            { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'treasury', label: 'Coffre', icon: <CoffreIcon className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: false },
-            { id: 'banque', label: 'Banque', icon: <Landmark className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: false },
-            { id: 'credit', label: 'Crédit', icon: <Receipt className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'archive', label: 'Archive', icon: <Archive className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'history', label: 'Audit', icon: <History className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
-            { id: 'settings', label: 'Param', icon: <Settings className="h-5 w-5 sm:h-6 sm:w-6" />, adminOnly: true },
+            { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'currencies', label: 'Devises', icon: <WalletCards className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'treasury', label: 'Coffre', icon: <CoffreIcon className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: false },
+            { id: 'banque', label: 'Banque', icon: <Landmark className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: false },
+            { id: 'credit', label: 'Crédit', icon: <Receipt className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'archive', label: 'Archive', icon: <Archive className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'contacts', label: 'Contacts', icon: <Users className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'history', label: 'Audit', icon: <History className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
+            { id: 'settings', label: 'Paramètres', icon: <Settings className="h-5 w-5 lg:h-6 lg:w-6" />, adminOnly: true },
           ].filter(s => !s.adminOnly || currentUser?.role === 'admin').map(s => (
-            <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex flex-1 min-w-0 flex-col items-center gap-1 px-1 py-2.5 sm:gap-1.5 sm:px-5 sm:py-3.5 rounded-[20px] sm:rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl sm:scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
-              {s.icon}<span className="w-full truncate text-center text-[7px] sm:text-[9px] font-black uppercase tracking-tight">{s.label}</span>
+            <button key={s.id} onClick={() => navigateTo(s.id)} className={`flex basis-[18%] grow lg:basis-0 min-w-0 flex-col items-center gap-1 px-1 py-2 lg:gap-1.5 lg:px-3 lg:py-3.5 rounded-[20px] sm:rounded-[28px] transition-all duration-300 active:scale-90 ${activeSection === s.id ? 'bg-white text-black font-black shadow-2xl lg:scale-105' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              {s.icon}<span className="w-full truncate text-center text-[8px] lg:text-[9px] font-black uppercase tracking-tight">{s.label}</span>
             </button>
           ))}
         </div>
