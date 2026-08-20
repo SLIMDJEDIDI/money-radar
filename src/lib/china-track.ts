@@ -35,6 +35,9 @@ export type ChinaTrackPayment = {
   status: 'Late' | 'Upcoming' | 'Partly Paid';
   remainingUsd: number;
   amountUsd: number;
+  /** Le fret maritime contenu dans cette echeance. Il se paie, mais ce n'est
+   *  PAS ce qui a ete convenu avec l'usine : on l'affiche a part. */
+  freightUsd?: number;
   dueDate: string | null; // YYYY-MM-DD
   /** Arrivée prévue du conteneur au port — seulement sur un solde « contre B/L ». */
   arrivalDate?: string | null; // YYYY-MM-DD

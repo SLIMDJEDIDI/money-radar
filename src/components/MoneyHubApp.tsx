@@ -1429,6 +1429,11 @@ export default function MoneyHubApp({
                       <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mt-1">
                         {rows.length > 0 ? `${rows.length} paiement${rows.length > 1 ? 's' : ''} à venir` : 'Aucun échéancier saisi'}
                       </p>
+                      {rows.some((p: any) => Number(p.freightUsd) > 0) && (
+                        <p className="text-[9px] font-black uppercase tracking-widest text-teal-300/70 mt-1.5">
+                          Fret maritime compris · detail dans Devises
+                        </p>
+                      )}
                       {/* Ce montant vient de CHINA TRACK. Il date du dernier
                           chargement, pas de maintenant : il faut le dire. */}
                       {chinaFresh.label && (
@@ -1724,6 +1729,14 @@ export default function MoneyHubApp({
                                 </div>
                                 {/* Les descriptions occupent toute la largeur et s'enroulent. */}
                                 <p className="text-[10px] font-bold text-neutral-400 break-words mt-1">{pmt.label}</p>
+                                {/* Le contrat, c'est la marchandise. Le fret maritime se paie
+                                    avec le solde mais reste un cout separe : on ne le fond pas
+                                    dans le montant de l'usine sans le dire. */}
+                                {Number(pmt.freightUsd) > 0 && (
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-teal-300/80 mt-0.5 break-words leading-relaxed">
+                                    Marchandise {formatUSD(pmt.amountUsd - pmt.freightUsd)} + fret maritime {formatUSD(pmt.freightUsd)}
+                                  </p>
+                                )}
                                 {arrivalOf(pmt) && (
                                   pmt.isDangerousGoods ? (
                                     <p className="text-[9px] font-black uppercase tracking-widest text-rose-400 mt-0.5 break-words leading-relaxed">
