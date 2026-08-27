@@ -29,7 +29,12 @@ async function ensurePlannedTypeColumn() {
 }
 
 // 1. Fetch all money hub data with "Facebook-fast" server-side sorting and aggregation
-export async function getHubDashboardData(searchQuery: string = '') {
+// `auditLimit` — combien de lignes du journal d'audit renvoyer. La valeur par défaut
+// reste 40 : c'est tout ce dont l'écran a besoin, et le payload ne grossit pas. Une
+// réconciliation de caisse, elle, doit pouvoir remonter plus loin pour retrouver un
+// mouvement SUPPRIMÉ (le journal d'audit en garde la copie). Réservé à l'admin,
+// borné, et strictement en LECTURE.
+export async function getHubDashboardData(searchQuery: string = '', auditLimit: number = 40) {
   try {
     // Self-healing: ensure the reminder plannedType column exists before any query selects it.
     // Idempotent, non-destructive, and now runs only once per server instance (see above).
@@ -77,7 +82,7 @@ export async function getHubDashboardData(searchQuery: string = '') {
       prisma.hubContact.findMany(), // Manual sorting below
       prisma.hubTransaction.findMany({ include: { contact: true }, orderBy: { createdAt: 'desc' } }),
       prisma.hubReminder.findMany({ include: { contact: true }, orderBy: { dueDate: 'asc' } }),
-      prisma.hubAuditTrail.findMany({ orderBy: { createdAt: 'desc' }, take: 40 }),
+      prisma.hubAuditTrail.findMany({ orderBy: { createdAt: 'desc' }, take: Math.min(Math.max(Math.trunc(auditLimit) || 40, 1), 1000) }),
       prisma.hubUser.findMany({
         orderBy: { username: 'asc' },
         select: { id: true, username: true, role: true, canWrite: true, canEdit: true, canDelete: true, createdAt: true },
