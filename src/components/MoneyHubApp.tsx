@@ -2640,8 +2640,45 @@ export default function MoneyHubApp({
           // Chaque ligne est classée UNE fois, puis les compteurs et la liste
           // se lisent sur la même base — les nombres affichés sur les onglets
           // sont donc toujours ceux de la liste.
-          type Tagged = { a: any; acct: typeof AUDIT_ACCOUNTS[number]; subj: typeof AUDIT_SUBJECTS[number] };
-          const tagged: Tagged[] = ((auditTrails || []) as any[]).map((a: any) => ({ a, acct: auditAccountOf(a), subj: auditSubjectOf(a) }));
+          // LA BANQUE N'EST PAS UNE CAISSE, C'EN EST PLUSIEURS.
+          // L'argent est déjà séparé par compte dans la section BANQUE ; l'audit
+          // doit l'être de la même façon, avec la MÊME couleur par compte, sinon
+          // on ne peut pas contrôler VLT MOTORS sans VOLTROP par-dessus.
+          // L'écriture d'audit ne porte que l'id du mouvement : on remonte au
+          // compte par le mouvement, ou par la copie gardée en cas de suppression.
+          const bankAccountIdOf = (a: any): string | null => {
+            if (a.entityType !== 'BANK' && !/^BANK_/.test(a.action || '')) return null;
+            try { const o = JSON.parse(a.oldValue || 'null'); if (o && o.accountId) return String(o.accountId); } catch { /* pas du JSON */ }
+            const m = (bankMovements || []).find((x: any) => x.id === a.entityId);
+            if (m) return String(m.accountId);
+            // Une action portée par le compte lui-même (création, renommage).
+            if ((bankAccounts || []).some((x: any) => x.id === a.entityId)) return String(a.entityId);
+            return null;
+          };
+          // Chaque compte bancaire devient un onglet à part entière, teinté comme
+          // sa carte dans BANQUE. Les caisses uniques gardent leur couleur.
+          const accountTabs: { key: string; label: string; chip: string; rail: string }[] = [
+            { key: 'coffre', label: 'Coffre', ...AUDIT_TONES.blue },
+            ...((bankAccounts || []) as any[]).map((acc: any) => {
+              const p = bankPalette(acc.id);
+              return { key: `bank:${acc.id}`, label: acc.name, chip: `${p.bgSoft} ${p.borderSoft} ${p.text}`, rail: p.solid };
+            }),
+            { key: 'banque', label: 'Banque (compte retiré)', ...AUDIT_TONES.teal },
+            { key: 'credit', label: 'Crédit', ...AUDIT_TONES.rose },
+            { key: 'archive', label: 'Archive', ...AUDIT_TONES.amber },
+            { key: 'partenaires', label: 'Partenaires', ...AUDIT_TONES.emerald },
+            { key: 'systeme', label: 'Système', ...AUDIT_TONES.neutral },
+          ];
+          const tabByKey = new Map(accountTabs.map(t => [t.key, t]));
+          const resolveAccount = (a: any) => {
+            const base = auditAccountOf(a);
+            if (base.key !== 'banque') return tabByKey.get(base.key)!;
+            const id = bankAccountIdOf(a);
+            return (id && tabByKey.get(`bank:${id}`)) || tabByKey.get('banque')!;
+          };
+
+          type Tagged = { a: any; acct: { key: string; label: string; chip: string; rail: string }; subj: typeof AUDIT_SUBJECTS[number] };
+          const tagged: Tagged[] = ((auditTrails || []) as any[]).map((a: any) => ({ a, acct: resolveAccount(a), subj: auditSubjectOf(a) }));
           const periodMs = auditPeriod === 'today' ? 86400000 : auditPeriod === '7d' ? 7 * 86400000 : auditPeriod === '30d' ? 30 * 86400000 : 0;
           const now = Date.now();
           const q = auditSearch.trim().toLowerCase();
@@ -2697,16 +2734,16 @@ export default function MoneyHubApp({
                 {/* Un choix qui ne donne rien n'est pas un choix : on le retire
                     au lieu de le griser. « Tout » et la sélection en cours
                     restent toujours là, sinon la barre sauterait sous le doigt. */}
-                {[{ key: 'all', label: 'Tout', tone: 'neutral' }, ...AUDIT_ACCOUNTS]
+                {[{ key: 'all', label: 'Tout', ...AUDIT_TONES.neutral }, ...accountTabs]
                   .filter(t => t.key === 'all' || auditAccount === t.key || countAcct(t.key) > 0)
                   .map(t => {
                     const n = countAcct(t.key); const on = auditAccount === t.key;
                     return (
                       <button key={t.key} onClick={() => setAuditAccount(t.key)}
-                        className={`shrink-0 min-h-[44px] flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? AUDIT_TONES[t.tone].chip + ' ring-1 ring-white/20' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${AUDIT_TONES[t.tone].rail}`} />
-                        {t.label}
-                        <span className="tabular-nums opacity-70">{n}</span>
+                        className={`shrink-0 min-h-[44px] max-w-full flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? t.chip + ' ring-1 ring-white/20' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${t.rail}`} />
+                        <span className="truncate">{t.label}</span>
+                        <span className="tabular-nums opacity-70 shrink-0">{n}</span>
                       </button>
                     );
                   })}
@@ -2775,8 +2812,7 @@ export default function MoneyHubApp({
               {rows.slice(0, auditVisible).map(({ a, acct, subj }: any) => {
                 const flow = auditFlowOf(a);
                 const amt = auditAmountOf(a);
-                const tone = AUDIT_TONES[acct.tone];
-                const rail = flow === 'del' ? 'bg-rose-500' : flow === 'in' ? 'bg-emerald-500' : flow === 'out' ? 'bg-rose-400/70' : tone.rail;
+                const rail = flow === 'del' ? 'bg-rose-500' : flow === 'in' ? 'bg-emerald-500' : flow === 'out' ? 'bg-rose-400/70' : acct.rail;
                 const amtColor = flow === 'del' ? 'text-rose-300 line-through' : flow === 'in' ? 'text-emerald-400' : flow === 'out' ? 'text-rose-400' : 'text-neutral-300';
                 const sign = flow === 'in' ? '+' : flow === 'out' ? '−' : '';
                 return (
@@ -2784,7 +2820,7 @@ export default function MoneyHubApp({
                     <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${rail}`} />
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border ${tone.chip}`}>{acct.label}</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border ${acct.chip}`}>{acct.label}</span>
                         <span className={`text-[9px] font-black uppercase tracking-widest ${subj.key === 'suppression' ? 'text-rose-300' : 'text-neutral-400'}`}>{subj.label}</span>
                       </div>
                       <p className="text-[9px] text-neutral-400 font-black uppercase shrink-0 tabular-nums">{new Date(a.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>

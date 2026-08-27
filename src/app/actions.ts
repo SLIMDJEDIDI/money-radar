@@ -1230,9 +1230,12 @@ export async function createBankMovement(formData: FormData) {
       await logAudit(tx, {
         entityType: 'BANK', entityId: movement.id,
         action: !isSettled ? (type === 'IN' ? 'BANK_IN_SCHEDULED' : 'BANK_OUT_SCHEDULED') : (type === 'IN' ? 'BANK_IN' : 'BANK_OUT'),
+        // Le NOM DU COMPTE est écrit dans la phrase : la BANQUE n'est pas une
+        // caisse, c'en est plusieurs, et un journal qui dit seulement « BANQUE »
+        // ne permet pas de contrôler un compte en particulier.
         details: !isSettled
-          ? `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE PLANIFIÉE ${amount} pour ${scheduledFor!.toLocaleDateString('fr-FR')}: ${note}`
-          : `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE de ${amount}: ${note}`,
+          ? `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE ${acc.name} PLANIFIÉE ${amount} pour ${scheduledFor!.toLocaleDateString('fr-FR')}: ${note}`
+          : `${type === 'IN' ? 'Entrée' : 'Sortie'} BANQUE ${acc.name} de ${amount}: ${note}`,
         modifiedBy: session.username,
       });
     });
@@ -1268,6 +1271,8 @@ export async function createBankBatchDisbursement(formData: FormData) {
     }
 
     const total = items.reduce((sum, item) => sum + item.amount, 0);
+    const batchAcc = await prisma.hubBankAccount.findUnique({ where: { id: accountId } });
+    if (!batchAcc) return { success: false, error: 'Compte bancaire introuvable' };
     await prisma.$transaction(async (tx) => {
       const created = await Promise.all(items.map(item => tx.hubBankMovement.create({
         data: { accountId, amount: item.amount, type: 'OUT', note: item.note, performedBy: session.username, scheduledFor, isSettled },
@@ -1275,7 +1280,7 @@ export async function createBankBatchDisbursement(formData: FormData) {
       await logAudit(tx, {
         entityType: 'BANK', entityId: created[0]?.id,
         action: isSettled ? 'BANK_BATCH_OUT' : 'BANK_BATCH_OUT_SCHEDULED',
-        details: `${items.length} décaissements BANQUE ${isSettled ? 'enregistrés' : 'planifiés'} — total ${total}${scheduledFor ? ` pour ${scheduledFor.toLocaleDateString('fr-FR')}` : ''}`,
+        details: `${items.length} décaissements BANQUE ${batchAcc.name} ${isSettled ? 'enregistrés' : 'planifiés'} — total ${total}${scheduledFor ? ` pour ${scheduledFor.toLocaleDateString('fr-FR')}` : ''}`,
         newValue: JSON.stringify(items.map(({ amount, note }) => ({ amount, note }))),
         modifiedBy: session.username,
       });
@@ -1294,8 +1299,9 @@ export async function settleBankMovement(id: string) {
     await prisma.$transaction(async (tx) => {
       const m = await tx.hubBankMovement.findUnique({ where: { id } });
       if (!m || m.isSettled) return;
+      const sAcc = await tx.hubBankAccount.findUnique({ where: { id: m.accountId } });
       await tx.hubBankMovement.update({ where: { id }, data: { isSettled: true } });
-      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_SETTLE', details: `Mouvement BANQUE confirmé (${m.amount} ${m.type})`, modifiedBy: session.username });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_SETTLE', details: `Mouvement BANQUE ${sAcc?.name || ''} confirmé (${m.amount} ${m.type})`, modifiedBy: session.username });
     });
     revalidatePath('/');
     return { success: true };
@@ -1312,8 +1318,9 @@ export async function updateBankMovementNote(id: string, rawNote: string) {
       const movement = await tx.hubBankMovement.findUnique({ where: { id } });
       if (!movement) throw new Error('NOT_FOUND');
       if (movement.note === note) return;
+      const nAcc = await tx.hubBankAccount.findUnique({ where: { id: movement.accountId } });
       await tx.hubBankMovement.update({ where: { id }, data: { note } });
-      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_NOTE_EDIT', details: `Note BANQUE modifiée`, oldValue: movement.note, newValue: note, modifiedBy: session.username });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_NOTE_EDIT', details: `Note BANQUE ${nAcc?.name || ''} modifiée — ${movement.type === 'IN' ? 'Entrée' : 'Sortie'} ${movement.amount} : « ${movement.note} » → « ${note} »`, oldValue: movement.note, newValue: note, modifiedBy: session.username });
     });
     revalidatePath('/');
     return { success: true };
@@ -1330,8 +1337,9 @@ export async function deleteBankMovement(id: string) {
     await prisma.$transaction(async (tx) => {
       const old = await tx.hubBankMovement.findUnique({ where: { id } });
       if (!old) return;
+      const dAcc = await tx.hubBankAccount.findUnique({ where: { id: old.accountId } });
       await tx.hubBankMovement.delete({ where: { id } });
-      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_DELETE', oldValue: JSON.stringify(old), details: `Suppression mouvement BANQUE: ${old.amount} (${old.type})`, modifiedBy: session.username });
+      await logAudit(tx, { entityType: 'BANK', entityId: id, action: 'BANK_DELETE', oldValue: JSON.stringify(old), details: `Suppression mouvement BANQUE ${dAcc?.name || ''}: ${old.amount} (${old.type})`, modifiedBy: session.username });
     });
     revalidatePath('/');
     return { success: true };
