@@ -2646,11 +2646,26 @@ export default function MoneyHubApp({
           // on ne peut pas contrôler VLT MOTORS sans VOLTROP par-dessus.
           // L'écriture d'audit ne porte que l'id du mouvement : on remonte au
           // compte par le mouvement, ou par la copie gardée en cas de suppression.
+          // Un mouvement supprimé ne figure plus dans la liste des mouvements,
+          // mais sa SUPPRESSION en garde une copie complète — l'id ET le compte.
+          // On s'en sert pour rattacher aussi les écritures ANTÉRIEURES du même
+          // mouvement (sa création, sa confirmation), qui autrement resteraient
+          // sans compte alors que l'information existe.
+          const deletedBankAccount = new Map<string, string>();
+          for (const a of ((auditTrails || []) as any[])) {
+            if (!/^BANK_/.test(a.action || '')) continue;
+            try {
+              const o = JSON.parse(a.oldValue || 'null');
+              if (o && o.id && o.accountId) deletedBankAccount.set(String(o.id), String(o.accountId));
+            } catch { /* pas du JSON */ }
+          }
           const bankAccountIdOf = (a: any): string | null => {
             if (a.entityType !== 'BANK' && !/^BANK_/.test(a.action || '')) return null;
             try { const o = JSON.parse(a.oldValue || 'null'); if (o && o.accountId) return String(o.accountId); } catch { /* pas du JSON */ }
             const m = (bankMovements || []).find((x: any) => x.id === a.entityId);
             if (m) return String(m.accountId);
+            const fromDeleted = deletedBankAccount.get(String(a.entityId));
+            if (fromDeleted) return fromDeleted;
             // Une action portée par le compte lui-même (création, renommage).
             if ((bankAccounts || []).some((x: any) => x.id === a.entityId)) return String(a.entityId);
             return null;
@@ -2663,7 +2678,7 @@ export default function MoneyHubApp({
               const p = bankPalette(acc.id);
               return { key: `bank:${acc.id}`, label: acc.name, chip: `${p.bgSoft} ${p.borderSoft} ${p.text}`, rail: p.solid };
             }),
-            { key: 'banque', label: 'Banque (compte retiré)', ...AUDIT_TONES.teal },
+            { key: 'banque', label: 'Banque · compte inconnu', ...AUDIT_TONES.teal },
             { key: 'credit', label: 'Crédit', ...AUDIT_TONES.rose },
             { key: 'archive', label: 'Archive', ...AUDIT_TONES.amber },
             { key: 'partenaires', label: 'Partenaires', ...AUDIT_TONES.emerald },
