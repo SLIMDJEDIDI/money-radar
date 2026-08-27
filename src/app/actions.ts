@@ -30,6 +30,57 @@ async function logAudit(tx: any, { entityType, entityId, action, details, oldVal
   });
 }
 
+// --- DATE PLANIFIÉE : JOUR CIVIL, JAMAIS UN HORODATAGE ---
+// `<input type="date">` renvoie "2026-08-27". `new Date("2026-08-27")` est lu par
+// JavaScript comme MINUIT UTC, alors que `startOfToday` est minuit LOCAL. Sur un
+// serveur qui n'est pas en UTC, minuit UTC d'aujourd'hui tombe APRÈS minuit local
+// d'aujourd'hui : choisir la date DU JOUR passait donc le test « date future » et
+// le mouvement était classé PLANIFIÉ — donc EXCLU du solde — alors que l'argent
+// était déjà dans le coffre. Un écart silencieux entre la caisse réelle et l'écran.
+// On compare maintenant des JOURS, pas des instants.
+function parseScheduledDay(raw: string): Date | null {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (iso) {
+    // Minuit LOCAL du jour choisi — même repère que startOfToday.
+    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 0, 0, 0, 0);
+  }
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+}
+
+function dayKey(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// « Aujourd'hui » DE QUI ? Vercel tourne en UTC, l'utilisateur est en Tunisie (UTC+1).
+// Entre 00h00 et 01h00 à Tunis, le serveur est encore la VEILLE : choisir la date du
+// jour comptait donc comme une date future et l'argent partait hors solde. Le
+// navigateur envoie donc SON jour civil ; on compare deux jours civils, pas deux
+// instants. Garde-fou : un jour client à plus de 2 jours du serveur est ignoré
+// (horloge fausse ou valeur trafiquée) et on retombe sur le jour du serveur.
+function todayKeyFrom(clientToday?: string | null): string {
+  const serverKey = dayKey(new Date());
+  if (!clientToday || !/^\d{4}-\d{2}-\d{2}$/.test(clientToday)) return serverKey;
+  const c = parseScheduledDay(clientToday);
+  const s = parseScheduledDay(serverKey);
+  if (!c || !s) return serverKey;
+  const driftDays = Math.abs(c.getTime() - s.getTime()) / 86400000;
+  return driftDays <= 2 ? clientToday : serverKey;
+}
+
+// Un mouvement n'est PLANIFIÉ (hors solde) que pour un jour STRICTEMENT futur.
+// Aujourd'hui et le passé sont encaissés/décaissés immédiatement.
+function resolveSchedule(raw: string, clientToday?: string | null): { ok: true; scheduledFor: Date | null; isSettled: boolean } | { ok: false } {
+  if (!raw) return { ok: true, scheduledFor: null, isSettled: true };
+  const day = parseScheduledDay(raw);
+  if (!day) return { ok: false };
+  // Comparaison de chaînes "YYYY-MM-DD" : sûre, et sans aucun piège de fuseau.
+  if (dayKey(day) > todayKeyFrom(clientToday)) return { ok: true, scheduledFor: day, isSettled: false };
+  return { ok: true, scheduledFor: null, isSettled: true };
+}
+
 // ----------------------------------------------------
 // 1. AUTHENTICATION
 // ----------------------------------------------------
@@ -452,14 +503,11 @@ export async function createTndMovement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const d = new Date(scheduledForRaw);
-      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      // Only future dates create a pending movement; past/today dates settle immediately
-      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-      if (d.getTime() > startOfToday.getTime()) {
-        scheduledFor = d;
-        isSettled = false;
-      }
+      // Only STRICTLY future days create a pending movement; today and the past settle
+      // immediately (see resolveSchedule — this used to misfire on any non-UTC server).
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     await prisma.$transaction(async (tx) => {
@@ -509,10 +557,9 @@ export async function createTndBatchDisbursement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const date = new Date(scheduledForRaw);
-      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     const total = items.reduce((sum, item) => sum + item.amount, 0);
@@ -974,10 +1021,9 @@ export async function createArchiveMovement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const d = new Date(scheduledForRaw);
-      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-      if (d.getTime() > startOfToday.getTime()) { scheduledFor = d; isSettled = false; }
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     await prisma.$transaction(async (tx) => {
@@ -1172,10 +1218,9 @@ export async function createBankMovement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const d = new Date(scheduledForRaw);
-      if (isNaN(d.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-      if (d.getTime() > startOfToday.getTime()) { scheduledFor = d; isSettled = false; }
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     await prisma.$transaction(async (tx) => {
@@ -1217,10 +1262,9 @@ export async function createBankBatchDisbursement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const date = new Date(scheduledForRaw);
-      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     const total = items.reduce((sum, item) => sum + item.amount, 0);
@@ -1314,10 +1358,9 @@ export async function createArchiveBatchDisbursement(formData: FormData) {
     let scheduledFor: Date | null = null;
     let isSettled = true;
     if (scheduledForRaw) {
-      const date = new Date(scheduledForRaw);
-      if (isNaN(date.getTime())) return { success: false, error: 'Date planifiée invalide' };
-      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-      if (date.getTime() > startOfToday.getTime()) { scheduledFor = date; isSettled = false; }
+      const sched = resolveSchedule(scheduledForRaw, formData.get('clientToday') as string | null);
+      if (!sched.ok) return { success: false, error: 'Date planifiée invalide' };
+      scheduledFor = sched.scheduledFor; isSettled = sched.isSettled;
     }
 
     const total = items.reduce((sum, item) => sum + item.amount, 0);

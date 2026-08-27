@@ -67,6 +67,15 @@ const TND_RECEIVABLE_TAG = '🔖 À RÉCUPÉRER';
 const isReceivableNote = (note?: string) => !!note && note.startsWith(TND_RECEIVABLE_TAG);
 const cleanReceivableNote = (note?: string) => (note || '').replace(TND_RECEIVABLE_TAG, '').replace(/^\s*·\s*/, '').trim();
 
+// Le jour civil DE L'UTILISATEUR, "YYYY-MM-DD". `toISOString()` donne le jour UTC :
+// entre minuit et 1h du matin en Tunisie il renvoie encore la VEILLE, et le serveur
+// classait alors une saisie du jour comme « planifiée » — donc hors du solde du coffre.
+// On envoie ce jour au serveur pour qu'il compare deux dates du même fuseau.
+const localDayKey = (d: Date = new Date()) => {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 const TYPE_EXPLAIN: Record<string, string> = {
   HELD: "ENCAISSER : tu lui confies de l'argent à garder. Ton argent chez lui AUGMENTE (+).",
   RECEIVABLE: "À RECEVOIR : paiement prévu à une date future. Sert uniquement à créer un rappel — n'affecte aucun solde.",
@@ -498,9 +507,14 @@ export default function MoneyHubApp({
   const formatUSD = useCallback((val: number) => groupSep(new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val)), []);
   const formatRawCurrency = useCallback((val: number, curr: string) => {
     // Tunisian convention: amount first, then DT (e.g. "11 130 DT").
-    // UI displays whole dinars only; tiny millime fractions from rate/math noise are ugly.
+    // Les millimes s'affichent UNIQUEMENT s'il y en a. Arrondir systématiquement au
+    // dinar entier cachait une saisie fractionnaire : l'écran et la base pouvaient
+    // alors dire deux choses différentes sans que rien ne le signale. Un compte de
+    // caisse doit pouvoir être vérifié au millime près.
     if (curr === 'TND') {
-      const amount = groupSep(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val));
+      const hasMillimes = Math.abs(val - Math.round(val)) > 0.0005;
+      const digits = hasMillimes ? 3 : 0;
+      const amount = groupSep(new Intl.NumberFormat('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(val));
       return `${amount} DT`;
     }
     const amount = groupSep(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val));
@@ -727,6 +741,7 @@ export default function MoneyHubApp({
       data.append('type', tndForm.type);
       data.append('note', tndForm.note);
       if (isPlanned) data.append('scheduledFor', scheduled!);
+      data.append('clientToday', localDayKey());
       const res: any = await createTndMovement(data);
       if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
@@ -816,6 +831,7 @@ export default function MoneyHubApp({
       data.append('type', type);
       data.append('note', note);
       if (isPlanned) data.append('scheduledFor', scheduled);
+      data.append('clientToday', localDayKey());
       const res: any = await createBankMovement(data);
       if (res.success) { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); setBankConfirm(null); await refreshHubState(); showToast('success', `${type === 'IN' ? 'Entrée' : 'Sortie'} de ${formatRawCurrency(amount, '')}enregistrée · ${accName}`); }
       else if (res.code) handleSessionExpired(); else { setBankConfirm(null); showToast('error', res.error || 'Erreur'); }
@@ -843,6 +859,7 @@ export default function MoneyHubApp({
       data.append('accountId', accountId);
       data.append('items', JSON.stringify(validItems));
       if (scheduled) data.append('scheduledFor', scheduled);
+      data.append('clientToday', localDayKey());
       const res: any = await createBankBatchDisbursement(data);
       if (res.success) { setBankBatchItems([{ amount: '', note: '' }]); setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setActiveModal(null); setBankConfirm(null); await refreshHubState(); showToast('success', `${validItems.length} sorties enregistrées · ${accName}`); }
       else if (res.code) handleSessionExpired(); else { setBankConfirm(null); showToast('error', res.error || 'Erreur'); }
@@ -877,6 +894,7 @@ export default function MoneyHubApp({
       const data = new FormData();
       data.append('items', JSON.stringify(validItems));
       if (scheduled) data.append('scheduledFor', scheduled);
+      data.append('clientToday', localDayKey());
       const res: any = await createTndBatchDisbursement(data);
       if (res.success) {
         setTndBatchItems([{ amount: '', note: '' }]);
@@ -996,6 +1014,7 @@ export default function MoneyHubApp({
       data.append('type', archiveForm.type);
       data.append('note', archiveForm.note);
       if (isPlanned) data.append('scheduledFor', scheduled!);
+      data.append('clientToday', localDayKey());
       const res: any = await createArchiveMovement(data);
       if (res.success) { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
@@ -1017,6 +1036,7 @@ export default function MoneyHubApp({
       const data = new FormData();
       data.append('items', JSON.stringify(validItems));
       if (scheduled) data.append('scheduledFor', scheduled);
+      data.append('clientToday', localDayKey());
       const res: any = await createArchiveBatchDisbursement(data);
       if (res.success) {
         setArchiveBatchItems([{ amount: '', note: '' }]);
@@ -1995,6 +2015,70 @@ export default function MoneyHubApp({
                 </div>
               </div>
 
+              {/* CONTRÔLE DE CAISSE — réconcilie l'écran avec le comptage physique.
+                  Le grand nombre du haut ne compte QUE les mouvements confirmés. Trois
+                  choses peuvent donc être dans le coffre sans y être : une créance
+                  encaissée mais jamais marquée « Récupéré », une entrée planifiée déjà
+                  reçue, et l'argent transféré vers l'Archive s'il dort dans le même
+                  coffre. Ce bloc les nomme au lieu de laisser chercher. */}
+              {(() => {
+                const pendingIn = metrics.tndPendingIn || 0;
+                const pendingInCount = tndUpcoming.filter((m: any) => m.type === 'IN').length;
+                const archive = currentUser.role === 'admin' ? (metrics.archiveBalance || 0) : 0;
+                const outside = receivablesTotal + pendingIn;
+                if (outside <= 0 && archive <= 0) {
+                  return (
+                    <div className="p-5 rounded-[28px] border border-neutral-800 bg-neutral-900/40 flex items-start gap-3">
+                      <ShieldCheck className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Contrôle de caisse</p>
+                        <p className="text-[11px] font-bold text-neutral-400 leading-relaxed mt-1">Rien n&apos;est en attente. Le coffre compté doit être égal au solde affiché. Tout écart vient d&apos;un mouvement non saisi, pas du calcul.</p>
+                      </div>
+                    </div>
+                  );
+                }
+                const row = (label: string, hint: string, value: number, tone: string) => (
+                  <div className="flex items-start justify-between gap-3 py-2.5 border-t border-white/5 first:border-t-0">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-neutral-200 uppercase tracking-widest">{label}</p>
+                      <p className="text-[10px] font-bold text-neutral-400 leading-relaxed mt-0.5">{hint}</p>
+                    </div>
+                    <p className={`text-base font-black tracking-tighter shrink-0 tabular-nums ${tone}`}>{formatRawCurrency(value, 'TND')}</p>
+                  </div>
+                );
+                return (
+                  <div className="rounded-[36px] border border-amber-500/30 bg-neutral-900/55 p-5 sm:p-6 flex flex-col gap-1 shadow-lg shadow-amber-950/10">
+                    <div className="flex items-center gap-2.5 pb-3">
+                      <div className="h-8 w-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0"><ShieldCheck className="h-4 w-4 text-amber-300" /></div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-amber-200 uppercase tracking-[0.2em]">Contrôle de caisse</p>
+                        <p className="text-[10px] font-bold text-neutral-400 mt-0.5">Ce que vous devriez trouver en comptant le coffre</p>
+                      </div>
+                    </div>
+                    {row('Solde système', 'Mouvements confirmés uniquement — le grand nombre ci-dessus.', metrics.tndBalance || 0, 'text-white')}
+                    {receivablesTotal > 0 && row(
+                      `+ À récupérer (${receivables.length})`,
+                      'Hors solde. Si l’argent est déjà rentré, appuyez sur « Récupéré » pour l’ajouter.',
+                      receivablesTotal, 'text-sky-300')}
+                    {pendingIn > 0 && row(
+                      `+ Entrées planifiées (${pendingInCount})`,
+                      'Hors solde tant qu’elles ne sont pas confirmées.',
+                      pendingIn, 'text-amber-300')}
+                    {outside > 0 && (
+                      <div className="flex items-baseline justify-between gap-3 mt-2 pt-3 border-t-2 border-amber-500/25">
+                        <p className="text-[10px] font-black text-amber-200 uppercase tracking-[0.2em]">Total si tout est rentré</p>
+                        <p className="text-2xl font-black text-amber-200 tracking-tighter shrink-0 tabular-nums">{formatRawCurrency((metrics.tndBalance || 0) + outside, 'TND')}</p>
+                      </div>
+                    )}
+                    {archive > 0 && (
+                      <p className="text-[10px] font-bold text-neutral-400 leading-relaxed mt-2 pt-2.5 border-t border-white/5">
+                        L&apos;<span className="text-violet-300 font-black">Archive</span> détient {formatRawCurrency(archive, 'TND')} à part. Si ces billets dorment dans le même coffre, ajoutez-les à votre comptage.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* QUICK ACTIONS */}
               <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => { setTndForm({ amount: '', type: 'IN', note: '' }); setActiveModal('add_tnd'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
@@ -2683,7 +2767,7 @@ export default function MoneyHubApp({
               <button type="button" onClick={() => setTransactionForm(p=>({...p, isPostponed: !p.isPostponed}))} className={`w-full py-3.5 rounded-[20px] text-[10px] font-black uppercase border transition-all flex items-center justify-center gap-2 tracking-widest ${transactionForm.isPostponed ? 'bg-amber-500 text-black border-amber-500 shadow-lg shadow-amber-500/20' : 'bg-neutral-900/50 border-neutral-800 text-amber-400 hover:border-amber-500/40'}`}><CalendarClock className="h-4 w-4" /> {transactionForm.isPostponed ? 'Planifié pour une date' : 'Planifier pour plus tard'}</button>
               {transactionForm.isPostponed && (
                 <div className="flex flex-col gap-3 animate-in slide-in-from-top-2 duration-300">
-                  <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date prévue du mouvement</label><input type="date" required min={new Date().toISOString().slice(0,10)} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} /></div>
+                  <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Date prévue du mouvement</label><input type="date" required min={localDayKey()} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-white font-black outline-none focus:border-amber-500/50 shadow-inner [color-scheme:dark]" value={transactionForm.dueDate} onChange={e => setTransactionForm(p=>({...p, dueDate: e.target.value}))} /></div>
                   <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Email pour le rappel (optionnel)</label><input type="email" placeholder="votre@email.com" className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black outline-none focus:border-amber-500/50" value={transactionForm.reminderEmail} onChange={e => setTransactionForm(p=>({...p, reminderEmail: e.target.value}))} /></div>
                 </div>
               )}
@@ -2864,7 +2948,7 @@ export default function MoneyHubApp({
                 <button type="button" disabled={tndBatchItems.length >= 30} onClick={() => setTndBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
                 <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label>
-                  <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />
+                  <input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />
                   {tndForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Tous les décaissements seront planifiés à cette date et rappelés dès J-1.</p>}
                 </div>
                 <div className="flex gap-4 mt-1">
@@ -2876,7 +2960,7 @@ export default function MoneyHubApp({
               <form onSubmit={handleAddTndMovement} className="flex flex-col gap-5">
                 <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-blue-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={tndForm.amount} onChange={e => setTndForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-blue-300 font-black text-lg shadow-inner">TND</div></div>
                 <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-blue-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={tndForm.note} onChange={e => setTndForm(p=>({...p, note: e.target.value}))} />
-                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />{tndForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={tndForm.scheduledFor || ''} onChange={e => setTndForm(p=>({ ...p, scheduledFor: e.target.value }))} />{tndForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
                 <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !tndForm.note.trim()} className="flex-[2] py-5 bg-blue-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-blue-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{tndForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
               </form>
             )}
@@ -2964,14 +3048,14 @@ export default function MoneyHubApp({
                   ))}
                 </div>
                 <button type="button" disabled={bankBatchItems.length >= 30} onClick={() => setBankBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
-                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label><input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
                 <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || bankBatchItems.some(item => !item.amount || !item.note.trim())} className="flex-[2] py-5 bg-rose-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-rose-900/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{bankForm.scheduledFor ? `Planifier ${bankBatchItems.length} sortie${bankBatchItems.length > 1 ? 's' : ''}` : `Enregistrer ${bankBatchItems.length} sortie${bankBatchItems.length > 1 ? 's' : ''}`}</button></div>
               </form>
             ) : (
               <form onSubmit={handleAddBankMovement} className="flex flex-col gap-5">
                 <div className="flex gap-3 w-full"><input type="number" step="any" required autoFocus className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-teal-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={bankForm.amount} onChange={e => setBankForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-teal-300 font-black text-lg shadow-inner">{bankAccounts.find((a:any)=>a.id===selectedBankId)?.currencyCode || 'TND'}</div></div>
                 <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={bankForm.note} onChange={e => setBankForm(p=>({...p, note: e.target.value}))} />
-                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — vide = immédiat)</label><input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-teal-500/50 shadow-inner" value={bankForm.scheduledFor || ''} onChange={e => setBankForm(p=>({ ...p, scheduledFor: e.target.value }))} /></div>
                 <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !bankForm.note.trim()} className="flex-[2] py-5 bg-teal-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{bankForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
               </form>
             )}
@@ -3013,7 +3097,7 @@ export default function MoneyHubApp({
                 <button type="button" disabled={archiveBatchItems.length >= 30} onClick={() => setArchiveBatchItems(items => [...items, { amount: '', note: '' }])} className="py-3.5 border border-dashed border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Ajouter un montant</button>
                 <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue commune (optionnel)</label>
-                  <input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />
+                  <input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />
                   {archiveForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Tous les décaissements seront planifiés à cette date et rappelés dès J-1.</p>}
                 </div>
                 <div className="flex gap-4 mt-1">
@@ -3025,7 +3109,7 @@ export default function MoneyHubApp({
               <form onSubmit={handleAddArchiveMovement} className="flex flex-col gap-5">
                 <div className="flex gap-3 w-full"><input type="number" step="any" required className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white focus:border-amber-500/50 outline-none shadow-inner tracking-tighter" placeholder="0.00" value={archiveForm.amount} onChange={e => setArchiveForm(p=>({...p, amount: e.target.value}))} /><div className="bg-neutral-950 border border-neutral-800 rounded-[20px] px-6 flex items-center text-amber-300 font-black text-lg shadow-inner">TND</div></div>
                 <input type="text" required className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" placeholder="NOTE OBLIGATOIRE" value={archiveForm.note} onChange={e => setArchiveForm(p=>({...p, note: e.target.value}))} />
-                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={new Date().toISOString().slice(0,10)} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />{archiveForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
+                <div className="flex flex-col gap-2"><label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest px-1 flex items-center gap-2"><CalendarClock className="h-3 w-3" /> Date prévue (optionnel — laisser vide = immédiat)</label><input type="date" min={localDayKey()} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-4 text-sm text-white font-black uppercase outline-none focus:border-amber-500/50 shadow-inner" value={archiveForm.scheduledFor || ''} onChange={e => setArchiveForm(p=>({ ...p, scheduledFor: e.target.value }))} />{archiveForm.scheduledFor && <p className="text-[10px] font-black text-amber-400 px-2 flex items-center gap-1.5"><Bell className="h-3 w-3" /> Rappel automatique dès J-1. Le montant ne compte dans le solde qu'après confirmation.</p>}</div>
                 <div className="flex gap-4 mt-2"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !archiveForm.note.trim()} className="flex-[2] py-5 bg-amber-600 text-white font-black rounded-[24px] uppercase shadow-2xl shadow-amber-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">{archiveForm.scheduledFor ? 'Planifier' : 'Confirmer'}</button></div>
               </form>
             )}
