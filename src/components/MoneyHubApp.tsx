@@ -76,6 +76,83 @@ const localDayKey = (d: Date = new Date()) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+// ---------------------------------------------------------------------------
+// JOURNAL D'AUDIT — deux axes de lecture : le COMPTE et le SUJET.
+//
+// La base ne garde qu'un code technique (« TND_BATCH_OUT ») et une phrase.
+// Pour retrouver quelque chose il faut pouvoir dire « le Coffre, les
+// suppressions, ce mois-ci » — alors on traduit ce code en deux axes lisibles
+// au moment de l'affichage. Aucune donnée n'est réécrite : lecture seule.
+// ---------------------------------------------------------------------------
+type AuditRow = { entityType?: string; action?: string; details?: string; oldValue?: string; newValue?: string; modifiedBy?: string; createdAt?: string };
+
+const AUDIT_ACCOUNTS: { key: string; label: string; tone: string; match: (a: AuditRow) => boolean }[] = [
+  { key: 'coffre', label: 'Coffre', tone: 'blue', match: a => a.entityType === 'TREASURY' || /^TND_/.test(a.action || '') },
+  { key: 'banque', label: 'Banque', tone: 'teal', match: a => a.entityType === 'BANK' || /^BANK_/.test(a.action || '') },
+  { key: 'archive', label: 'Archive', tone: 'amber', match: a => a.entityType === 'ARCHIVE' || /^ARCH_/.test(a.action || '') },
+  { key: 'partenaires', label: 'Partenaires', tone: 'emerald', match: a => ['CONTACT', 'TRANSACTION', 'REMINDER'].includes(a.entityType || '') },
+  { key: 'credit', label: 'Crédit', tone: 'rose', match: a => a.entityType === 'CREDIT' || /^CREDIT/.test(a.action || '') },
+  { key: 'systeme', label: 'Système', tone: 'neutral', match: () => true },
+];
+const auditAccountOf = (a: AuditRow) => AUDIT_ACCOUNTS.find(x => x.match(a)) || AUDIT_ACCOUNTS[AUDIT_ACCOUNTS.length - 1];
+
+// L'ordre compte : une suppression d'entrée reste une SUPPRESSION, et un
+// transfert n'est ni une entrée ni une sortie ordinaire.
+const AUDIT_SUBJECTS: { key: string; label: string; match: (a: AuditRow) => boolean }[] = [
+  { key: 'suppression', label: 'Suppressions', match: a => /DELETE|WIPE|RETIRE/.test(a.action || '') },
+  { key: 'transfert', label: 'Transferts', match: a => /TRANSFER|MIGRATE/.test(a.action || '') },
+  // Une créance est de l'argent qu'on nous DOIT : elle n'entre pas dans le
+  // solde. Elle a donc son propre sujet et n'est jamais comptée comme
+  // une entrée verte — sinon le journal ferait croire à un encaissement.
+  { key: 'creance', label: 'Créances', match: a => /RECEIVABLE/.test(a.action || '') },
+  { key: 'entree', label: 'Entrées', match: a => /_IN(_|$)/.test(a.action || '') || /^Entrée/i.test(a.details || '') },
+  { key: 'sortie', label: 'Sorties', match: a => /_OUT(_|$)/.test(a.action || '') || /^Sortie/i.test(a.details || '') },
+  { key: 'confirmation', label: 'Confirmations', match: a => /SETTLE|RECEIVED|PAID/.test(a.action || '') },
+  { key: 'modification', label: 'Modifications', match: a => /EDIT|UPDATE|POSTPON|RENAME/.test(a.action || '') },
+  { key: 'creation', label: 'Créations', match: a => /^CREATE|_CREATE/.test(a.action || '') },
+  { key: 'acces', label: 'Accès', match: a => /LOGIN|LOGOUT|PANIC|PASSWORD/.test(a.action || '') },
+  { key: 'autre', label: 'Autres', match: () => true },
+];
+const auditSubjectOf = (a: AuditRow) => AUDIT_SUBJECTS.find(x => x.match(a)) || AUDIT_SUBJECTS[AUDIT_SUBJECTS.length - 1];
+
+// Le montant est la seule chose qu'on cherche vraiment dans un journal de
+// caisse. Il est fiable dans la copie JSON d'une suppression ; sinon on le
+// relit dans la phrase, qui suit toujours les mêmes tournures.
+const auditAmountOf = (a: AuditRow): number | null => {
+  try { const o = JSON.parse(a.oldValue || 'null'); if (o && typeof o.amount === 'number') return o.amount; } catch { /* pas du JSON */ }
+  try {
+    const n = JSON.parse(a.newValue || 'null');
+    if (Array.isArray(n)) { const t = n.reduce((s: number, x: any) => s + (Number(x?.amount) || 0), 0); if (t > 0) return t; }
+  } catch { /* pas du JSON */ }
+  const d = String(a.details || '');
+  const m = d.match(/\b(?:de|total)\s+([\d]+(?:[.,]\d+)?)/i)
+    || d.match(/TND\s*:\s*([\d]+(?:[.,]\d+)?)/i)
+    || d.match(/\(([\d]+(?:[.,]\d+)?)\s*(?:IN|OUT)\)/i)
+    || d.match(/([\d]+(?:[.,]\d+)?)\s*(?:TND|DT)\b/i);
+  if (!m) return null;
+  const v = parseFloat(String(m[1]).replace(',', '.'));
+  return isFinite(v) && v > 0 ? v : null;
+};
+
+const auditFlowOf = (a: AuditRow): 'in' | 'out' | 'del' | null => {
+  const act = String(a.action || ''), d = String(a.details || '');
+  if (/DELETE|WIPE/.test(act)) return 'del';
+  // Une créance ne bouge aucun solde : montant affiché en neutre, jamais en vert.
+  if (/RECEIVABLE/.test(act)) return null;
+  if (/TRANSFER_ARCHIVE/.test(act) || /^Sortie/i.test(d) || /_OUT(_|$)/.test(act)) return 'out';
+  if (/_IN(_|$)|TRANSFER_IN/.test(act) || /^Entrée|^Réception|encaiss/i.test(d)) return 'in';
+  return null;
+};
+
+const AUDIT_TONES: Record<string, { chip: string; rail: string }> = {
+  blue: { chip: 'bg-blue-500/15 border-blue-500/40 text-blue-200', rail: 'bg-blue-500' },
+  teal: { chip: 'bg-teal-500/15 border-teal-500/40 text-teal-200', rail: 'bg-teal-500' },
+  amber: { chip: 'bg-amber-500/15 border-amber-500/40 text-amber-200', rail: 'bg-amber-500' },
+  emerald: { chip: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200', rail: 'bg-emerald-500' },
+  rose: { chip: 'bg-rose-500/15 border-rose-500/40 text-rose-200', rail: 'bg-rose-500' },
+  neutral: { chip: 'bg-white/5 border-white/15 text-neutral-300', rail: 'bg-neutral-600' },
+};
+
 const TYPE_EXPLAIN: Record<string, string> = {
   HELD: "ENCAISSER : tu lui confies de l'argent à garder. Ton argent chez lui AUGMENTE (+).",
   RECEIVABLE: "À RECEVOIR : paiement prévu à une date future. Sert uniquement à créer un rappel — n'affecte aucun solde.",
@@ -308,6 +385,16 @@ export default function MoneyHubApp({
   const [transactions, setTransactions] = useState(initialTransactions.map((t:any) => ({...t, createdAt: new Date(t.createdAt)})));
   const [metrics, setMetrics] = useState(initialMetrics);
   const [auditTrails, setAuditTrails] = useState(initialAuditTrails);
+  // Filtres du journal d'audit — compte, sujet, auteur, période, recherche.
+  const [auditAccount, setAuditAccount] = useState('all');
+  const [auditSubject, setAuditSubject] = useState('all');
+  const [auditUserFilter, setAuditUserFilter] = useState('all');
+  const [auditPeriod, setAuditPeriod] = useState('all');
+  const [auditSearch, setAuditSearch] = useState('');
+  // Le tableau de bord n'a besoin que des dernières lignes. La page Audit, elle,
+  // doit pouvoir remonter loin : on recharge en profondeur à son ouverture.
+  const [auditDeepLoaded, setAuditDeepLoaded] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [reminders, setReminders] = useState(initialReminders.map((r:any) => ({...r, dueDate: new Date(r.dueDate)})));
   const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })) || []);
   const [tndForecast, setTndForecast] = useState(initialTndForecast);
@@ -457,6 +544,25 @@ export default function MoneyHubApp({
       return truncated;
     });
   }, [navPos]);
+
+  // Recharge le journal en profondeur (500 lignes au lieu des 40 du tableau de
+  // bord). Réservé à l'administrateur côté serveur ; si l'appel échoue on garde
+  // simplement les lignes déjà affichées.
+  const loadDeepAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard-data?auditLimit=500&t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.auditTrails)) { setAuditTrails(data.auditTrails); setAuditDeepLoaded(true); }
+      }
+    } catch { /* on garde l'affichage courant */ }
+    finally { setAuditLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === 'history' && !auditDeepLoaded && !auditLoading) void loadDeepAudit();
+  }, [activeSection, auditDeepLoaded, auditLoading, loadDeepAudit]);
 
   // Ouvre une section ET descend jusqu'au bloc voulu.
   const goToAnchor = useCallback((section: string, anchorId: string) => {
@@ -2525,21 +2631,153 @@ export default function MoneyHubApp({
           </div>
         )}
 
-        {activeSection === 'history' && (
+        {activeSection === 'history' && (() => {
+          // Chaque ligne est classée UNE fois, puis les compteurs et la liste
+          // se lisent sur la même base — les nombres affichés sur les onglets
+          // sont donc toujours ceux de la liste.
+          type Tagged = { a: any; acct: typeof AUDIT_ACCOUNTS[number]; subj: typeof AUDIT_SUBJECTS[number] };
+          const tagged: Tagged[] = ((auditTrails || []) as any[]).map((a: any) => ({ a, acct: auditAccountOf(a), subj: auditSubjectOf(a) }));
+          const periodMs = auditPeriod === 'today' ? 86400000 : auditPeriod === '7d' ? 7 * 86400000 : auditPeriod === '30d' ? 30 * 86400000 : 0;
+          const now = Date.now();
+          const q = auditSearch.trim().toLowerCase();
+          // Les compteurs d'un axe ignorent CE MÊME axe : sinon choisir un
+          // compte remettrait tous les autres à zéro et on ne verrait plus où aller.
+          const passBase = (t: any) => {
+            if (periodMs > 0 && (now - new Date(t.a.createdAt).getTime()) > periodMs) return false;
+            if (auditUserFilter !== 'all' && t.a.modifiedBy !== auditUserFilter) return false;
+            if (q) {
+              const hay = `${t.a.details || ''} ${t.a.action || ''} ${t.acct.label} ${t.subj.label} ${displayUser(t.a.modifiedBy)} ${auditAmountOf(t.a) ?? ''}`.toLowerCase();
+              if (!hay.includes(q)) return false;
+            }
+            return true;
+          };
+          const byAccount = tagged.filter(t => passBase(t) && (auditSubject === 'all' || t.subj.key === auditSubject));
+          const bySubject = tagged.filter(t => passBase(t) && (auditAccount === 'all' || t.acct.key === auditAccount));
+          const rows = tagged.filter(t => passBase(t)
+            && (auditAccount === 'all' || t.acct.key === auditAccount)
+            && (auditSubject === 'all' || t.subj.key === auditSubject));
+          const countAcct = (k: string) => k === 'all' ? byAccount.length : byAccount.filter(t => t.acct.key === k).length;
+          const countSubj = (k: string) => k === 'all' ? bySubject.length : bySubject.filter(t => t.subj.key === k).length;
+          const users: string[] = Array.from(new Set((auditTrails || []).map((a: any) => a.modifiedBy).filter(Boolean)));
+          const sumFlow = (f: string) => rows.filter(t => auditFlowOf(t.a) === f).reduce((s, t) => s + (auditAmountOf(t.a) || 0), 0);
+          const totalIn = sumFlow('in'), totalOut = sumFlow('out');
+          const deletions = rows.filter(t => t.subj.key === 'suppression').length;
+          const isFiltered = auditAccount !== 'all' || auditSubject !== 'all' || auditUserFilter !== 'all' || auditPeriod !== 'all' || !!q;
+
+          return (
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between border-b border-neutral-900 pb-4 px-1"><h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Journal d'audit</h3><button onClick={() => refreshHubState()} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition">Actualiser</button></div>
+            <div className="flex items-center justify-between border-b border-neutral-900 pb-4 px-1">
+              <div className="min-w-0">
+                <h3 className="text-xs font-black text-neutral-500 uppercase tracking-[0.2em]">Journal d&apos;audit</h3>
+                <p className="text-[9px] font-black text-neutral-400 uppercase tracking-widest mt-1">{auditLoading ? 'Chargement…' : `${auditTrails.length} action${auditTrails.length > 1 ? 's' : ''} tracée${auditTrails.length > 1 ? 's' : ''}`}</p>
+              </div>
+              <button onClick={() => loadDeepAudit()} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:text-emerald-400 transition shrink-0">Actualiser</button>
+            </div>
+
+            {/* RECHERCHE — un montant, un nom, un numéro de BL */}
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-600 pointer-events-none" />
+              <input value={auditSearch} onChange={e => setAuditSearch(e.target.value)} placeholder="Chercher un montant, un nom, une note…"
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl pl-11 pr-4 py-3.5 text-sm text-white outline-none focus:border-emerald-500/40 shadow-inner" />
+            </div>
+
+            {/* AXE 1 — LE COMPTE. Chaque caisse a déjà sa couleur ailleurs dans
+                l'app : on garde la même ici pour qu'un coup d'œil suffise. */}
+            <div className="flex flex-col gap-2">
+              <p className="text-[9px] font-black text-neutral-400 uppercase tracking-[0.2em] px-1">Compte</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {[{ key: 'all', label: 'Tout', tone: 'neutral' }, ...AUDIT_ACCOUNTS].map(t => {
+                  const n = countAcct(t.key); const on = auditAccount === t.key;
+                  return (
+                    <button key={t.key} onClick={() => setAuditAccount(t.key)} disabled={n === 0 && !on}
+                      className={`shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? AUDIT_TONES[t.tone].chip + ' ring-1 ring-white/20' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700'} ${n === 0 && !on ? 'opacity-30' : ''}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${AUDIT_TONES[t.tone].rail}`} />
+                      {t.label}
+                      <span className="tabular-nums opacity-70">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* AXE 2 — LE SUJET */}
+            <div className="flex flex-col gap-2">
+              <p className="text-[9px] font-black text-neutral-400 uppercase tracking-[0.2em] px-1">Sujet</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {[{ key: 'all', label: 'Tous' }, ...AUDIT_SUBJECTS].map(s => {
+                  const n = countSubj(s.key); const on = auditSubject === s.key;
+                  const danger = s.key === 'suppression';
+                  return (
+                    <button key={s.key} onClick={() => setAuditSubject(s.key)} disabled={n === 0 && !on}
+                      className={`shrink-0 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? (danger ? 'bg-rose-500/20 border-rose-500/50 text-rose-200' : 'bg-white text-black border-white') : `bg-neutral-950 border-neutral-800 hover:border-neutral-700 ${danger ? 'text-rose-300/80' : 'text-neutral-400'}`} ${n === 0 && !on ? 'opacity-30' : ''}`}>
+                      {s.label} <span className="tabular-nums opacity-70">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <select value={auditUserFilter} onChange={e => setAuditUserFilter(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-emerald-500/40">
+                <option value="all">Tous les auteurs</option>
+                {users.map(u => <option key={u} value={u}>{displayUser(u)}</option>)}
+              </select>
+              <select value={auditPeriod} onChange={e => setAuditPeriod(e.target.value)} className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3 text-xs font-black text-white outline-none focus:border-emerald-500/40">
+                <option value="all">Toute la période</option>
+                <option value="today">Aujourd&apos;hui</option>
+                <option value="7d">7 derniers jours</option>
+                <option value="30d">30 derniers jours</option>
+              </select>
+            </div>
+
+            {/* CE QUE LA SÉLECTION REPRÉSENTE — la question d'un contrôle de
+                caisse est toujours « combien est entré, combien est sorti ». */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3.5 rounded-2xl border border-neutral-800 bg-neutral-900/50">
+              <p className="text-[10px] font-black text-white uppercase tracking-widest">{rows.length} ligne{rows.length > 1 ? 's' : ''}</p>
+              {totalIn > 0 && <p className="text-[10px] font-black text-emerald-400 tabular-nums">+ {formatRawCurrency(totalIn, 'TND')}</p>}
+              {totalOut > 0 && <p className="text-[10px] font-black text-rose-400 tabular-nums">− {formatRawCurrency(totalOut, 'TND')}</p>}
+              {deletions > 0 && <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">{deletions} suppression{deletions > 1 ? 's' : ''}</p>}
+              {isFiltered && (
+                <button onClick={() => { setAuditAccount('all'); setAuditSubject('all'); setAuditUserFilter('all'); setAuditPeriod('all'); setAuditSearch(''); }}
+                  className="ml-auto text-[9px] font-black text-neutral-400 uppercase tracking-widest hover:text-white transition">Tout effacer</button>
+              )}
+            </div>
+
             <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
-              {auditTrails.length === 0 && <EmptyState icon={<History className="h-10 w-10" />} title="Journal vide" subtitle="Actions tracées ici." />}
-              {auditTrails.map((a: any) => (
-                <div key={a.id} className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-3xl flex flex-col gap-2.5 shadow-sm">
-                  <div className="flex justify-between items-center"><div className="flex items-center gap-2"><span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${a.action === 'DELETE' || a.action === 'WIPE' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>{a.action}</span><span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">· {a.entityType}</span></div><p className="text-[9px] text-neutral-700 font-black uppercase">{new Date(a.createdAt).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</p></div>
-                  <p className="text-[11px] font-bold text-neutral-300 leading-relaxed px-1">{displayNamesIn(a.details)}</p>
-                  <p className="text-[9px] text-neutral-600 font-black uppercase px-1 tracking-wider italic text-right">Signature: {displayUser(a.modifiedBy)}</p>
-                </div>
-              ))}
+              {rows.length === 0 && (
+                <EmptyState icon={<History className="h-10 w-10" />}
+                  title={auditTrails.length === 0 ? 'Journal vide' : 'Aucune action ne correspond'}
+                  subtitle={auditTrails.length === 0 ? 'Les actions seront tracées ici.' : 'Changez le compte, le sujet ou la période.'} />
+              )}
+              {rows.map(({ a, acct, subj }: any) => {
+                const flow = auditFlowOf(a);
+                const amt = auditAmountOf(a);
+                const tone = AUDIT_TONES[acct.tone];
+                const rail = flow === 'del' ? 'bg-rose-500' : flow === 'in' ? 'bg-emerald-500' : flow === 'out' ? 'bg-rose-400/70' : tone.rail;
+                const amtColor = flow === 'del' ? 'text-rose-300 line-through' : flow === 'in' ? 'text-emerald-400' : flow === 'out' ? 'text-rose-400' : 'text-neutral-300';
+                const sign = flow === 'in' ? '+' : flow === 'out' ? '−' : '';
+                return (
+                  <div key={a.id} className={`relative overflow-hidden p-4 pl-5 rounded-3xl flex flex-col gap-2 shadow-sm border ${flow === 'del' ? 'bg-rose-950/20 border-rose-500/25' : 'bg-neutral-900/60 border-neutral-800'}`}>
+                    <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${rail}`} />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border ${tone.chip}`}>{acct.label}</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${subj.key === 'suppression' ? 'text-rose-300' : 'text-neutral-400'}`}>{subj.label}</span>
+                      </div>
+                      <p className="text-[9px] text-neutral-400 font-black uppercase shrink-0 tabular-nums">{new Date(a.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+                    </div>
+                    <p className="text-[11px] font-bold text-neutral-300 leading-relaxed break-words">{displayNamesIn(a.details) || a.action}</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[9px] text-neutral-400 font-black uppercase tracking-wider">Signature · {displayUser(a.modifiedBy)}</p>
+                      {amt !== null && <p className={`text-sm font-black tracking-tighter tabular-nums shrink-0 ${amtColor}`}>{sign}{formatRawCurrency(amt, 'TND')}</p>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {activeSection === 'settings' && (
           <div className="flex flex-col gap-8">
