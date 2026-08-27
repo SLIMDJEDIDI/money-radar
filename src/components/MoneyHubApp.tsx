@@ -395,6 +395,9 @@ export default function MoneyHubApp({
   // doit pouvoir remonter loin : on recharge en profondeur à son ouverture.
   const [auditDeepLoaded, setAuditDeepLoaded] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
+  // 254 lignes d'un coup font une page interminable. On en montre 50, puis on
+  // en redonne 50 à la demande. Toute nouvelle sélection repart du haut.
+  const [auditVisible, setAuditVisible] = useState(50);
   const [reminders, setReminders] = useState(initialReminders.map((r:any) => ({...r, dueDate: new Date(r.dueDate)})));
   const [tndMovements, setTndMovements] = useState(initialTndMovements?.map((m:any) => ({...m, createdAt: new Date(m.createdAt), scheduledFor: m.scheduledFor ? new Date(m.scheduledFor) : null })) || []);
   const [tndForecast, setTndForecast] = useState(initialTndForecast);
@@ -563,6 +566,8 @@ export default function MoneyHubApp({
   useEffect(() => {
     if (activeSection === 'history' && !auditDeepLoaded && !auditLoading) void loadDeepAudit();
   }, [activeSection, auditDeepLoaded, auditLoading, loadDeepAudit]);
+
+  useEffect(() => { setAuditVisible(50); }, [auditAccount, auditSubject, auditUserFilter, auditPeriod, auditSearch]);
 
   // Ouvre une section ET descend jusqu'au bloc voulu.
   const goToAnchor = useCallback((section: string, anchorId: string) => {
@@ -2685,35 +2690,48 @@ export default function MoneyHubApp({
                 l'app : on garde la même ici pour qu'un coup d'œil suffise. */}
             <div className="flex flex-col gap-2">
               <p className="text-[9px] font-black text-neutral-400 uppercase tracking-[0.2em] px-1">Compte</p>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {[{ key: 'all', label: 'Tout', tone: 'neutral' }, ...AUDIT_ACCOUNTS].map(t => {
-                  const n = countAcct(t.key); const on = auditAccount === t.key;
-                  return (
-                    <button key={t.key} onClick={() => setAuditAccount(t.key)} disabled={n === 0 && !on}
-                      className={`shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? AUDIT_TONES[t.tone].chip + ' ring-1 ring-white/20' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700'} ${n === 0 && !on ? 'opacity-30' : ''}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${AUDIT_TONES[t.tone].rail}`} />
-                      {t.label}
-                      <span className="tabular-nums opacity-70">{n}</span>
-                    </button>
-                  );
-                })}
+              {/* Les pastilles S'ENROULENT au lieu de défiler : un défilement
+                  horizontal sans barre visible cachait la moitié des choix, et
+                  on ne peut pas chercher ce qu'on ne voit pas. */}
+              <div className="flex flex-wrap gap-2">
+                {/* Un choix qui ne donne rien n'est pas un choix : on le retire
+                    au lieu de le griser. « Tout » et la sélection en cours
+                    restent toujours là, sinon la barre sauterait sous le doigt. */}
+                {[{ key: 'all', label: 'Tout', tone: 'neutral' }, ...AUDIT_ACCOUNTS]
+                  .filter(t => t.key === 'all' || auditAccount === t.key || countAcct(t.key) > 0)
+                  .map(t => {
+                    const n = countAcct(t.key); const on = auditAccount === t.key;
+                    return (
+                      <button key={t.key} onClick={() => setAuditAccount(t.key)}
+                        className={`shrink-0 min-h-[44px] flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? AUDIT_TONES[t.tone].chip + ' ring-1 ring-white/20' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${AUDIT_TONES[t.tone].rail}`} />
+                        {t.label}
+                        <span className="tabular-nums opacity-70">{n}</span>
+                      </button>
+                    );
+                  })}
               </div>
             </div>
 
             {/* AXE 2 — LE SUJET */}
             <div className="flex flex-col gap-2">
               <p className="text-[9px] font-black text-neutral-400 uppercase tracking-[0.2em] px-1">Sujet</p>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {[{ key: 'all', label: 'Tous' }, ...AUDIT_SUBJECTS].map(s => {
-                  const n = countSubj(s.key); const on = auditSubject === s.key;
-                  const danger = s.key === 'suppression';
-                  return (
-                    <button key={s.key} onClick={() => setAuditSubject(s.key)} disabled={n === 0 && !on}
-                      className={`shrink-0 px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? (danger ? 'bg-rose-500/20 border-rose-500/50 text-rose-200' : 'bg-white text-black border-white') : `bg-neutral-950 border-neutral-800 hover:border-neutral-700 ${danger ? 'text-rose-300/80' : 'text-neutral-400'}`} ${n === 0 && !on ? 'opacity-30' : ''}`}>
-                      {s.label} <span className="tabular-nums opacity-70">{n}</span>
-                    </button>
-                  );
-                })}
+              {/* Les pastilles S'ENROULENT au lieu de défiler : un défilement
+                  horizontal sans barre visible cachait la moitié des choix, et
+                  on ne peut pas chercher ce qu'on ne voit pas. */}
+              <div className="flex flex-wrap gap-2">
+                {[{ key: 'all', label: 'Tous' }, ...AUDIT_SUBJECTS]
+                  .filter(s => s.key === 'all' || auditSubject === s.key || countSubj(s.key) > 0)
+                  .map(s => {
+                    const n = countSubj(s.key); const on = auditSubject === s.key;
+                    const danger = s.key === 'suppression';
+                    return (
+                      <button key={s.key} onClick={() => setAuditSubject(s.key)}
+                        className={`shrink-0 min-h-[44px] px-3.5 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition active:scale-95 ${on ? (danger ? 'bg-rose-500/20 border-rose-500/50 text-rose-200' : 'bg-white text-black border-white') : `bg-neutral-950 border-neutral-800 hover:border-neutral-700 ${danger ? 'text-rose-300/80' : 'text-neutral-400'}`}`}>
+                        {s.label} <span className="tabular-nums opacity-70">{n}</span>
+                      </button>
+                    );
+                  })}
               </div>
             </div>
 
@@ -2743,13 +2761,18 @@ export default function MoneyHubApp({
               )}
             </div>
 
-            <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1">
+            {/* PAS de hauteur maximale ici. Une liste en colonne flex avec une
+                hauteur bornée fait RÉTRÉCIR chaque carte pour tenir dedans :
+                avec `overflow-hidden` sur la carte, la description et le
+                montant étaient purement et simplement coupés (34 px de haut au
+                lieu de 125). La page défile, les cartes gardent leur taille. */}
+            <div className="flex flex-col gap-3">
               {rows.length === 0 && (
                 <EmptyState icon={<History className="h-10 w-10" />}
                   title={auditTrails.length === 0 ? 'Journal vide' : 'Aucune action ne correspond'}
                   subtitle={auditTrails.length === 0 ? 'Les actions seront tracées ici.' : 'Changez le compte, le sujet ou la période.'} />
               )}
-              {rows.map(({ a, acct, subj }: any) => {
+              {rows.slice(0, auditVisible).map(({ a, acct, subj }: any) => {
                 const flow = auditFlowOf(a);
                 const amt = auditAmountOf(a);
                 const tone = AUDIT_TONES[acct.tone];
@@ -2757,7 +2780,7 @@ export default function MoneyHubApp({
                 const amtColor = flow === 'del' ? 'text-rose-300 line-through' : flow === 'in' ? 'text-emerald-400' : flow === 'out' ? 'text-rose-400' : 'text-neutral-300';
                 const sign = flow === 'in' ? '+' : flow === 'out' ? '−' : '';
                 return (
-                  <div key={a.id} className={`relative overflow-hidden p-4 pl-5 rounded-3xl flex flex-col gap-2 shadow-sm border ${flow === 'del' ? 'bg-rose-950/20 border-rose-500/25' : 'bg-neutral-900/60 border-neutral-800'}`}>
+                  <div key={a.id} className={`shrink-0 relative overflow-hidden p-4 pl-5 rounded-3xl flex flex-col gap-2 shadow-sm border ${flow === 'del' ? 'bg-rose-950/20 border-rose-500/25' : 'bg-neutral-900/60 border-neutral-800'}`}>
                     <span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${rail}`} />
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-1.5 min-w-0">
@@ -2774,6 +2797,12 @@ export default function MoneyHubApp({
                   </div>
                 );
               })}
+              {rows.length > auditVisible && (
+                <button onClick={() => setAuditVisible(v => v + 50)}
+                  className="shrink-0 w-full py-4 rounded-2xl border border-neutral-800 bg-neutral-900/50 text-[10px] font-black text-neutral-300 uppercase tracking-widest hover:border-neutral-700 hover:text-white active:scale-[0.99] transition">
+                  Voir 50 de plus · {rows.length - auditVisible} restante{rows.length - auditVisible > 1 ? 's' : ''}
+                </button>
+              )}
             </div>
           </div>
           );
@@ -3105,7 +3134,7 @@ export default function MoneyHubApp({
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Décaissements multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant doit avoir sa propre note.</p></div><div className="shrink-0 px-4 py-2 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-right"><p className="text-[8px] font-black uppercase tracking-[0.2em] text-rose-300/70">Total</p><p className="text-lg font-black text-rose-300 leading-none mt-0.5 whitespace-nowrap">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(tndBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))} DT</p></div></div>
                 <div className="flex flex-col gap-3 max-h-[44vh] sm:max-h-[38vh] overflow-y-auto pr-1">
                   {tndBatchItems.map((item, index) => (
-                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                    <div key={index} className="shrink-0 grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
                       {/* Telephone : ligne 1 = numero + montant + corbeille, ligne 2 = la note
                           sur toute la largeur. Ordinateur : tout tient sur une seule ligne.
                           Les positions sont donnees explicitement pour les deux tailles. */}
@@ -3207,7 +3236,7 @@ export default function MoneyHubApp({
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Sorties multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant a sa propre note.</p></div><div className="shrink-0 px-4 py-2 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-right"><p className="text-[8px] font-black uppercase tracking-[0.2em] text-rose-300/70">Total</p><p className="text-lg font-black text-rose-300 leading-none mt-0.5 whitespace-nowrap">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(bankBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))}</p></div></div>
                 <div className="flex flex-col gap-3 max-h-[44vh] sm:max-h-[38vh] overflow-y-auto pr-1">
                   {bankBatchItems.map((item, index) => (
-                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                    <div key={index} className="shrink-0 grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
                       {/* Telephone : ligne 1 = numero + montant + corbeille, ligne 2 = la note
                           sur toute la largeur. Ordinateur : tout tient sur une seule ligne.
                           Les positions sont donnees explicitement pour les deux tailles. */}
@@ -3254,7 +3283,7 @@ export default function MoneyHubApp({
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Décaissements multiples</p><p className="text-[10px] text-neutral-500 font-bold mt-1">Chaque montant doit avoir sa propre note.</p></div><div className="shrink-0 px-4 py-2 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-right"><p className="text-[8px] font-black uppercase tracking-[0.2em] text-rose-300/70">Total</p><p className="text-lg font-black text-rose-300 leading-none mt-0.5 whitespace-nowrap">{new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(archiveBatchItems.reduce((s, item) => s + (Number(item.amount) || 0), 0))} DT</p></div></div>
                 <div className="flex flex-col gap-3 max-h-[44vh] sm:max-h-[38vh] overflow-y-auto pr-1">
                   {archiveBatchItems.map((item, index) => (
-                    <div key={index} className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
+                    <div key={index} className="shrink-0 grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_170px_1fr_auto] gap-2 items-center p-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
                       {/* Telephone : ligne 1 = numero + montant + corbeille, ligne 2 = la note
                           sur toute la largeur. Ordinateur : tout tient sur une seule ligne.
                           Les positions sont donnees explicitement pour les deux tailles. */}
