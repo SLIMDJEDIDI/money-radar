@@ -66,16 +66,16 @@ export async function getHubDashboardData(searchQuery: string = '', auditLimit: 
       );
 
     const creditsPromise = adminOnly(() => prisma.hubCredit.findMany({ orderBy: { createdAt: 'desc' } }));
-    // CHINA TRACK — paiements fournisseurs a venir. Reserve a l'admin comme le
-    // reste des donnees DEVISES : un assistant ne recoit jamais ce payload.
-    const chinaTrackPromise = sessionPromise
-      .then((s) => (s?.role === 'admin' ? fetchChinaTrackPayments() : null))
-      .catch(() => null);
+    // CHINA TRACK N'EST PLUS ICI. C'etait un appel HTTP vers une AUTRE
+    // application, place dans le lot qui bloque l'affichage de la page : la
+    // lenteur ou la panne de China Track retardait l'ouverture de MONEY HUB,
+    // pour une information qui ne sert qu'a une section. Le navigateur va
+    // desormais la chercher seul, apres l'affichage, sur /api/china-track.
     const archivePromise = adminOnly(() => prisma.hubArchiveMovement.findMany({ orderBy: { createdAt: 'desc' } }));
 
     const [
       currenciesRaw, categories, contacts, transactions, reminders, auditTrails, users, tndMovements,
-      archiveMovements, partnerNotes, bankAccounts, bankMovements, session, credits, chinaTrack,
+      archiveMovements, partnerNotes, bankAccounts, bankMovements, session, credits,
     ] = await Promise.all([
       prisma.hubCurrency.findMany({ orderBy: { code: 'asc' } }),
       prisma.hubCategory.findMany({ orderBy: { name: 'asc' } }),
@@ -95,7 +95,6 @@ export async function getHubDashboardData(searchQuery: string = '', auditLimit: 
       prisma.hubBankMovement.findMany({ orderBy: { createdAt: 'desc' } }).catch(() => [] as any[]),
       sessionPromise,
       creditsPromise,
-      chinaTrackPromise,
     ]);
 
     const isAdmin = session?.role === 'admin';
@@ -284,7 +283,6 @@ export async function getHubDashboardData(searchQuery: string = '', auditLimit: 
       bankAccounts: bankAccountsWithStats,
       bankMovements,
       credits,
-      chinaTrack,
       metrics: {
         totalAvoirs: totalAvoirsUsd,
         totalAvoirsTnd,

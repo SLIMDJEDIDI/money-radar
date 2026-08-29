@@ -671,11 +671,27 @@ export default function MoneyHubApp({
         setBankAccounts(data.bankAccounts || []);
         setBankMovements((data.bankMovements || []).map(hydrateTnd));
         setCredits((data.credits || []).map((c: any) => ({ ...c, createdAt: new Date(c.createdAt), paidAt: c.paidAt ? new Date(c.paidAt) : null })));
-        setChinaTrack(data.chinaTrack ?? null);
       }
     } catch (e) { console.error(e); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
+    // CHINA TRACK part de son cote : c'est une AUTRE application, elle ne doit
+    // jamais retarder l'affichage des comptes MONEY HUB.
+    void loadChinaTrack();
   };
+
+  // Chargé APRÈS l'affichage, pas pendant. Si China Track est lent ou en panne,
+  // MONEY HUB s'ouvre quand même — seule la section DEVISES arrive plus tard.
+  const loadChinaTrack = useCallback(async () => {
+    if (currentUser?.role !== 'admin') return;
+    try {
+      const res = await fetch(`/api/china-track?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.chinaTrack) setChinaTrack(data.chinaTrack);
+    } catch { /* la section reste simplement vide */ }
+  }, [currentUser?.role]);
+
+  useEffect(() => { void loadChinaTrack(); }, [loadChinaTrack]);
 
   // RETOUR AU PREMIER PLAN = RELECTURE.
   //
