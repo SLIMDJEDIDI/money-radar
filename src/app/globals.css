@@ -187,3 +187,43 @@ body {
     border-color: rgba(250, 204, 21, 0.7);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   CONFIRMATION D'ENREGISTREMENT — la coche verte au centre de l'écran.
+   Une écriture d'argent doit se voir confirmée, sans ambiguïté et sans avoir
+   à chercher : le rond se pose, l'anneau se referme, puis la coche SE TRACE.
+   On dessine le trait au lieu de le faire apparaître — l'oeil suit le geste
+   et comprend « c'est parti, c'est enregistré ».
+   L'overlay ne capte aucun clic : il confirme, il ne bloque jamais la suite.
+--------------------------------------------------------------------------- */
+@keyframes success-pop {
+  0%   { transform: scale(0.55); opacity: 0; }
+  55%  { transform: scale(1.06); opacity: 1; }
+  75%  { transform: scale(0.98); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes success-draw { to { stroke-dashoffset: 0; } }
+@keyframes success-halo {
+  0%   { opacity: 0; transform: scale(0.7); }
+  35%  { opacity: 0.5; }
+  100% { opacity: 0; transform: scale(1.75); }
+}
+@keyframes success-out {
+  to { opacity: 0; transform: scale(0.94); }
+}
+
+.success-mark   { animation: success-pop 340ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.success-halo   { animation: success-halo 900ms ease-out both; }
+/* Périmètre du cercle r=26 : 2πr ≈ 163,4 — on arrondit au-dessus. */
+.success-ring   { stroke-dasharray: 166; stroke-dashoffset: 166; animation: success-draw 460ms cubic-bezier(0.4, 0, 0.2, 1) 60ms forwards; }
+/* Longueur de la coche M17 29 L25 37 L40 20 ≈ 34. */
+.success-check  { stroke-dasharray: 36; stroke-dashoffset: 36; animation: success-draw 280ms cubic-bezier(0.4, 0, 0.2, 1) 430ms forwards; }
+.success-label  { animation: fadeInUp 300ms ease-out 520ms both; }
+.success-leaving { animation: success-out 260ms ease-in forwards; }
+
+/* Qui demande moins de mouvement voit la coche, finie, sans le tracé. */
+@media (prefers-reduced-motion: reduce) {
+  .success-mark, .success-label, .success-leaving { animation: none; opacity: 1; transform: none; }
+  .success-ring, .success-check { animation: none; stroke-dashoffset: 0; }
+  .success-halo { animation: none; opacity: 0; }
+}

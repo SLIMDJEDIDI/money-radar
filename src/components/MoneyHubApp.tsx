@@ -270,6 +270,34 @@ const ContactCard = memo(({ c, formatUSD, formatRawCurrency, onEdit, onSelect, n
 });
 ContactCard.displayName = 'ContactCard';
 
+// CONFIRMATION D'ENREGISTREMENT — au centre, pour toute personne qui saisit.
+// Une opération d'argent ne doit jamais laisser un doute : la coche se trace
+// une fois que le SERVEUR a répondu que c'est enregistré, jamais avant.
+// L'overlay ne capte aucun clic (pointer-events-none) : il confirme sans
+// jamais bloquer la saisie suivante.
+const SuccessMark = memo(({ msg }: { msg?: string }) => (
+  <div className="fixed inset-0 z-[300] flex items-center justify-center px-8 pointer-events-none" role="status" aria-live="polite">
+    <div className="success-mark flex flex-col items-center gap-5">
+      <div className="relative">
+        <span className="success-halo absolute inset-0 rounded-full bg-emerald-400/50 blur-2xl" aria-hidden="true" />
+        <svg viewBox="0 0 56 56" className="relative h-28 w-28 sm:h-32 sm:w-32 drop-shadow-[0_10px_40px_rgba(16,185,129,0.5)]" aria-hidden="true">
+          {/* Le disque de fond donne le contraste sur n'importe quel écran. */}
+          <circle cx="28" cy="28" r="26" fill="rgba(0,0,0,0.72)" />
+          <circle cx="28" cy="28" r="26" fill="none" stroke="rgba(16,185,129,0.22)" strokeWidth="3" />
+          <circle cx="28" cy="28" r="26" fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round"
+            className="success-ring" transform="rotate(-90 28 28)" />
+          <path d="M17 29 L25 37 L40 20" fill="none" stroke="#6ee7b7" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"
+            className="success-check" />
+        </svg>
+      </div>
+      <p className="success-label max-w-[18rem] text-center text-[11px] font-black uppercase tracking-[0.18em] text-emerald-200 bg-black/80 border border-emerald-500/30 rounded-2xl px-4 py-2.5 leading-relaxed shadow-2xl">
+        {msg || 'Enregistré'}
+      </p>
+    </div>
+  </div>
+));
+SuccessMark.displayName = 'SuccessMark';
+
 const EmptyState = memo(({ icon, title, subtitle }: any) => (
   <div className="flex flex-col items-center justify-center text-center gap-4 py-20 px-6 animate-fade-up">
     <div className="p-6 bg-neutral-900 border border-neutral-800 rounded-[32px] text-neutral-600 shadow-inner">{icon}</div>
@@ -443,10 +471,22 @@ export default function MoneyHubApp({
   const [renameAccountName, setRenameAccountName] = useState('');
   // Ephemeral success/error feedback banner (auto-dismisses).
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
+  // La coche verte. Clé par `id` : deux enregistrements rapprochés rejouent
+  // l'animation depuis le début au lieu de la figer.
+  const [successMark, setSuccessMark] = useState<{ id: number; msg?: string } | null>(null);
+  const showSuccess = useCallback((msg?: string) => {
+    const id = Date.now() + Math.random();
+    setSuccessMark({ id, msg });
+    setTimeout(() => setSuccessMark(cur => (cur && cur.id === id ? null : cur)), 1600);
+  }, []);
+  // Un SEUL point de passage pour toute confirmation : le succès devient la
+  // coche au centre, l'erreur garde le bandeau rouge en bas. Les appels
+  // existants à showToast('success', …) affichent donc la coche sans changement.
   const showToast = useCallback((kind: 'success' | 'error', msg: string) => {
+    if (kind === 'success') { showSuccess(msg); return; }
     setToast({ kind, msg });
     setTimeout(() => setToast(null), 3800);
-  }, []);
+  }, [showSuccess]);
   // Pending bank action awaiting explicit confirmation (anti-mistake dialog).
   const [bankConfirm, setBankConfirm] = useState<{ accountId: string; accountName: string; currencyCode: string; type: 'IN' | 'OUT'; amount: number; note: string; count?: number; scheduledFor?: string; run: () => void } | null>(null);
 
@@ -778,12 +818,12 @@ export default function MoneyHubApp({
       let res: any;
       if (noteModal.editId) { data.append('id', noteModal.editId); res = await updatePartnerNote(data); }
       else { data.append('contactId', noteModal.contactId!); res = await createPartnerNote(data); }
-      if (res.success) { setNoteModal({ open: false }); await refreshHubState(); }
+      if (res.success) { setNoteModal({ open: false }); await refreshHubState(); showSuccess('Note enregistrée'); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
   const handleDeleteNote = (id: string) => {
-    setConfirmModal({ isOpen: true, title: 'Supprimer la note ?', description: 'Cette note informelle sera supprimée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deletePartnerNote(id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); } });
+    setConfirmModal({ isOpen: true, title: 'Supprimer la note ?', description: 'Cette note informelle sera supprimée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deletePartnerNote(id); if (res.success) { await refreshHubState(); showSuccess('Note supprimée'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); }); } });
   };
 
   const handleLogout = async () => { try { await logoutUser(); } catch {} setCurrentUser(null); localStorage.removeItem('hub_session_user'); };
@@ -840,16 +880,18 @@ export default function MoneyHubApp({
         // The planned movement carries its direction (ENCAISSER=HELD / DÉCAISSER=PAYABLE).
         data.set('plannedType', transactionForm.type);
         const res: any = await createReminder(data);
-        if (res.success) { setTransactionForm({ ...transactionForm, amount: '', note: '', isPostponed: false }); setActiveModal(null); await refreshHubState(); }
+        if (res.success) { setTransactionForm({ ...transactionForm, amount: '', note: '', isPostponed: false }); setActiveModal(null); await refreshHubState(); showSuccess('Mouvement planifié enregistré'); }
         else if (res.code) handleSessionExpired(); else alert(res.error);
         return;
       }
       addOptimisticTransaction({ id: Math.random().toString(), amount, currencyCode: transactionForm.currencyCode, amountInUsd: amount, contact, type: transactionForm.type, category: transactionForm.category, note: transactionForm.note, createdAt: new Date() });
       const data = new FormData(); Object.entries(transactionForm).forEach(([k,v]) => data.append(k, v as any));
       const res: any = await createHubTransaction(data);
-      if (res.success) { 
-        setTransactionForm({ ...transactionForm, amount: '', note: '' }); setActiveModal(null); await refreshHubState(); 
-      } else if (res.code) handleSessionExpired(); else alert(res.error);
+      if (res.success) {
+        const label = transactionForm.type === 'HELD' ? 'Encaissement' : transactionForm.type === 'PAYABLE' ? 'Décaissement' : 'Opération';
+        setTransactionForm({ ...transactionForm, amount: '', note: '' }); setActiveModal(null); await refreshHubState();
+        showSuccess(`${label} enregistré · ${contact?.name || ''}`.trim());
+      } else if (res.code) handleSessionExpired(); else showToast('error', res.error);
     });
   };
 
@@ -870,7 +912,7 @@ export default function MoneyHubApp({
       if (isPlanned) data.append('scheduledFor', scheduled!);
       data.append('clientToday', localDayKey());
       const res: any = await createTndMovement(data);
-      if (res.success) { setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { const wasIn = tndForm.type === 'IN'; setTndForm({ amount: '', type: 'IN', note: '' } as any); setActiveModal(null); await refreshHubState(); showSuccess(`${wasIn ? 'Entrée' : 'Sortie'} de ${formatRawCurrency(amount, 'TND')} enregistrée`); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
@@ -884,7 +926,7 @@ export default function MoneyHubApp({
       data.append('amount', transferForm.amount);
       data.append('note', transferForm.note);
       const res: any = await transferTreasuryToArchive(data);
-      if (res.success) { setTransferForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { setTransferForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); showSuccess(`Transfert de ${formatRawCurrency(amount, 'TND')} vers l'Archive`); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
       void amount;
     });
@@ -900,7 +942,7 @@ export default function MoneyHubApp({
       data.append('amount', receivableForm.amount);
       data.append('note', receivableForm.note);
       const res: any = await createTndReceivable(data);
-      if (res.success) { setReceivableForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { setReceivableForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); showSuccess(`Créance de ${formatRawCurrency(amount, 'TND')} enregistrée`); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
@@ -1024,11 +1066,14 @@ export default function MoneyHubApp({
       data.append('clientToday', localDayKey());
       const res: any = await createTndBatchDisbursement(data);
       if (res.success) {
+        const n = validItems.length;
+        const total = validItems.reduce((sum, it) => sum + it.amount, 0);
         setTndBatchItems([{ amount: '', note: '' }]);
         setTndForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' });
         setActiveModal(null);
         await refreshHubState();
-      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+        showSuccess(`${n} sortie${n > 1 ? 's' : ''} · ${formatRawCurrency(total, 'TND')} enregistré${n > 1 ? 'es' : 'e'}`);
+      } else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur');
     });
   };
 
@@ -1040,7 +1085,7 @@ export default function MoneyHubApp({
       confirmText: 'Confirmer',
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
-        startTransition(async () => { await settleTndMovement(id); await refreshHubState(); });
+        startTransition(async () => { await settleTndMovement(id); await refreshHubState(); showSuccess('Encaissement confirmé'); });
       },
     });
   };
@@ -1054,6 +1099,7 @@ export default function MoneyHubApp({
         setTndNoteEdit(null);
         setTndNoteEditError('');
         await refreshHubState();
+        showSuccess('Note modifiée');
       } else if (res.code) handleSessionExpired(); else setTndNoteEditError(res.error || 'Modification impossible');
     });
   };
@@ -1067,7 +1113,7 @@ export default function MoneyHubApp({
       isDanger: true,
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
-        startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); });
+        startTransition(async () => { addOptimisticTndMovement({ id, action: 'delete' }); await deleteTndMovement(id); await refreshHubState(); showSuccess('Mouvement supprimé'); });
       },
     });
   };
@@ -1143,7 +1189,7 @@ export default function MoneyHubApp({
       if (isPlanned) data.append('scheduledFor', scheduled!);
       data.append('clientToday', localDayKey());
       const res: any = await createArchiveMovement(data);
-      if (res.success) { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { const wasIn = archiveForm.type === 'IN'; setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal(null); await refreshHubState(); showSuccess(`${wasIn ? 'Entrée' : 'Sortie'} ARCHIVE de ${formatRawCurrency(amount, 'TND')} enregistrée`); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
@@ -1166,11 +1212,14 @@ export default function MoneyHubApp({
       data.append('clientToday', localDayKey());
       const res: any = await createArchiveBatchDisbursement(data);
       if (res.success) {
+        const n = validItems.length;
+        const total = validItems.reduce((sum, it) => sum + it.amount, 0);
         setArchiveBatchItems([{ amount: '', note: '' }]);
         setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' });
         setActiveModal(null);
         await refreshHubState();
-      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+        showSuccess(`${n} sortie${n > 1 ? 's' : ''} ARCHIVE · ${formatRawCurrency(total, 'TND')}`);
+      } else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur');
     });
   };
 
@@ -1182,7 +1231,7 @@ export default function MoneyHubApp({
       confirmText: 'Confirmer',
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
-        startTransition(async () => { await settleArchiveMovement(id); await refreshHubState(); });
+        startTransition(async () => { await settleArchiveMovement(id); await refreshHubState(); showSuccess('Mouvement ARCHIVE confirmé'); });
       },
     });
   };
@@ -1196,6 +1245,7 @@ export default function MoneyHubApp({
         setArchiveNoteEdit(null);
         setArchiveNoteEditError('');
         await refreshHubState();
+        showSuccess('Note ARCHIVE modifiée');
       } else if (res.code) handleSessionExpired(); else setArchiveNoteEditError(res.error || 'Modification impossible');
     });
   };
@@ -1209,7 +1259,7 @@ export default function MoneyHubApp({
       isDanger: true,
       onConfirm: async () => {
         setConfirmModal({ isOpen: false });
-        startTransition(async () => { addOptimisticArchiveMovement({ id, action: 'delete' }); await deleteArchiveMovement(id); await refreshHubState(); });
+        startTransition(async () => { addOptimisticArchiveMovement({ id, action: 'delete' }); await deleteArchiveMovement(id); await refreshHubState(); showSuccess('Mouvement ARCHIVE supprimé'); });
       },
     });
   };
@@ -1240,6 +1290,7 @@ export default function MoneyHubApp({
         setConfirmModal({ isOpen: false });
         await deleteAssistantUser(uid);
         await refreshHubState();
+        showSuccess(`${uname} retiré`);
       },
     });
   };
@@ -1249,8 +1300,8 @@ export default function MoneyHubApp({
     startTransition(async () => {
       const data = new FormData(); data.append('name', inlinePartnerName.trim()); data.append('emoji', '👤'); data.append('country', inlinePartnerCountry.trim());
       const res: any = await createContact(data);
-      if (res.success && res.contact) { await refreshHubState(); setTransactionForm(p => ({ ...p, contactId: res.contact.id })); setInlineNewPartner(false); }
-      else if (res.code) handleSessionExpired(); else alert(res.error);
+      if (res.success && res.contact) { const nm = inlinePartnerName.trim(); await refreshHubState(); setTransactionForm(p => ({ ...p, contactId: res.contact.id })); setInlineNewPartner(false); showSuccess(`Partenaire ${nm} créé`); }
+      else if (res.code) handleSessionExpired(); else showToast('error', res.error);
     });
   };
 
@@ -1259,7 +1310,7 @@ export default function MoneyHubApp({
     startTransition(async () => {
       const data = new FormData(); Object.entries(contactForm).forEach(([k,v]) => data.append(k, v as any));
       const res: any = await createContact(data);
-      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); }
+      if (res.success) { setContactForm({ id: '', name: '', emoji: '👤', country: '', isArchived: false }); setActiveModal(null); await refreshHubState(); showSuccess('Partenaire créé'); }
       else if (res.code) handleSessionExpired(); else alert(res.error);
     });
   };
@@ -1267,7 +1318,7 @@ export default function MoneyHubApp({
   const handleUpdateContact = async (e: React.FormEvent) => {
     e.preventDefault(); if (!contactForm.id || !contactForm.name) return;
     const data = new FormData(); data.append('contactId', contactForm.id); data.append('name', contactForm.name); data.append('emoji', contactForm.emoji); data.append('country', contactForm.country); data.append('isArchived', contactForm.isArchived ? 'true' : 'false');
-    startTransition(async () => { const res: any = await updateContact(data); if (res.success) { setActiveModal(null); await refreshHubState(); } else if (res.code) handleSessionExpired(); else alert(res.error); });
+    startTransition(async () => { const res: any = await updateContact(data); if (res.success) { setActiveModal(null); await refreshHubState(); showSuccess('Partenaire modifié'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); });
   };
 
   const handleConfirmReceived = (r: any) => {
@@ -1280,7 +1331,7 @@ export default function MoneyHubApp({
         return `Marquer ce rappel de ${formatRawCurrency(r.amount, r.currencyCode)} (${r.contact?.name}) comme terminé ? Ceci n'affecte aucun solde.`;
       })(),
       confirmText: 'Confirmer',
-      onConfirm: async () => { startTransition(async () => { const res: any = await confirmReminderReceived(r.id); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); }); }
+      onConfirm: async () => { startTransition(async () => { const res: any = await confirmReminderReceived(r.id); if (res.success) { await refreshHubState(); showSuccess('Mouvement planifié confirmé'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); }); }
     });
   };
 
@@ -1288,7 +1339,7 @@ export default function MoneyHubApp({
   const submitPostpone = async () => {
     if (!postponeTarget || !postponeDate) return;
     const target = postponeTarget; setPostponeTarget(null);
-    startTransition(async () => { const res: any = await postponeReminder(target.id, postponeDate); if (res.success) await refreshHubState(); else if (res.code) handleSessionExpired(); else alert(res.error); });
+    startTransition(async () => { const res: any = await postponeReminder(target.id, postponeDate); if (res.success) { await refreshHubState(); showSuccess('Rappel reporté'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); });
   };
 
   const filteredContacts = useMemo(() => {
@@ -1367,7 +1418,7 @@ export default function MoneyHubApp({
   // Reset inline partner creation whenever the operation modal is not open
   useEffect(() => { if (activeModal !== 'add_tx') { setInlineNewPartner(false); setInlinePartnerName(''); setInlinePartnerCountry(''); } }, [activeModal]);
 
-  const handleDeleteTxLoc = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); }); } }); };
+  const handleDeleteTxLoc = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer ?', description: 'Action auditée.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { addOptimisticTransaction({ id, action: 'delete' }); await deleteHubTransaction(id); await refreshHubState(); showSuccess('Opération supprimée'); }); } }); };
 
   const handleOpenEditContact = (e: any, c: any) => { e.stopPropagation(); setContactForm(c); setActiveModal('edit_contact'); };
 
@@ -2899,8 +2950,8 @@ export default function MoneyHubApp({
                     const form = e.currentTarget;
                     const fd = new FormData(form);
                     const res: any = await createAssistantUser(fd);
-                    if (res.success) { form.reset(); await refreshHubState(); }
-                    else alert(res.error || 'Erreur');
+                    if (res.success) { form.reset(); await refreshHubState(); showSuccess('Compte assistant créé'); }
+                    else showToast('error', res.error || 'Erreur');
                   }} className="flex flex-col gap-4">
                     <input name="username" required minLength={2} placeholder="NOM D'UTILISATEUR" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black uppercase outline-none focus:border-emerald-500/50" />
                     <input name="password" type="password" required minLength={4} placeholder="MOT DE PASSE" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-sm text-white font-black outline-none focus:border-emerald-500/50" />
@@ -2968,7 +3019,7 @@ export default function MoneyHubApp({
                   <p className="text-[11px] font-bold text-neutral-300 leading-relaxed">Bloque instantanément tous les comptes, sessions et accès aux données — y compris les administrateurs. Seuls les identifiants d’urgence créés maintenant pourront ouvrir la console de déverrouillage.</p>
                   <button onClick={() => { setPanicForm({ currentPassword: '', emergencyUsername: '', emergencyPassword: '', emergencyPasswordConfirm: '' }); setPanicError(''); setPanicActivationOpen(true); }} className="py-5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-2xl uppercase text-[11px] tracking-[0.18em] active:scale-95 transition shadow-2xl shadow-rose-900/30 flex items-center justify-center gap-2"><Siren className="h-4 w-4" /> Activer Panic Lock</button>
                 </div>
-                <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); } else alert(res.error); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
+                <div className="p-8 border-2 border-rose-500/20 bg-rose-500/5 rounded-[40px] flex flex-col gap-6 mt-4"><h3 className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Zone de Danger</h3><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Action irréversible. Toutes les données seront effacées.</p><button onClick={() => { setConfirmModal({ isOpen: true, title: 'WIPE TOTAL', isDanger: true, requirePassword: true, description: 'Attention : TOUT sera effacé.', confirmText: 'TOUT EFFACER', onConfirm: async (p: string) => { startTransition(async () => { const res = await resetDatabaseToZero(p); if (res.success) { setSelectedContact(null); setActiveModal(null); await refreshHubState(); showSuccess('Plateforme réinitialisée'); } else showToast('error', res.error || 'Erreur'); }); } }); }} className="py-4 bg-rose-600 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition shadow-2xl">Réinitialiser la plateforme</button></div>
               </>
             )}
           </div>
@@ -3553,7 +3604,7 @@ export default function MoneyHubApp({
               const fd = new FormData(form);
               fd.set('userId', pwdModal.targetId || '');
               const res: any = await changeUserPassword(fd);
-              if (res.success) { form.reset(); setPwdModal({ open: false }); await refreshHubState(); alert('Mot de passe mis à jour'); }
+              if (res.success) { form.reset(); setPwdModal({ open: false }); await refreshHubState(); showSuccess('Mot de passe mis à jour'); }
               else alert(res.error || 'Erreur');
             }} className="flex flex-col gap-4">
               {pwdModal.mode === 'self' && (
@@ -3621,6 +3672,8 @@ export default function MoneyHubApp({
       ); })()}
 
       {/* Ephemeral success / error toast */}
+      {successMark && <SuccessMark key={successMark.id} msg={successMark.msg} />}
+
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 z-[240] bottom-[calc(6rem+env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-sm animate-slide-up" onClick={() => setToast(null)}>
           <div className={`flex items-center gap-3 p-4 rounded-[24px] shadow-2xl ring-1 ring-white/10 border ${toast.kind === 'success' ? 'bg-emerald-500 text-black border-emerald-400' : 'bg-rose-600 text-white border-rose-500'}`}>
