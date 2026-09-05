@@ -227,3 +227,18 @@ body {
   .success-ring, .success-check { animation: none; stroke-dashoffset: 0; }
   .success-halo { animation: none; opacity: 0; }
 }
+
+/* Un clic a cote d'un formulaire rempli ne le ferme plus : le cadre tremble
+   brievement pour dire "ta saisie est intacte, utilise Annuler". */
+@keyframes guard-shake {
+  0%, 100% { transform: translateX(0); }
+  15%  { transform: translateX(-7px); }
+  30%  { transform: translateX(6px); }
+  45%  { transform: translateX(-4px); }
+  60%  { transform: translateX(3px); }
+  80%  { transform: translateX(-1px); }
+}
+.guard-shake { animation: guard-shake 380ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+@media (prefers-reduced-motion: reduce) {
+  .guard-shake { animation: none; outline: 2px solid rgba(52, 211, 153, 0.8); outline-offset: 2px; }
+}

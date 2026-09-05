@@ -487,6 +487,34 @@ export default function MoneyHubApp({
     setToast({ kind, msg });
     setTimeout(() => setToast(null), 3800);
   }, [showSuccess]);
+  // UN CLIC À CÔTÉ NE DOIT PLUS EFFACER UNE SAISIE.
+  //
+  // Tous les formulaires se fermaient au moindre clic hors du cadre — et tout
+  // ce qui était tapé disparaissait. Sur un montant et une note saisis à la
+  // main, c'est une perte sèche, et ça arrive d'autant plus vite au doigt.
+  //
+  // Désormais le clic hors cadre ne ferme QUE si rien n'a été saisi. Dès qu'un
+  // champ contient quelque chose, le clic est ignoré et le cadre tremble : la
+  // saisie reste, et on ferme volontairement par « Annuler » ou la croix.
+  // Quand le formulaire est vide, le comportement ne change pas.
+  const guardBackdrop = useCallback((close: () => void) => (e: React.MouseEvent<HTMLElement>) => {
+    // Un clic qui vient de l'intérieur du cadre ne ferme jamais.
+    if (e.target !== e.currentTarget) return;
+    const panel = e.currentTarget.querySelector<HTMLElement>(':scope > *');
+    const hasInput = (el: Element) => {
+      const f = el as HTMLInputElement;
+      if (f.disabled || f.type === 'checkbox' || f.type === 'radio' || f.type === 'hidden') return false;
+      if (f.type === 'submit' || f.type === 'button') return false;
+      return (f.value || '').trim() !== '';
+    };
+    const filled = !!panel && Array.from(panel.querySelectorAll('input, textarea')).some(hasInput);
+    if (filled) {
+      if (panel) { panel.classList.remove('guard-shake'); void panel.offsetWidth; panel.classList.add('guard-shake'); }
+      return;
+    }
+    close();
+  }, []);
+
   // Pending bank action awaiting explicit confirmation (anti-mistake dialog).
   const [bankConfirm, setBankConfirm] = useState<{ accountId: string; accountName: string; currencyCode: string; type: 'IN' | 'OUT'; amount: number; note: string; count?: number; scheduledFor?: string; run: () => void } | null>(null);
 
@@ -3048,7 +3076,7 @@ export default function MoneyHubApp({
 
       {/* --- MODALS --- */}
       {tndNoteEdit && (
-        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setTndNoteEdit(null); }}>
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => { if (!isPending) setTndNoteEdit(null); })}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-blue-300 uppercase tracking-[0.2em]">Coffre</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setTndNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
             <div className="grid grid-cols-2 gap-3"><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant verrouillé</p><p className={`text-lg font-black mt-1 ${tndNoteEdit.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{tndNoteEdit.type === 'IN' ? '+' : '-'}{formatRawCurrency(tndNoteEdit.amount, 'TND')}</p></div><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type verrouillé</p><p className="text-lg font-black mt-1 text-neutral-200">{tndNoteEdit.type === 'IN' ? 'Entrée' : 'Sortie'}</p></div></div>
@@ -3058,7 +3086,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_tx' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl shadow-emerald-500/5 ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-emerald-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">Nouvelle Opération</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition hover:text-white border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleAddTransaction} className="flex flex-col gap-4">
@@ -3196,7 +3224,7 @@ export default function MoneyHubApp({
         );
       })()}
       {noteModal.open && (
-        <div className="fixed inset-0 z-[170] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setNoteModal({ open: false })}>
+        <div className="fixed inset-0 z-[170] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setNoteModal({ open: false }))}>
           <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-sky-300 min-w-0"><Bell className="h-5 w-5 shrink-0" /><h3 className="font-black uppercase tracking-[0.2em] text-sm truncate">{noteModal.editId ? 'Modifier la note' : 'Nouvelle note'}{noteModal.contactName ? ` · ${noteModal.contactName}` : ''}</h3></div><button onClick={() => setNoteModal({ open: false })} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800 shrink-0"><X className="h-5 w-5" /></button></div>
             <div className="flex items-center gap-3 p-3.5 bg-sky-500/5 border border-sky-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Argent informel <b className="text-sky-300">jamais compté</b> dans les totaux. Juste un rappel visible sur la fiche du partenaire.</p></div>
@@ -3218,7 +3246,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_receivable' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-sky-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-sky-300"><Bell className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">On me doit de l'argent</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <div className="flex items-center gap-3 p-3.5 bg-sky-500/5 border border-sky-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Ce montant reste <b className="text-sky-300">visible mais hors du solde</b>. Quand la personne te rembourse, tape « Récupéré » et il rejoint la caisse.</p></div>
@@ -3231,7 +3259,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'transfer_archive' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-amber-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-amber-300"><ArrowLeftRight className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Transfert Coffre → Archive</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <div className="flex items-center gap-3 p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-2xl"><span className="text-base shrink-0">💡</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Sortie du Coffre TND et entrée dans l'Archive, en une seule opération. Réservé à l'administrateur, mis en évidence dans les deux journaux.</p></div>
@@ -3244,7 +3272,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_tnd' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className={`w-full ${tndForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-blue-500/40 rounded-[48px] p-5 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-blue-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{tndForm.type === 'IN' ? 'Encaisser TND' : 'Décaissement TND'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             {tndForm.type === 'OUT' ? (
@@ -3290,7 +3318,7 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'add_bank_account' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4 text-teal-300"><div className="flex items-center gap-2"><Landmark className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Nouveau compte bancaire</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleCreateBankAccount} className="flex flex-col gap-5">
@@ -3302,7 +3330,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'rename_bank_account' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-4 text-teal-300"><div className="flex items-center gap-2"><Edit className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Renommer le compte</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleRenameBankAccount} className="flex flex-col gap-5">
@@ -3313,7 +3341,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_credit' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => { if (!isPending) setActiveModal(null); }}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => { if (!isPending) setActiveModal(null); })}>
           <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border border-rose-500/40 rounded-[48px] p-5 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-rose-400 px-1">
               <h3 className="font-black uppercase tracking-[0.2em] text-sm">{creditForm.id ? 'Modifier le crédit' : 'Nouveau crédit'}</h3>
@@ -3344,7 +3372,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_bank' && (() => { const bAcc = bankAccounts.find((a:any)=>a.id===selectedBankId); const bp = bAcc ? bankPalette(bAcc.id) : bankPalette('x'); return (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className={`w-full ${bankForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border-2 ${bp.border} rounded-[48px] p-5 sm:p-10 flex flex-col gap-6 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className={`flex justify-between items-center border-b border-neutral-900 pb-5 ${bp.text} px-1`}><h3 className="font-black uppercase tracking-[0.2em] text-sm flex items-center gap-2">{bankForm.type === 'IN' ? <ArrowUpRight className="h-4 w-4 rotate-180" /> : <ArrowUpRight className="h-4 w-4" />} {bankForm.type === 'IN' ? 'Entrée' : 'Sortie'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             {/* Prominent account banner — always visible during the transaction */}
@@ -3384,7 +3412,7 @@ export default function MoneyHubApp({
         </div>
       ); })()}
       {bankNoteEdit && (
-        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setBankNoteEdit(null); }}>
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => { if (!isPending) setBankNoteEdit(null); })}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-teal-300 uppercase tracking-[0.2em]">Banque</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setBankNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
             <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">Seule la note peut être corrigée. Le montant, le type et la date ne changent pas.</p>
@@ -3393,7 +3421,7 @@ export default function MoneyHubApp({
         </div>
       )}
       {activeModal === 'add_archive' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className={`w-full ${archiveForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-amber-500/40 rounded-[48px] p-5 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-amber-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">{archiveForm.type === 'IN' ? 'Encaisser Archive' : 'Décaissement Archive'}</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
             {archiveForm.type === 'OUT' ? (
@@ -3439,7 +3467,7 @@ export default function MoneyHubApp({
       )}
 
       {archiveNoteEdit && (
-        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={() => { if (!isPending) setArchiveNoteEdit(null); }}>
+        <div className="fixed inset-0 z-[180] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => { if (!isPending) setArchiveNoteEdit(null); })}>
           <div className="w-full max-w-md bg-[#080808] border border-neutral-800 rounded-t-[36px] sm:rounded-[36px] p-6 sm:p-7 flex flex-col gap-5 animate-slide-up shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4"><div><p className="text-[9px] font-black text-amber-300 uppercase tracking-[0.2em]">Archive</p><h3 className="text-lg font-black text-white tracking-tight mt-1">Modifier la note</h3></div><button onClick={() => setArchiveNoteEdit(null)} disabled={isPending} className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition"><X className="h-4 w-4" /></button></div>
             <div className="grid grid-cols-2 gap-3"><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Montant verrouillé</p><p className={`text-lg font-black mt-1 ${archiveNoteEdit.type === 'IN' ? 'text-emerald-400' : 'text-rose-400'}`}>{archiveNoteEdit.type === 'IN' ? '+' : '-'}{formatRawCurrency(archiveNoteEdit.amount, 'TND')}</p></div><div className="p-3 bg-neutral-900/70 border border-neutral-800 rounded-2xl"><p className="text-[8px] font-black text-neutral-500 uppercase tracking-widest">Type verrouillé</p><p className="text-lg font-black mt-1 text-neutral-200">{archiveNoteEdit.type === 'IN' ? 'Entrée' : 'Sortie'}</p></div></div>
@@ -3450,7 +3478,7 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'add_contact' && currentUser.role === 'admin' && (
-        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[160] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-7 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5 text-emerald-400 px-1"><h3 className="font-black uppercase tracking-[0.2em] text-sm">Nouveau Partenaire</h3><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 border border-neutral-800 transition hover:text-white"><X className="h-5 w-5" /></button></div>
             <form onSubmit={handleAddContact} className="flex flex-col gap-5">
@@ -3463,7 +3491,7 @@ export default function MoneyHubApp({
       )}
 
       {activeModal === 'edit_contact' && (
-        <div className="fixed inset-0 z-[170] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 shadow-2xl" onClick={() => setActiveModal(null)}>
+        <div className="fixed inset-0 z-[170] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 shadow-2xl" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-blue-500/40 rounded-[52px] p-10 flex flex-col gap-8 animate-scale-in shadow-2xl shadow-blue-500/10 ring-1 ring-blue-500/20" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-6 text-blue-400"><h3 className="font-black uppercase tracking-[0.25em] text-sm">Modification</h3><button onClick={() => setActiveModal(null)} className="p-3 bg-neutral-900 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition shadow-xl active:scale-90"><X className="h-6 w-6" /></button></div>
             <form onSubmit={handleUpdateContact} className="flex flex-col gap-6">
@@ -3581,7 +3609,7 @@ export default function MoneyHubApp({
       )}
 
       {postponeTarget && (
-        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPostponeTarget(null)}>
+        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setPostponeTarget(null))}>
           <div className="w-full max-w-sm bg-[#080808] border border-amber-500/40 rounded-[40px] p-8 flex flex-col gap-6 ring-1 ring-amber-500/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-[0.2em] text-sm text-amber-400 flex items-center gap-2"><CalendarClock className="h-5 w-5" /> Reporter</h3><button onClick={() => setPostponeTarget(null)} className="p-2.5 bg-neutral-900 border border-neutral-800 rounded-full text-neutral-400 hover:text-white transition active:scale-90"><X className="h-5 w-5" /></button></div>
             <p className="text-xs font-bold text-neutral-400 leading-relaxed">Nouveau suivi pour <span className="text-white font-black">{postponeTarget.contact?.name}</span> · {formatRawCurrency(postponeTarget.amount, postponeTarget.currencyCode)}. Vous serez notifié à cette nouvelle date.</p>
@@ -3592,7 +3620,7 @@ export default function MoneyHubApp({
       )}
 
       {pwdModal.open && (
-        <div className="fixed inset-0 z-[210] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPwdModal({ open: false })}>
+        <div className="fixed inset-0 z-[210] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setPwdModal({ open: false }))}>
           <div className="w-full max-w-md bg-[#0a0a0a] border border-neutral-800 rounded-[48px] p-10 flex flex-col gap-6 shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-neutral-900 pb-5">
               <div className="flex items-center gap-3 text-blue-400"><KeyRound className="h-5 w-5" /><h3 className="text-[11px] font-black uppercase tracking-[0.2em]">{pwdModal.mode === 'self' ? 'Changer mon mot de passe' : `Réinitialiser: ${pwdModal.targetName}`}</h3></div>
@@ -3618,7 +3646,7 @@ export default function MoneyHubApp({
       )}
 
       {panicActivationOpen && (
-        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setPanicActivationOpen(false)}>
+        <div className="fixed inset-0 z-[230] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setPanicActivationOpen(false))}>
           <div className="w-full max-w-lg bg-[#0a0a0a] border border-rose-500/30 rounded-[52px] p-9 sm:p-11 flex flex-col gap-7 shadow-2xl shadow-rose-950/40 ring-1 ring-rose-500/10" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start gap-5 border-b border-rose-500/15 pb-6"><div className="flex items-center gap-4"><div className="p-3.5 bg-rose-500/15 rounded-2xl border border-rose-500/30 text-rose-400"><Siren className="h-7 w-7" /></div><div><h3 className="text-lg font-black uppercase text-white tracking-tight">Activer Panic Lock</h3><p className="text-[9px] font-black text-rose-300 uppercase tracking-[0.16em] mt-1">Verrouillage global immédiat</p></div></div><button onClick={() => setPanicActivationOpen(false)} className="p-2.5 rounded-full bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800"><X className="h-4 w-4" /></button></div>
             <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-2xl"><p className="text-[11px] text-neutral-300 font-bold leading-relaxed">Après confirmation, tous les utilisateurs — y compris toi — seront immédiatement déconnectés. Tu pourras revenir uniquement avec les nouveaux identifiants d’urgence ci-dessous.</p></div>
@@ -3635,7 +3663,7 @@ export default function MoneyHubApp({
       )}
 
       {confirmModal.isOpen && (
-        <div className="fixed inset-0 z-[220] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in scale-in duration-300 shadow-2xl" onClick={() => setConfirmModal({isOpen: false})}>
+        <div className="fixed inset-0 z-[220] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in scale-in duration-300 shadow-2xl" onClick={guardBackdrop(() => setConfirmModal({isOpen: false}))}>
           <div className="w-full max-w-sm bg-[#0a0a0a] border border-neutral-800 rounded-[56px] p-12 text-center flex flex-col gap-9 shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             <div className="flex flex-col gap-5 items-center"><div className={`p-6 rounded-[32px] shadow-2xl shadow-rose-900/10 ${confirmModal.isDanger ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'}`}><AlertTriangle className="h-12 w-12" /></div><h3 className="text-2xl font-black uppercase text-white tracking-widest mt-2 leading-tight">{confirmModal.title}</h3><p className="text-[13px] text-neutral-400 font-bold leading-relaxed px-2">{confirmModal.description}</p></div>
             {confirmModal.requirePassword && ( <input type="password" placeholder="MOT DE PASSE ADMIN" className="w-full bg-neutral-900 border border-neutral-800 rounded-[28px] p-6 text-center text-lg outline-none text-white focus:border-rose-500/50 shadow-inner font-black tracking-[0.3em]" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /> )}
@@ -3646,7 +3674,7 @@ export default function MoneyHubApp({
 
       {/* BANK transaction confirmation — anti-mistake dialog (account / type / amount / warning) */}
       {bankConfirm && (() => { const bp = bankPalette(bankConfirm.accountId); const isIn = bankConfirm.type === 'IN'; return (
-        <div className="fixed inset-0 z-[230] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setBankConfirm(null)}>
+        <div className="fixed inset-0 z-[230] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={guardBackdrop(() => setBankConfirm(null))}>
           <div className={`w-full max-w-sm bg-[#0a0a0a] border-2 ${bp.border} rounded-[44px] p-8 flex flex-col gap-6 shadow-2xl ring-1 ring-white/10`} onClick={e => e.stopPropagation()}>
             <div className="flex flex-col items-center text-center gap-3">
               <div className={`p-4 rounded-3xl ${isIn ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border border-rose-500/25'}`}>{isIn ? <ArrowUpRight className="h-9 w-9 rotate-180" /> : <ArrowUpRight className="h-9 w-9" />}</div>
