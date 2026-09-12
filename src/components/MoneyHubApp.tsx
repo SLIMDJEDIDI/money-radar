@@ -691,9 +691,8 @@ export default function MoneyHubApp({
     // alors dire deux choses différentes sans que rien ne le signale. Un compte de
     // caisse doit pouvoir être vérifié au millime près.
     if (curr === 'TND') {
-      const hasMillimes = Math.abs(val - Math.round(val)) > 0.0005;
-      const digits = hasMillimes ? 3 : 0;
-      const amount = groupSep(new Intl.NumberFormat('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(val));
+      // Toujours en dinars, TOUJOURS 3 chiffres après la virgule (les millimes).
+      const amount = groupSep(new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(val));
       return `${amount} DT`;
     }
     const amount = groupSep(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(val));
