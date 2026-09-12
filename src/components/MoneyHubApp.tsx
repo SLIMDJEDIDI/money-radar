@@ -5,7 +5,7 @@ import MoneyHubLogo from './MoneyHubLogo';
 import {
   Plus, ArrowLeftRight, Camera, Search, X, ChevronRight, ChevronLeft, RefreshCw, Clock, ExternalLink, LayoutDashboard, WalletCards, Activity,
   UserPlus, Trash2, Users, Settings, Edit, AlertTriangle, Coins, Calendar, LogOut, Lock, KeyRound,
-  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Receipt, Undo2
+  Sun, Moon, CheckCircle, DollarSign, History, ArrowUpRight, Bell, CalendarClock, ShieldAlert, ShieldCheck, Siren, Archive, Landmark, Receipt, Undo2, Upload
 } from 'lucide-react';
 // Logo Coffre Fort Administration (remplace l'icône Vault de lucide).
 import CoffreIcon from './CoffreIcon';
@@ -24,7 +24,7 @@ import {
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
   ensureCreditTable, createCredit, updateCredit, setCreditPaid, deleteCredit,
   ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
-  createBankMovement, createBankBatchDisbursement, settleBankMovement, updateBankMovementNote, deleteBankMovement,
+  createBankMovement, createBankBatchDisbursement, settleBankMovement, updateBankMovementNote, deleteBankMovement, importBankStatement,
   activatePanicLock, unlockPanicLock
 } from '../app/actions';
 
@@ -1062,6 +1062,44 @@ export default function MoneyHubApp({
       else if (res.code) handleSessionExpired(); else { setBankConfirm(null); showToast('error', res.error || 'Erreur'); }
     });
   };
+  // RELEVÉ BIAT → BANQUE. Deux temps : un aperçu (rien n'est écrit), puis la
+  // confirmation. Ce que la fenêtre annonce est exactement ce qui sera écrit.
+  const bankImportInputRef = useRef<HTMLInputElement>(null);
+  const handleBankImportFile = async (e: React.ChangeEvent<HTMLInputElement>, accountId: string, accountName: string) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('accountId', accountId);
+    fd.append('csv', await file.text());
+    startTransition(async () => {
+      const res: any = await importBankStatement(fd);
+      if (!res.success) { if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Import impossible'); return; }
+      if (res.toImport === 0) { showSuccess(`Relevé déjà à jour · ${accountName}`); return; }
+      const lines = [
+        `${res.toImport} nouvelle${res.toImport > 1 ? 's' : ''} ligne${res.toImport > 1 ? 's' : ''} · net ${res.net > 0 ? '+' : ''}${formatRawCurrency(res.net, 'TND')}.`,
+        `Déjà présentes : ${res.alreadyImported} importée${res.alreadyImported > 1 ? 's' : ''} + ${res.matchedManual} saisie${res.matchedManual > 1 ? 's' : ''} à la main.`,
+        `Ignorées : ${res.beforeOpening} avant l'ouverture du ${new Date(res.openingDay + 'T12:00:00Z').toLocaleDateString('fr-FR')}, ${res.cancelledPairs} blocages qui s'annulent.`,
+        res.manualUnmatched > 0 ? `⚠ ${res.manualUnmatched} saisie${res.manualUnmatched > 1 ? 's' : ''} à la main sans ligne en banque.` : '',
+      ].filter(Boolean).join(' ');
+      setConfirmModal({
+        isOpen: true,
+        title: `Importer ${res.toImport} ligne${res.toImport > 1 ? 's' : ''} dans ${accountName} ?`,
+        description: lines,
+        confirmText: 'Importer',
+        onConfirm: async () => {
+          setConfirmModal({ isOpen: false });
+          fd.set('commit', '1');
+          startTransition(async () => {
+            const r: any = await importBankStatement(fd);
+            if (r.success) { await refreshHubState(); showSuccess(`${r.imported ?? 0} ligne${(r.imported ?? 0) > 1 ? 's' : ''} importée${(r.imported ?? 0) > 1 ? 's' : ''} · ${accountName}`); }
+            else if (r.code) handleSessionExpired(); else showToast('error', r.error || 'Import impossible');
+          });
+        },
+      });
+    });
+  };
+
   const handleSettleBankMovement = (id: string) => { startTransition(async () => { const res: any = await settleBankMovement(id); if (res.success) { await refreshHubState(); showToast('success', 'Mouvement confirmé'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error || 'Erreur'); }); };
   const handleDeleteBankMovement = (id: string) => { setConfirmModal({ isOpen: true, title: 'Supprimer le mouvement ?', description: 'Ce mouvement bancaire sera supprimé définitivement.', confirmText: 'Supprimer', isDanger: true, onConfirm: async () => { startTransition(async () => { const res: any = await deleteBankMovement(id); if (res.success) { await refreshHubState(); showToast('success', 'Mouvement supprimé'); } else if (res.code) handleSessionExpired(); else showToast('error', res.error); }); } }); };
   const handleSaveBankNote = async (e: React.FormEvent) => {
@@ -2459,6 +2497,16 @@ export default function MoneyHubApp({
                     <button onClick={() => { setBankForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal('add_bank'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Entrée</p></button>
                     <button onClick={() => { setBankForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setBankBatchItems([{ amount: '', note: '' }]); setActiveModal('add_bank'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Sortie</p></button>
                   </div>
+
+                  {/* RELEVÉ BIAT — l'admin dépose le CSV téléchargé sur la banque ; seules
+                      les lignes absentes sont ajoutées, avec leur date de banque. */}
+                  {currentUser.role === 'admin' && isBiatAccount(account.name) && (<>
+                    <input ref={bankImportInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => handleBankImportFile(e, account.id, account.name)} />
+                    <button onClick={() => bankImportInputRef.current?.click()} disabled={isPending} className={`w-full min-h-[56px] px-5 py-4 rounded-[24px] border-2 border-dashed ${p.borderSoft} ${p.bgSoft} flex items-center justify-center gap-3 active:scale-[0.98] transition disabled:opacity-40`}>
+                      <Upload className={`h-5 w-5 ${p.text}`} />
+                      <span className={`text-[11px] font-black uppercase tracking-widest ${p.text}`}>Importer un relevé BIAT (CSV)</span>
+                    </button>
+                  </>)}
 
                   {/* FILTERS */}
                   <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">

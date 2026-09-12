@@ -6,6 +6,7 @@ import {
   verifyPassword, hashPassword, needsUpgrade,
   setSessionCookie, clearSessionCookie, requireSession, requireAdmin, getSession, getPanicLockState,
 } from '../lib/auth';
+import { parseBiatCsv, planImport } from '../lib/bank-import';
 
 // --- LOGIQUE D'AUDIT ---
 async function logAudit(tx: any, { entityType, entityId, action, details, oldValue, newValue, modifiedBy }: {
@@ -1290,6 +1291,86 @@ export async function createBankBatchDisbursement(formData: FormData) {
   } catch (error: any) {
     if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Session expirée', code: error.message };
     return { success: false, error: 'Erreur lors de l’enregistrement groupé' };
+  }
+}
+
+// IMPORT D'UN RELEVÉ BIAT (CSV « DétailsTransactions ») — admin uniquement.
+//
+// Sans `commit` c'est un APERÇU : rien n'est écrit, l'écran annonce exactement ce
+// qui le serait. Avec `commit`, le plan est recalculé DANS la transaction, sur
+// les mouvements du moment — un double clic ne peut pas importer deux fois.
+//
+// Chaque ligne garde sa date de banque et porte une marque ⟦B:…⟧ dans sa note :
+// réimporter le même relevé, ou un relevé plus long, n'ajoute que le nouveau.
+// Les saisies faites à la main sont reconnues (même montant, à 4 jours près) et
+// ne sont jamais doublées ; rien de ce qui existe déjà n'est modifié.
+export async function importBankStatement(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const accountId = String(formData.get('accountId') || '').trim();
+    const csv = String(formData.get('csv') || '');
+    const commit = formData.get('commit') === '1';
+    if (!accountId || !csv) return { success: false, error: 'Compte ou fichier manquant' };
+    if (csv.length > 5_000_000) return { success: false, error: 'Fichier trop lourd' };
+
+    const acc = await prisma.hubBankAccount.findUnique({ where: { id: accountId } });
+    if (!acc) return { success: false, error: 'Compte bancaire introuvable' };
+
+    let statement;
+    try { statement = parseBiatCsv(csv); } catch (e: any) { return { success: false, error: e?.message || 'Relevé illisible' }; }
+    // Garde-fou : le relevé de VLT MOTORS ne doit jamais tomber dans VOLTROP.
+    const want = acc.name.replace(/^BIAT\s+/i, '').trim().toUpperCase();
+    if (!statement.accountTitle.toUpperCase().includes(want)) {
+      return { success: false, error: `Ce relevé est celui de « ${statement.accountTitle} », pas de ${acc.name}` };
+    }
+
+    const plan = async (db: typeof prisma | any) => {
+      const existing = await db.hubBankMovement.findMany({ where: { accountId }, orderBy: { createdAt: 'asc' } });
+      if (existing.length === 0) return null;
+      // Le jour du solde de départ : la banque y a déjà tout compté.
+      const openingDay = existing[0].createdAt.toISOString().slice(0, 10);
+      return { openingDay, ...planImport(statement.lines, existing, openingDay) };
+    };
+
+    const preview = await plan(prisma);
+    if (!preview) return { success: false, error: 'Saisissez d’abord le solde de départ du compte' };
+    const summary = {
+      openingDay: preview.openingDay, toImport: preview.toImport.length, net: preview.net,
+      alreadyImported: preview.alreadyImported.length, matchedManual: preview.matchedManual.length,
+      beforeOpening: preview.beforeOpening.length, cancelledPairs: preview.cancelledPairs.length,
+      manualUnmatched: preview.manualUnmatched.length,
+    };
+    if (!commit || preview.toImport.length === 0) return { success: true, preview: true, ...summary };
+
+    const written = await prisma.$transaction(async (tx) => {
+      const p = await plan(tx);
+      if (!p || p.toImport.length === 0) return { count: 0, net: 0 };
+      await tx.hubBankMovement.createMany({
+        data: p.toImport.map((l) => ({
+          accountId,
+          amount: Math.abs(l.amount),
+          type: l.amount > 0 ? 'IN' : 'OUT',
+          note: `${l.type} — ${l.description} (réf ${l.ref}) ${l.tag}`,
+          performedBy: session.username,
+          isSettled: true,
+          scheduledFor: null,
+          // Midi UTC : le même jour calendaire à Tunis comme partout ailleurs.
+          createdAt: new Date(`${l.date}T12:00:00.000Z`),
+        })),
+      });
+      await logAudit(tx, {
+        entityType: 'BANK', entityId: accountId, action: 'BANK_IMPORT',
+        details: `Import relevé BIAT ${acc.name} : ${p.toImport.length} ligne(s), net ${p.net} (après le ${p.openingDay})`,
+        newValue: JSON.stringify(p.toImport.map((l) => ({ date: l.date, amount: l.amount, ref: l.ref, tag: l.tag }))),
+        modifiedBy: session.username,
+      });
+      return { count: p.toImport.length, net: p.net };
+    });
+    revalidatePath('/');
+    return { success: true, imported: written.count, importedNet: written.net, ...summary };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l’administrateur', code: error.message };
+    return { success: false, error: 'Import impossible' };
   }
 }
 
