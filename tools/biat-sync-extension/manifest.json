@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "BIAT -> MONEY HUB sync",
+  "version": "1.0",
+  "description": "Se connecte a MyBIAT Corporate et envoie les nouvelles lignes a MONEY HUB, chaque heure. Ne stocke aucun mot de passe.",
+  "permissions": ["alarms", "tabs"],
+  "host_permissions": [
+    "https://authcorporate.mybiat.tn/*",
+    "https://onlinecorporate.mybiat.tn/*",
+    "https://money-radar-six.vercel.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Sync BIAT maintenant" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://authcorporate.mybiat.tn/*",
+        "https://onlinecorporate.mybiat.tn/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

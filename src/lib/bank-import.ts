@@ -81,6 +81,38 @@ export function parseBiatCsv(text: string): ParsedStatement {
   return { iban: (rows[1][cIban] || '').trim(), accountTitle: (rows[1][cTitle] || '').trim(), lines };
 }
 
+// Une ligne telle que l'API MyBIAT Corporate la renvoie
+// (/api/transaction-manager/client-api/v2/transactions).
+export type BiatJsonRow = {
+  reference?: string;
+  bookingDate?: string;   // « YYYY-MM-DD » — date d'opération
+  valueDate?: string;
+  creditDebitIndicator?: string;
+  description?: string;
+  typeGroup?: string;
+  type?: string;
+  transactionAmountCurrency?: { amount?: string | number };
+};
+
+// Même sortie que parseBiatCsv : le serveur traite le JSON exactement comme le CSV.
+// La clé (date|réf|montant) est identique, donc une ligne prise par l'API et la même
+// ligne prise par le CSV portent la MÊME marque : aucune n'est comptée deux fois.
+export function parseBiatJson(input: { accountTitle?: string; iban?: string; rows: BiatJsonRow[] }): ParsedStatement {
+  const lines: BankLine[] = (input.rows || []).map((r, n) => {
+    const date = (r.bookingDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Ligne ${n + 1} : date illisible « ${date} »`);
+    const raw = r.transactionAmountCurrency?.amount;
+    const amount = round3(Number(raw)); // déjà signé : + crédit, − débit
+    if (!Number.isFinite(amount) || amount === 0) throw new Error(`Ligne ${n + 1} : montant illisible « ${raw} »`);
+    const ref = (r.reference || '').trim();
+    const description = (r.description || '').replace(/\\n/g, ' · ').replace(/\s+/g, ' ').replace(/[·\s*]+$/, '').trim();
+    const type = (r.typeGroup || r.type || '').trim();
+    const key = `${date}|${ref}|${amount.toFixed(3)}`;
+    return { date, amount, ref, type, description, key, tag: `⟦B:${shortHash(key)}⟧` };
+  });
+  return { iban: (input.iban || '').trim(), accountTitle: (input.accountTitle || '').trim(), lines };
+}
+
 export type ImportPlan = {
   toImport: BankLine[];
   alreadyImported: BankLine[];
