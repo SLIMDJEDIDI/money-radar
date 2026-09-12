@@ -9,11 +9,15 @@
   //    champ « soit rempli ». On laisse a Chrome le temps de remplir, puis on
   //    clique. L'extension ne lit ni ne stocke le mot de passe.
   if (host === 'authcorporate.mybiat.tn') {
-    for (let i = 0; i < 24; i++) {
+    // Le bouton demande DEUX clics (le 1er valide la saisie auto de Chrome, le
+    // 2e envoie). On laisse Chrome remplir, puis on clique en boucle tant qu'on
+    // reste sur la page de connexion : dès que ça part, location.host change et
+    // la boucle s'arrête. Un clic « à vide » avant le remplissage est sans effet.
+    await sleep(1500);
+    for (let i = 0; i < 8 && location.host === 'authcorporate.mybiat.tn'; i++) {
       const btn = document.querySelector('button[type=submit], input[type=submit]');
-      const pw = document.querySelector('input[type=password]');
-      if (btn && pw) { await sleep(1200); btn.click(); return; }
-      await sleep(500);
+      if (btn) btn.click();
+      await sleep(1500);
     }
     return;
   }
