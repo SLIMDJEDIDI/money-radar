@@ -20,7 +20,7 @@ import {
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote, createTndReceivable,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
-  transferTreasuryToArchive,
+  transferTreasuryToArchive, transferCoffreToDevise,
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
   ensureCreditTable, createCredit, updateCredit, setCreditPaid, deleteCredit,
   ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
@@ -559,6 +559,7 @@ export default function MoneyHubApp({
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
   const [transferForm, setTransferForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
+  const [deviseForm, setDeviseForm] = useState<{ contactId: string; amount: string; rate: string; currencyCode: string; note: string }>({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
   const [receivableForm, setReceivableForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
   const [tndNoteEditError, setTndNoteEditError] = useState('');
@@ -957,6 +958,29 @@ export default function MoneyHubApp({
       if (res.success) { setTransferForm({ amount: '', note: '' }); setActiveModal(null); await refreshHubState(); showSuccess(`Transfert de ${formatRawCurrency(amount, 'TND')} vers l'Archive`); }
       else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
       void amount;
+    });
+  };
+
+  const handleTransferToDevise = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const tnd = parseFloat(deviseForm.amount);
+    const rate = parseFloat(deviseForm.rate);
+    if (!deviseForm.contactId || !deviseForm.note.trim() || !(tnd > 0) || !(rate > 0)) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('contactId', deviseForm.contactId);
+      data.append('amountTnd', deviseForm.amount);
+      data.append('rate', deviseForm.rate);
+      data.append('currencyCode', deviseForm.currencyCode);
+      data.append('note', deviseForm.note);
+      const res: any = await transferCoffreToDevise(data);
+      if (res.success) {
+        const dev = res.deviseAmount ?? tnd / rate;
+        setDeviseForm({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
+        setActiveModal(null);
+        await refreshHubState();
+        showSuccess(`Coffre → Devise · ${formatRawCurrency(tnd, 'TND')} → ${dev} ${res.currencyCode || deviseForm.currencyCode}`);
+      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
 
@@ -2266,7 +2290,10 @@ export default function MoneyHubApp({
               </div>
 
               {currentUser.role === 'admin' && (
-                <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+                <div className="flex flex-col gap-4">
+                  <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+                  <button onClick={() => { setDeviseForm({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' }); setActiveModal('transfer_devise'); }} className="w-full p-5 bg-gradient-to-r from-teal-500/15 to-emerald-500/15 border border-teal-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-teal-500/60 shadow-lg shadow-teal-950/10"><Coins className="h-5 w-5 text-teal-300" /><p className="text-[11px] font-black uppercase tracking-widest text-teal-200">Transfert Coffre → Devise</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+                </div>
               )}
 
               {/* CRÉANCES — one connected module: action + list share the same visual container */}
@@ -3315,6 +3342,34 @@ export default function MoneyHubApp({
               <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Montant (TND)</label><input type="number" step="any" required autoFocus placeholder="0" value={transferForm.amount} onChange={e => setTransferForm(p => ({ ...p, amount: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-5 text-3xl font-black text-white outline-none focus:border-amber-500/50 shadow-inner tracking-tighter" /></div>
               <input type="text" required placeholder="NOTE OBLIGATOIRE (TRACABILITÉ)" value={transferForm.note} onChange={e => setTransferForm(p => ({ ...p, note: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white outline-none focus:border-amber-500/40 shadow-inner" />
               <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !transferForm.amount || !transferForm.note.trim()} className="flex-[2] py-5 bg-amber-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-amber-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Transférer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      {activeModal === 'transfer_devise' && currentUser.role === 'admin' && (
+        <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
+          <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-teal-300"><Coins className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Transfert Coffre → Devise</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-teal-500/5 border border-teal-500/20 rounded-2xl"><span className="text-base shrink-0">💱</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Sortie du Coffre en TND, portée en devise sur l'« Encaissé » du partenaire. Réservé à l'administrateur, tracé dans les deux journaux.</p></div>
+            <form onSubmit={handleTransferToDevise} className="flex flex-col gap-5">
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Partenaire</label>
+                <select required value={deviseForm.contactId} onChange={e => setDeviseForm(p => ({ ...p, contactId: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-sm text-white outline-none focus:border-teal-500/50 shadow-inner">
+                  <option value="">— Choisir un partenaire —</option>
+                  {contacts.filter((c: any) => !c.isArchived).map((c: any) => <option key={c.id} value={c.id}>{c.emoji ? c.emoji + ' ' : ''}{c.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Montant (TND)</label><input type="number" step="any" required autoFocus placeholder="0" value={deviseForm.amount} onChange={e => setDeviseForm(p => ({ ...p, amount: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-2xl font-black text-white outline-none focus:border-teal-500/50 shadow-inner tracking-tighter" /></div>
+                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Devise</label>
+                  <select value={deviseForm.currencyCode} onChange={e => setDeviseForm(p => ({ ...p, currencyCode: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-sm text-white outline-none focus:border-teal-500/50 shadow-inner h-full">
+                    {(() => { const codes = Array.from(new Set(['USD', ...((initialActiveCurrencies || []).filter((c: any) => c.code !== 'TND').map((c: any) => c.code))])); return codes.map((code) => <option key={code} value={code}>{code}</option>); })()}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Taux · TND pour 1 {deviseForm.currencyCode}</label><input type="number" step="any" required placeholder="0" value={deviseForm.rate} onChange={e => setDeviseForm(p => ({ ...p, rate: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-xl font-black text-white outline-none focus:border-teal-500/50 shadow-inner tracking-tighter" /></div>
+              {(() => { const t = parseFloat(deviseForm.amount), r = parseFloat(deviseForm.rate); return (t > 0 && r > 0) ? <div className="flex items-center justify-between p-3.5 bg-teal-500/10 border border-teal-500/30 rounded-2xl"><span className="text-[10px] font-black text-teal-300 uppercase tracking-widest">Reçu chez le partenaire</span><span className="text-lg font-black text-teal-200 tracking-tighter">{Math.round((t / r) * 1000) / 1000} {deviseForm.currencyCode}</span></div> : null; })()}
+              <input type="text" required placeholder="NOTE OBLIGATOIRE (TRACABILITÉ)" value={deviseForm.note} onChange={e => setDeviseForm(p => ({ ...p, note: e.target.value }))} className="bg-neutral-950 border border-neutral-800 rounded-[20px] p-5 text-sm text-white outline-none focus:border-teal-500/40 shadow-inner" />
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setActiveModal(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !deviseForm.contactId || !(parseFloat(deviseForm.amount) > 0) || !(parseFloat(deviseForm.rate) > 0) || !deviseForm.note.trim()} className="flex-[2] py-5 bg-teal-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Transférer</button></div>
             </form>
           </div>
         </div>

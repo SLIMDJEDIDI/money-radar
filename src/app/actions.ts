@@ -1090,6 +1090,72 @@ export async function transferTreasuryToArchive(formData: FormData) {
   }
 }
 
+const TREASURY_DEVISE_TAG = '⇄ TRANSFERT COFFRE→DEVISE';
+
+// Coffre (TND) -> devise détenue chez un partenaire (« Encaissé »). Admin only.
+// L'utilisateur saisit le TND qui SORT du Coffre et le taux (TND pour 1 unité de
+// devise). Devise reçue = TND / taux. Elle augmente le heldBalanceUsd du
+// partenaire, converti en USD via le taux de la devise — exactement le même
+// chemin qu'une opération HELD (createHubTransaction), pour rester synchronisé
+// avec le reste de la plateforme. Deux écritures : sortie Coffre + Encaissé.
+export async function transferCoffreToDevise(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const contactId = String(formData.get('contactId') || '').trim();
+    const amountTnd = parseFloat(formData.get('amountTnd') as string);
+    const rate = parseFloat(formData.get('rate') as string);
+    const currencyCode = String(formData.get('currencyCode') || 'USD').trim() || 'USD';
+    const note = (formData.get('note') as string || '').trim();
+
+    if (!contactId) return { success: false, error: 'Choisissez un partenaire' };
+    if (!note) return { success: false, error: 'La note est obligatoire pour la traçabilité' };
+    if (!isFinite(amountTnd) || amountTnd <= 0) return { success: false, error: 'Montant TND invalide' };
+    if (!isFinite(rate) || rate <= 0) return { success: false, error: 'Taux de change invalide' };
+
+    const contact = await prisma.hubContact.findUnique({ where: { id: contactId } });
+    if (!contact) return { success: false, error: 'Partenaire introuvable' };
+
+    const deviseAmount = Math.round((amountTnd / rate) * 100000) / 100000; // devise reçue
+    const currency = await prisma.hubCurrency.findUnique({ where: { code: currencyCode } });
+    const currRate = currency ? currency.rateToUsd : (currencyCode === 'USD' ? 1 : 1);
+    const amountInUsd = deviseAmount * currRate;
+
+    const taggedNote = `${TREASURY_DEVISE_TAG} · ${amountTnd} TND @ ${rate} = ${deviseAmount} ${currencyCode} · ${note}`;
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Sortie du Coffre en TND.
+      const out = await tx.hubTndMovement.create({
+        data: { amount: amountTnd, type: 'OUT', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: true },
+      });
+      // 2. Devise détenue chez le partenaire (« Encaissé » +), même chemin qu'un HELD.
+      const trx = await tx.hubTransaction.create({
+        data: { amount: deviseAmount, currencyCode, amountInUsd, contactId, type: 'HELD', category: 'Change Coffre→Devise', note: taggedNote },
+      });
+      const h = contact.heldBalanceUsd + amountInUsd;
+      await tx.hubContact.update({
+        where: { id: contactId },
+        data: { heldBalanceUsd: h, netPositionUsd: h + contact.receivableBalanceUsd - contact.payableBalanceUsd },
+      });
+      await logAudit(tx, {
+        entityType: 'TREASURY', entityId: out.id, action: 'TND_TRANSFER_DEVISE',
+        details: `Change ${amountTnd} TND du Coffre → ${deviseAmount} ${currencyCode} détenu chez ${contact.name} (taux ${rate}): ${note}`,
+        modifiedBy: session.username,
+      });
+      await logAudit(tx, {
+        entityType: 'TRANSACTION', entityId: trx.id, action: 'CREATE',
+        details: `${deviseAmount} ${currencyCode} (Encaissé, depuis le Coffre) pour ${contact.name}`,
+        newValue: JSON.stringify({ amountTnd, rate, deviseAmount, currencyCode, amountInUsd }),
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, deviseAmount, currencyCode };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
+    return { success: false, error: 'Erreur lors du transfert' };
+  }
+}
+
 // ----------------------------------------------------
 // 5d. BANQUE — multiple named bank accounts (assistant-visible, like Trésorerie)
 // ----------------------------------------------------
