@@ -2,17 +2,15 @@
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const host = location.host;
+  // Balise de diagnostic : dit au serveur ou on en est. Rien de sensible.
+  const beacon = (stage, extra) => { try { chrome.runtime.sendMessage({ type: 'biat-debug', stage, extra: extra == null ? null : String(extra).slice(0, 120) }); } catch (e) {} };
 
   // 1) PAGE DE CONNEXION : cliquer « Connexion ». Chrome remplit identifiant et
-  //    mot de passe, mais il CACHE la valeur du mot de passe aux scripts tant
-  //    qu'il n'y a pas eu d'interaction : on ne peut donc pas attendre que le
-  //    champ « soit rempli ». On laisse a Chrome le temps de remplir, puis on
-  //    clique. L'extension ne lit ni ne stocke le mot de passe.
+  //    mot de passe mais CACHE la valeur aux scripts ; on ne peut donc pas
+  //    attendre que « ce soit rempli ». Le bouton demande DEUX clics (1er valide
+  //    la saisie auto, 2e envoie) : on clique en boucle tant qu'on reste ici.
   if (host === 'authcorporate.mybiat.tn') {
-    // Le bouton demande DEUX clics (le 1er valide la saisie auto de Chrome, le
-    // 2e envoie). On laisse Chrome remplir, puis on clique en boucle tant qu'on
-    // reste sur la page de connexion : dès que ça part, location.host change et
-    // la boucle s'arrête. Un clic « à vide » avant le remplissage est sans effet.
+    beacon('login-page', location.pathname);
     await sleep(1500);
     for (let i = 0; i < 8 && location.host === 'authcorporate.mybiat.tn'; i++) {
       const btn = document.querySelector('button[type=submit], input[type=submit]');
@@ -22,27 +20,41 @@
     return;
   }
 
-  // 2) APPLICATION : attendre le jeton, lire les comptes puis leurs mouvements,
-  //    et passer le tout au service worker (qui postera vers MONEY HUB).
+  // 2) APPLICATION : jeton -> (choix societe si demande) -> comptes -> mouvements.
   if (host === 'onlinecorporate.mybiat.tn') {
     let tok = null;
-    for (let i = 0; i < 40; i++) {
-      tok = localStorage.getItem('access_token');
-      if (tok) break;
-      await sleep(500);
-    }
-    if (!tok) return;
+    for (let i = 0; i < 40; i++) { tok = localStorage.getItem('access_token'); if (tok) break; await sleep(500); }
+    if (!tok) { beacon('no-token', location.pathname); return; }
+    beacon('token-ok', location.pathname);
 
     const H = { credentials: 'include', headers: { Accept: 'application/json', Authorization: 'Bearer ' + tok } };
     const AR = '/api/arrangement-manager/client-api/v2/productsummary/context/arrangements'
       + '?withLatestBalances=true&businessFunction=Product%20Summary&resourceName=Product%20Summary'
       + '&privilege=view&productKindName=Savings%20Account%2CCurrent%20Account&searchTerm=&favoriteFirst=true&from=0&size=50';
 
-    let arr = [];
-    try {
-      const j = await (await fetch(AR, H)).json();
-      arr = Array.isArray(j) ? j : (j.arrangementItems || j.items || j.data || []);
-    } catch (e) { return; }
+    // Ecran « choisir la societe » : cliquer la carte de la societe (jamais un
+    // bouton deconnexion). ponytail: heuristique par texte, a affiner si MyBIAT
+    // change ses libelles.
+    if (/select-context/.test(location.pathname)) {
+      beacon('select-context');
+      await sleep(1500);
+      const cands = [...document.querySelectorAll('button, [role=button], a, li, .mat-list-item, .card, div')]
+        .filter((e) => /voltrop|motors|societe|société/i.test(e.innerText || '') && (e.innerText || '').trim().length < 80);
+      for (const c of cands.slice(0, 4)) { try { c.click(); } catch (e) {} await sleep(1000); if (!/select-context/.test(location.pathname)) break; }
+      await sleep(2000);
+    }
+
+    // Comptes : reessayer, le contexte peut mettre un instant a s'appliquer.
+    let arr = [], lastStatus = 0;
+    for (let i = 0; i < 6; i++) {
+      try {
+        const r = await fetch(AR, H); lastStatus = r.status;
+        if (r.status === 200) { const j = await r.json(); arr = Array.isArray(j) ? j : (j.arrangementItems || j.items || j.data || []); if (arr.length) break; }
+      } catch (e) {}
+      await sleep(1500);
+    }
+    if (!arr.length) { beacon('no-accounts', 'httpStatus=' + lastStatus); return; }
+    beacon('accounts', arr.length);
 
     const accounts = [];
     for (const a of arr) {
@@ -55,11 +67,9 @@
           '/api/transaction-manager/client-api/v2/transactions?arrangementsIds=' + id +
           '&from=0&size=400&orderBy=bookingDate&direction=DESC', H)).json();
         if (Array.isArray(rows) && rows.length) accounts.push({ accountTitle: title, iban, rows });
-      } catch (e) { /* compte suivant */ }
+      } catch (e) {}
     }
-
-    if (accounts.length) {
-      try { chrome.runtime.sendMessage({ type: 'biat-data', accounts }); } catch (e) {}
-    }
+    beacon('read', accounts.map((a) => a.accountTitle + ':' + a.rows.length).join(' | '));
+    if (accounts.length) { try { chrome.runtime.sendMessage({ type: 'biat-data', accounts }); } catch (e) {} }
   }
 })();

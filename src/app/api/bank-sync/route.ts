@@ -39,6 +39,19 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => null);
+
+    // Balise de diagnostic envoyee par l'extension : on la journalise et on sort.
+    if (body && body.debug !== undefined) {
+      await prisma.hubAuditTrail.create({
+        data: {
+          entityType: 'BANK', entityId: null, action: 'BANK_SYNC_DEBUG',
+          details: `DEBUG ${String(body.debug).slice(0, 60)}${body.extra ? ' | ' + String(body.extra).slice(0, 120) : ''}`,
+          modifiedBy: 'auto-sync',
+        },
+      });
+      return NextResponse.json({ success: true, debug: true }, { headers: CORS });
+    }
+
     const accounts: any[] | null = Array.isArray(body?.accounts)
       ? body.accounts
       : (body?.rows ? [{ accountTitle: body.accountTitle, iban: body.iban, rows: body.rows }] : null);
