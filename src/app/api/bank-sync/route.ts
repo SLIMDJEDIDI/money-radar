@@ -86,28 +86,32 @@ export async function POST(req: Request) {
         if (existing.length === 0) return { skipped: 'solde de départ manquant' as const };
         const openingDay = existing[0].createdAt.toISOString().slice(0, 10);
         const p = planImport(statement.lines, existing, openingDay);
-        if (p.toImport.length === 0) return { count: 0, net: 0, openingDay };
-        await tx.hubBankMovement.createMany({
-          data: p.toImport.map((l) => ({
-            accountId: acc.id,
-            amount: Math.abs(l.amount),
-            type: l.amount > 0 ? 'IN' : 'OUT',
-            note: `${l.type} — ${l.description} (réf ${l.ref}) ${l.tag}`,
-            performedBy: 'auto-sync',
-            isSettled: true,
-            scheduledFor: null,
-            createdAt: new Date(`${l.date}T12:00:00.000Z`),
-          })),
-        });
+        if (p.toImport.length > 0) {
+          await tx.hubBankMovement.createMany({
+            data: p.toImport.map((l) => ({
+              accountId: acc.id,
+              amount: Math.abs(l.amount),
+              type: l.amount > 0 ? 'IN' : 'OUT',
+              note: `${l.type} — ${l.description} (réf ${l.ref}) ${l.tag}`,
+              performedBy: 'auto-sync',
+              isSettled: true,
+              scheduledFor: null,
+              createdAt: new Date(`${l.date}T12:00:00.000Z`),
+            })),
+          });
+        }
+        // Toujours tracer le resultat, meme 0 ligne : preuve que la synchro a
+        // tourne et ce que planImport a decide (nouvelles, deja la, saisies).
         await tx.hubAuditTrail.create({
           data: {
             entityType: 'BANK', entityId: acc.id, action: 'BANK_SYNC',
-            details: `Sync auto BIAT ${acc.name} : ${p.toImport.length} ligne(s), net ${p.net} (après le ${openingDay})`,
-            newValue: JSON.stringify(p.toImport.map((l) => ({ date: l.date, amount: l.amount, ref: l.ref, tag: l.tag }))),
+            details: `Sync auto BIAT ${acc.name} : ${p.toImport.length} nouvelle(s), ${p.alreadyImported.length} deja la, ${p.matchedManual.length} saisie(s), ${p.beforeOpening.length} avant ouverture (net ${p.net}, après le ${openingDay})`,
+            newValue: p.toImport.length ? JSON.stringify(p.toImport.map((l) => ({ date: l.date, amount: l.amount, ref: l.ref, tag: l.tag }))) : null,
             modifiedBy: 'auto-sync',
           },
         });
-        return { count: p.toImport.length, net: p.net, openingDay };
+        return { count: p.toImport.length, net: p.net, openingDay,
+          alreadyImported: p.alreadyImported.length, matchedManual: p.matchedManual.length, beforeOpening: p.beforeOpening.length };
       });
 
       results.push({ account: acc.name, ...written });
