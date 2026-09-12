@@ -3,18 +3,19 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const host = location.host;
 
-  // 1) PAGE DE CONNEXION : cliquer « Connexion » UNE fois que Chrome a rempli le
-  //    mot de passe. On ne clique jamais tant que le champ est vide (sinon on
-  //    tenterait une connexion sans mot de passe). L'extension ne lit ni ne
-  //    stocke le mot de passe : c'est Chrome qui le remplit.
+  // 1) PAGE DE CONNEXION : cliquer « Connexion ». Chrome remplit identifiant et
+  //    mot de passe, mais il CACHE la valeur du mot de passe aux scripts tant
+  //    qu'il n'y a pas eu d'interaction : on ne peut donc pas attendre que le
+  //    champ « soit rempli ». On laisse a Chrome le temps de remplir, puis on
+  //    clique. L'extension ne lit ni ne stocke le mot de passe.
   if (host === 'authcorporate.mybiat.tn') {
     for (let i = 0; i < 24; i++) {
-      const pw = document.querySelector('input[type=password]');
       const btn = document.querySelector('button[type=submit], input[type=submit]');
-      if (pw && pw.value && btn) { btn.click(); return; }
+      const pw = document.querySelector('input[type=password]');
+      if (btn && pw) { await sleep(1200); btn.click(); return; }
       await sleep(500);
     }
-    return; // pas de mot de passe enregistre -> rien a faire
+    return;
   }
 
   // 2) APPLICATION : attendre le jeton, lire les comptes puis leurs mouvements,
