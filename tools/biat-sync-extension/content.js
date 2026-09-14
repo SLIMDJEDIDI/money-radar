@@ -2,13 +2,16 @@
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const host = location.host;
-  // Balise de diagnostic : dit au serveur ou on en est. Rien de sensible.
   const beacon = (stage, extra) => { try { chrome.runtime.sendMessage({ type: 'biat-debug', stage, extra: extra == null ? null : String(extra).slice(0, 120) }); } catch (e) {} };
+  // Signale au service worker que ce script a fini (succes OU abandon) : il fermera
+  // l'onglet SI c'est l'extension qui l'a ouvert. Un onglet ouvert par l'utilisateur
+  // n'est jamais dans sa liste, donc jamais ferme.
+  const done = () => { try { chrome.runtime.sendMessage({ type: 'biat-done' }); } catch (e) {} };
 
   // 1) PAGE DE CONNEXION : cliquer « Connexion ». Chrome remplit identifiant et
-  //    mot de passe mais CACHE la valeur aux scripts ; on ne peut donc pas
-  //    attendre que « ce soit rempli ». Le bouton demande DEUX clics (1er valide
-  //    la saisie auto, 2e envoie) : on clique en boucle tant qu'on reste ici.
+  //    mot de passe mais CACHE la valeur aux scripts ; le bouton demande DEUX
+  //    clics. On clique en boucle tant qu'on reste ici ; si on n'arrive pas a
+  //    partir (echec connexion), on abandonne et on demande la fermeture.
   if (host === 'authcorporate.mybiat.tn') {
     beacon('login-page', location.pathname);
     await sleep(1500);
@@ -17,6 +20,7 @@
       if (btn) btn.click();
       await sleep(1500);
     }
+    if (location.host === 'authcorporate.mybiat.tn') { beacon('login-stuck'); done(); }
     return;
   }
 
@@ -24,7 +28,7 @@
   if (host === 'onlinecorporate.mybiat.tn') {
     let tok = null;
     for (let i = 0; i < 40; i++) { tok = localStorage.getItem('access_token'); if (tok) break; await sleep(500); }
-    if (!tok) { beacon('no-token', location.pathname); return; }
+    if (!tok) { beacon('no-token', location.pathname); done(); return; }
     beacon('token-ok', location.pathname);
 
     const H = { credentials: 'include', headers: { Accept: 'application/json', Authorization: 'Bearer ' + tok } };
@@ -32,9 +36,6 @@
       + '?withLatestBalances=true&businessFunction=Product%20Summary&resourceName=Product%20Summary'
       + '&privilege=view&productKindName=Savings%20Account%2CCurrent%20Account&searchTerm=&favoriteFirst=true&from=0&size=50';
 
-    // Ecran « choisir la societe » : cliquer la carte de la societe (jamais un
-    // bouton deconnexion). ponytail: heuristique par texte, a affiner si MyBIAT
-    // change ses libelles.
     if (/select-context/.test(location.pathname)) {
       beacon('select-context');
       await sleep(1500);
@@ -44,7 +45,6 @@
       await sleep(2000);
     }
 
-    // Comptes : reessayer, le contexte peut mettre un instant a s'appliquer.
     let arr = [], lastStatus = 0;
     for (let i = 0; i < 6; i++) {
       try {
@@ -53,7 +53,7 @@
       } catch (e) {}
       await sleep(1500);
     }
-    if (!arr.length) { beacon('no-accounts', 'httpStatus=' + lastStatus); return; }
+    if (!arr.length) { beacon('no-accounts', 'httpStatus=' + lastStatus); done(); return; }
     beacon('accounts', arr.length);
 
     const accounts = [];
@@ -70,6 +70,9 @@
       } catch (e) {}
     }
     beacon('read', accounts.map((a) => a.accountTitle + ':' + a.rows.length).join(' | '));
+    // biat-data fait poster ET fermer l'onglet cote service worker. done() en
+    // filet si aucun compte lisible.
     if (accounts.length) { try { chrome.runtime.sendMessage({ type: 'biat-data', accounts }); } catch (e) {} }
+    else done();
   }
 })();
