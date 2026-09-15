@@ -1098,7 +1098,12 @@ const TREASURY_DEVISE_TAG = '⇄ TRANSFERT COFFRE→DEVISE';
 // partenaire, converti en USD via le taux de la devise — exactement le même
 // chemin qu'une opération HELD (createHubTransaction), pour rester synchronisé
 // avec le reste de la plateforme. Deux écritures : sortie Coffre + Encaissé.
-export async function transferCoffreToDevise(formData: FormData) {
+const ARCHIVE_DEVISE_TAG = '⇄ TRANSFERT ARCHIVE→DEVISE';
+
+// Un seul chemin d'argent pour les deux boutons : seule la caisse de départ
+// change (Coffre = HubTndMovement, Archive = HubArchiveMovement). Tout le reste
+// — devise reçue, « Encaissé » du partenaire, audit — est identique.
+async function runDeviseTransfer(source: 'COFFRE' | 'ARCHIVE', formData: FormData) {
   try {
     const session = await requireAdmin();
     const contactId = String(formData.get('contactId') || '').trim();
@@ -1120,16 +1125,19 @@ export async function transferCoffreToDevise(formData: FormData) {
     const currRate = currency ? currency.rateToUsd : (currencyCode === 'USD' ? 1 : 1);
     const amountInUsd = deviseAmount * currRate;
 
-    const taggedNote = `${TREASURY_DEVISE_TAG} · ${amountTnd} TND @ ${rate} = ${deviseAmount} ${currencyCode} · ${note}`;
+    const isArchive = source === 'ARCHIVE';
+    const boxName = isArchive ? 'l\'Archive' : 'le Coffre';
+    const taggedNote = `${isArchive ? ARCHIVE_DEVISE_TAG : TREASURY_DEVISE_TAG} · ${amountTnd} TND @ ${rate} = ${deviseAmount} ${currencyCode} · ${note}`;
 
     await prisma.$transaction(async (tx) => {
-      // 1. Sortie du Coffre en TND.
-      const out = await tx.hubTndMovement.create({
-        data: { amount: amountTnd, type: 'OUT', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: true },
-      });
+      // 1. Sortie en TND de la caisse de départ.
+      const outData = { amount: amountTnd, type: 'OUT', note: taggedNote, performedBy: session.username, scheduledFor: null, isSettled: true };
+      const out = isArchive
+        ? await tx.hubArchiveMovement.create({ data: outData })
+        : await tx.hubTndMovement.create({ data: outData });
       // 2. Devise détenue chez le partenaire (« Encaissé » +), même chemin qu'un HELD.
       const trx = await tx.hubTransaction.create({
-        data: { amount: deviseAmount, currencyCode, amountInUsd, contactId, type: 'HELD', category: 'Change Coffre→Devise', note: taggedNote },
+        data: { amount: deviseAmount, currencyCode, amountInUsd, contactId, type: 'HELD', category: isArchive ? 'Change Archive→Devise' : 'Change Coffre→Devise', note: taggedNote },
       });
       const h = contact.heldBalanceUsd + amountInUsd;
       await tx.hubContact.update({
@@ -1137,14 +1145,15 @@ export async function transferCoffreToDevise(formData: FormData) {
         data: { heldBalanceUsd: h, netPositionUsd: h + contact.receivableBalanceUsd - contact.payableBalanceUsd },
       });
       await logAudit(tx, {
-        entityType: 'TREASURY', entityId: out.id, action: 'TND_TRANSFER_DEVISE',
-        details: `Change ${amountTnd} TND du Coffre → ${deviseAmount} ${currencyCode} détenu chez ${contact.name} (taux ${rate}): ${note}`,
+        entityType: isArchive ? 'ARCHIVE' : 'TREASURY', entityId: out.id,
+        action: isArchive ? 'ARCH_TRANSFER_DEVISE' : 'TND_TRANSFER_DEVISE',
+        details: `Change ${amountTnd} TND depuis ${boxName} → ${deviseAmount} ${currencyCode} détenu chez ${contact.name} (taux ${rate}): ${note}`,
         modifiedBy: session.username,
       });
       await logAudit(tx, {
         entityType: 'TRANSACTION', entityId: trx.id, action: 'CREATE',
-        details: `${deviseAmount} ${currencyCode} (Encaissé, depuis le Coffre) pour ${contact.name}`,
-        newValue: JSON.stringify({ amountTnd, rate, deviseAmount, currencyCode, amountInUsd }),
+        details: `${deviseAmount} ${currencyCode} (Encaissé, depuis ${boxName}) pour ${contact.name}`,
+        newValue: JSON.stringify({ source, amountTnd, rate, deviseAmount, currencyCode, amountInUsd }),
         modifiedBy: session.username,
       });
     });
@@ -1155,6 +1164,9 @@ export async function transferCoffreToDevise(formData: FormData) {
     return { success: false, error: 'Erreur lors du transfert' };
   }
 }
+
+export async function transferCoffreToDevise(formData: FormData) { return runDeviseTransfer('COFFRE', formData); }
+export async function transferArchiveToDevise(formData: FormData) { return runDeviseTransfer('ARCHIVE', formData); }
 
 // ----------------------------------------------------
 // 5d. BANQUE — multiple named bank accounts (assistant-visible, like Trésorerie)

@@ -20,7 +20,7 @@ import {
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote, createTndReceivable,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
-  transferTreasuryToArchive, transferCoffreToDevise,
+  transferTreasuryToArchive, transferCoffreToDevise, transferArchiveToDevise,
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
   ensureCreditTable, createCredit, updateCredit, setCreditPaid, deleteCredit,
   ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
@@ -559,7 +559,7 @@ export default function MoneyHubApp({
   const [tndForm, setTndForm] = useState<{ amount: string; type: string; note: string; scheduledFor?: string }>({ amount: '', type: 'IN', note: '', scheduledFor: '' });
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
   const [transferForm, setTransferForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
-  const [deviseForm, setDeviseForm] = useState<{ contactId: string; amount: string; rate: string; currencyCode: string; note: string }>({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
+  const [deviseForm, setDeviseForm] = useState<{ source: 'COFFRE' | 'ARCHIVE'; contactId: string; amount: string; rate: string; currencyCode: string; note: string }>({ source: 'COFFRE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
   const [receivableForm, setReceivableForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
   const [tndNoteEditError, setTndNoteEditError] = useState('');
@@ -966,6 +966,7 @@ export default function MoneyHubApp({
     const tnd = parseFloat(deviseForm.amount);
     const rate = parseFloat(deviseForm.rate);
     if (!deviseForm.contactId || !deviseForm.note.trim() || !(tnd > 0) || !(rate > 0)) return;
+    const fromArchive = deviseForm.source === 'ARCHIVE';
     startTransition(async () => {
       const data = new FormData();
       data.append('contactId', deviseForm.contactId);
@@ -973,13 +974,13 @@ export default function MoneyHubApp({
       data.append('rate', deviseForm.rate);
       data.append('currencyCode', deviseForm.currencyCode);
       data.append('note', deviseForm.note);
-      const res: any = await transferCoffreToDevise(data);
+      const res: any = fromArchive ? await transferArchiveToDevise(data) : await transferCoffreToDevise(data);
       if (res.success) {
         const dev = res.deviseAmount ?? tnd / rate;
-        setDeviseForm({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
+        setDeviseForm({ source: 'COFFRE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
         setActiveModal(null);
         await refreshHubState();
-        showSuccess(`Coffre → Devise · ${formatRawCurrency(tnd, 'TND')} → ${dev} ${res.currencyCode || deviseForm.currencyCode}`);
+        showSuccess(`${fromArchive ? 'Archive' : 'Coffre'} → Devise · ${formatRawCurrency(tnd, 'TND')} → ${dev} ${res.currencyCode || deviseForm.currencyCode}`);
       } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
@@ -2292,7 +2293,8 @@ export default function MoneyHubApp({
               {currentUser.role === 'admin' && (
                 <div className="flex flex-col gap-4">
                   <button onClick={() => { setTransferForm({ amount: '', note: '' }); setActiveModal('transfer_archive'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><ArrowLeftRight className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Transfert Coffre → Archive</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
-                  <button onClick={() => { setDeviseForm({ contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' }); setActiveModal('transfer_devise'); }} className="w-full p-5 bg-gradient-to-r from-teal-500/15 to-emerald-500/15 border border-teal-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-teal-500/60 shadow-lg shadow-teal-950/10"><Coins className="h-5 w-5 text-teal-300" /><p className="text-[11px] font-black uppercase tracking-widest text-teal-200">Transfert Coffre → Devise</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+                  <button onClick={() => { setDeviseForm({ source: 'COFFRE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' }); setActiveModal('transfer_devise'); }} className="w-full p-5 bg-gradient-to-r from-teal-500/15 to-emerald-500/15 border border-teal-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-teal-500/60 shadow-lg shadow-teal-950/10"><Coins className="h-5 w-5 text-teal-300" /><p className="text-[11px] font-black uppercase tracking-widest text-teal-200">Transfert Coffre → Devise</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
+                  <button onClick={() => { setDeviseForm({ source: 'ARCHIVE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' }); setActiveModal('transfer_devise'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-teal-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><Coins className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-teal-200">Transfert Archive → Devise</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
                 </div>
               )}
 
@@ -2724,6 +2726,8 @@ export default function MoneyHubApp({
                 <button onClick={() => { setArchiveForm({ amount: '', type: 'IN', note: '', scheduledFor: '' }); setActiveModal('add_archive'); }} className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-emerald-500/20"><div className="p-3 bg-emerald-500/20 rounded-2xl group-hover:scale-110 transition"><Plus className="h-6 w-6 text-emerald-400" /></div><p className="text-[10px] font-black uppercase text-emerald-400">Encaisser TND</p></button>
                 <button onClick={() => { setArchiveForm({ amount: '', type: 'OUT', note: '', scheduledFor: '' }); setArchiveBatchItems([{ amount: '', note: '' }]); setActiveModal('add_archive'); }} className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-[32px] flex flex-col items-center gap-3 active:scale-95 transition group hover:bg-rose-500/20"><div className="p-3 bg-rose-500/20 rounded-2xl group-hover:scale-110 transition rotate-45"><Plus className="h-6 w-6 text-rose-400" /></div><p className="text-[10px] font-black uppercase text-rose-400">Décaissement</p></button>
               </div>
+
+              <button onClick={() => { setDeviseForm({ source: 'ARCHIVE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' }); setActiveModal('transfer_devise'); }} className="w-full p-5 bg-gradient-to-r from-amber-500/15 to-teal-500/15 border border-amber-500/30 rounded-[28px] flex items-center justify-center gap-3 active:scale-[0.98] transition hover:border-amber-500/60 shadow-lg shadow-amber-950/10"><Coins className="h-5 w-5 text-amber-300" /><p className="text-[11px] font-black uppercase tracking-widest text-teal-200">Transfert Archive → Devise</p><span className="text-[8px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 rounded-md">Admin</span></button>
 
               <div className="flex flex-col gap-3 p-5 bg-neutral-900/40 border border-neutral-800 rounded-[32px]">
                 <div className="relative"><Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500 pointer-events-none" /><input value={archiveSearch} onChange={e => setArchiveSearch(e.target.value)} placeholder="Rechercher note, montant, utilisateur…" className="w-full pl-12 pr-4 py-3.5 bg-neutral-950 border border-neutral-800 rounded-2xl text-sm text-white outline-none focus:border-amber-500/40" /></div>
@@ -3349,8 +3353,8 @@ export default function MoneyHubApp({
       {activeModal === 'transfer_devise' && currentUser.role === 'admin' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className="w-full max-w-sm max-h-[92vh] overflow-y-auto bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-teal-300"><Coins className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Transfert Coffre → Devise</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
-            <div className="flex items-center gap-3 p-3.5 bg-teal-500/5 border border-teal-500/20 rounded-2xl"><span className="text-base shrink-0">💱</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Sortie du Coffre en TND, portée en devise sur l'« Encaissé » du partenaire. Réservé à l'administrateur, tracé dans les deux journaux.</p></div>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-teal-300"><Coins className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Transfert {deviseForm.source === 'ARCHIVE' ? 'Archive' : 'Coffre'} → Devise</h3></div><button onClick={() => setActiveModal(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-teal-500/5 border border-teal-500/20 rounded-2xl"><span className="text-base shrink-0">💱</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Sortie {deviseForm.source === 'ARCHIVE' ? "de l'Archive" : 'du Coffre'} en TND, portée en devise sur l'« Encaissé » du partenaire. Réservé à l'administrateur, tracé dans les deux journaux.</p></div>
             <form onSubmit={handleTransferToDevise} className="flex flex-col gap-5">
               <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Partenaire</label>
                 <select required value={deviseForm.contactId} onChange={e => setDeviseForm(p => ({ ...p, contactId: e.target.value }))} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-sm text-white outline-none focus:border-teal-500/50 shadow-inner">
