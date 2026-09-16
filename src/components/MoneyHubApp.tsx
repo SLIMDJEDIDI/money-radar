@@ -20,7 +20,7 @@ import {
   changeUserPassword, createAssistantUser, deleteAssistantUser,
   createTndMovement, deleteTndMovement, settleTndMovement, createTndBatchDisbursement, updateTndMovementNote, createTndReceivable,
   createArchiveMovement, deleteArchiveMovement, settleArchiveMovement, createArchiveBatchDisbursement, updateArchiveMovementNote, ensureArchiveTable, migrateArchivePartnerToLedger, retireArchivePartner, ensureReminderPlannedType,
-  transferTreasuryToArchive, transferCoffreToDevise, transferArchiveToDevise,
+  transferTreasuryToArchive, transferCoffreToDevise, transferArchiveToDevise, editDeviseTransferRate,
   createPartnerNote, updatePartnerNote, deletePartnerNote, ensurePartnerNoteTable,
   ensureCreditTable, createCredit, updateCredit, setCreditPaid, deleteCredit,
   ensureBankTables, createBankAccount, renameBankAccount, deleteBankAccount,
@@ -560,6 +560,7 @@ export default function MoneyHubApp({
   const [tndBatchItems, setTndBatchItems] = useState<Array<{ amount: string; note: string }>>([{ amount: '', note: '' }]);
   const [transferForm, setTransferForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [deviseForm, setDeviseForm] = useState<{ source: 'COFFRE' | 'ARCHIVE'; contactId: string; amount: string; rate: string; currencyCode: string; note: string }>({ source: 'COFFRE', contactId: '', amount: '', rate: '', currencyCode: 'USD', note: '' });
+  const [rateEdit, setRateEdit] = useState<{ txId: string; amountTnd: number; currencyCode: string; oldRate: number; newRate: string } | null>(null);
   const [receivableForm, setReceivableForm] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
   const [tndNoteEdit, setTndNoteEdit] = useState<{ id: string; note: string; amount: number; type: string } | null>(null);
   const [tndNoteEditError, setTndNoteEditError] = useState('');
@@ -981,6 +982,27 @@ export default function MoneyHubApp({
         setActiveModal(null);
         await refreshHubState();
         showSuccess(`${fromArchive ? 'Archive' : 'Coffre'} → Devise · ${formatRawCurrency(tnd, 'TND')} → ${dev} ${res.currencyCode || deviseForm.currencyCode}`);
+      } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
+    });
+  };
+
+  const openRateEdit = (t: any) => {
+    const m = String(t.note || '').match(/· ([\d.]+) TND @ ([\d.]+) = /);
+    if (!m) return;
+    setRateEdit({ txId: t.id, amountTnd: parseFloat(m[1]), currencyCode: t.currencyCode, oldRate: parseFloat(m[2]), newRate: String(parseFloat(m[2])) });
+  };
+  const handleEditDeviseRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rateEdit || !(parseFloat(rateEdit.newRate) > 0)) return;
+    startTransition(async () => {
+      const data = new FormData();
+      data.append('txId', rateEdit.txId);
+      data.append('rate', rateEdit.newRate);
+      const res: any = await editDeviseTransferRate(data);
+      if (res.success) {
+        setRateEdit(null);
+        await refreshHubState();
+        showSuccess(`Taux corrigé · ${res.newDevise} ${res.currencyCode || rateEdit.currencyCode}`);
       } else if (res.code) handleSessionExpired(); else alert(res.error || 'Erreur');
     });
   };
@@ -3378,6 +3400,20 @@ export default function MoneyHubApp({
           </div>
         </div>
       )}
+      {rateEdit && (
+        <div className="fixed inset-0 z-[170] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#080808] border border-teal-500/40 rounded-[40px] p-8 flex flex-col gap-6 animate-scale-in shadow-2xl ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-neutral-900 pb-4"><div className="flex items-center gap-2 text-teal-300"><Coins className="h-5 w-5" /><h3 className="font-black uppercase tracking-[0.2em] text-sm">Corriger le taux</h3></div><button onClick={() => setRateEdit(null)} className="p-2.5 rounded-full bg-neutral-900 transition border border-neutral-800"><X className="h-5 w-5" /></button></div>
+            <div className="flex items-center gap-3 p-3.5 bg-teal-500/5 border border-teal-500/20 rounded-2xl"><span className="text-base shrink-0">💱</span><p className="text-[11px] font-bold text-neutral-400 leading-relaxed">Le TND sorti de la caisse ne change pas. On recalcule seulement la devise reçue et l'« Encaissé » du partenaire avec le vrai taux.</p></div>
+            <form onSubmit={handleEditDeviseRate} className="flex flex-col gap-5">
+              <div className="flex items-center justify-between p-3.5 bg-neutral-900/50 border border-neutral-800 rounded-2xl"><span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Montant sorti</span><span className="text-base font-black text-white tracking-tighter">{formatRawCurrency(rateEdit.amountTnd, 'TND')}</span></div>
+              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-1">Nouveau taux · TND pour 1 {rateEdit.currencyCode}</label><input type="number" step="any" required autoFocus placeholder="0" value={rateEdit.newRate} onChange={e => setRateEdit(p => p ? { ...p, newRate: e.target.value } : p)} className="bg-neutral-900 border border-neutral-800 rounded-[20px] p-4 text-2xl font-black text-white outline-none focus:border-teal-500/50 shadow-inner tracking-tighter" /></div>
+              {(() => { const r = parseFloat(rateEdit.newRate); return (r > 0) ? <div className="flex items-center justify-between p-3.5 bg-teal-500/10 border border-teal-500/30 rounded-2xl"><span className="text-[10px] font-black text-teal-300 uppercase tracking-widest">Reçu chez le partenaire</span><span className="text-lg font-black text-teal-200 tracking-tighter">{Math.round((rateEdit.amountTnd / r) * 1000) / 1000} {rateEdit.currencyCode}</span></div> : null; })()}
+              <div className="flex gap-4 mt-1"><button type="button" onClick={() => setRateEdit(null)} className="flex-1 py-5 bg-neutral-900 text-neutral-400 font-black rounded-[24px] uppercase transition active:scale-95 border border-neutral-800 tracking-widest text-xs">Annuler</button><button type="submit" disabled={isPending || !(parseFloat(rateEdit.newRate) > 0)} className="flex-[2] py-5 bg-teal-500 text-black font-black rounded-[24px] uppercase shadow-2xl shadow-teal-500/30 active:scale-95 transition tracking-widest text-xs disabled:opacity-40">Corriger</button></div>
+            </form>
+          </div>
+        </div>
+      )}
       {activeModal === 'add_tnd' && (
         <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={guardBackdrop(() => setActiveModal(null))}>
           <div className={`w-full ${tndForm.type === 'OUT' ? 'max-w-2xl' : 'max-w-sm'} max-h-[92vh] overflow-y-auto bg-[#080808] border border-blue-500/40 rounded-[48px] p-5 sm:p-10 flex flex-col gap-7 animate-scale-in shadow-2xl`} onClick={e => e.stopPropagation()}>
@@ -3661,7 +3697,7 @@ export default function MoneyHubApp({
                 return <div className="flex flex-col gap-3">{shown.slice(0,30).map((t:any) => {
                   const st = getTransactionTypeStyle(t.type); const dotColor = st.style === 'blue' ? 'bg-blue-500' : st.style === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500'; const txtColor = st.style === 'blue' ? 'text-blue-400' : st.style === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
                   return (
-                    <div key={t.id} className="group relative p-4 pl-5 bg-neutral-900/30 border border-neutral-800 rounded-3xl flex justify-between items-center gap-3 hover:border-neutral-700 hover:bg-neutral-900/50 transition"><span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${dotColor}`} /><div className="flex flex-col gap-1 min-w-0"><p className="text-sm font-black text-neutral-100 uppercase tracking-tight truncate">{t.category}</p><p className={`text-[10px] font-black uppercase tracking-widest ${txtColor}`}>{st.label}</p><p className="text-[10px] text-neutral-600 font-black uppercase mt-0.5">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div><div className="text-right flex flex-col gap-0.5 shrink-0"><p className="text-base font-black text-white tracking-tighter leading-none break-words">{formatRawCurrency(t.amount, t.currencyCode)}</p>{t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}</div><button onClick={() => handleDeleteTxLoc(t.id)} className="p-2 text-rose-500/30 hover:text-rose-500 active:scale-90 transition shrink-0"><Trash2 className="h-4 w-4" /></button></div>
+                    <div key={t.id} className="group relative p-4 pl-5 bg-neutral-900/30 border border-neutral-800 rounded-3xl flex justify-between items-center gap-3 hover:border-neutral-700 hover:bg-neutral-900/50 transition"><span className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${dotColor}`} /><div className="flex flex-col gap-1 min-w-0"><p className="text-sm font-black text-neutral-100 uppercase tracking-tight truncate">{t.category}</p><p className={`text-[10px] font-black uppercase tracking-widest ${txtColor}`}>{st.label}</p><p className="text-[10px] text-neutral-600 font-black uppercase mt-0.5">{new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div><div className="text-right flex flex-col gap-0.5 shrink-0"><p className="text-base font-black text-white tracking-tighter leading-none break-words">{formatRawCurrency(t.amount, t.currencyCode)}</p>{t.currencyCode !== 'USD' && <p className="text-[10px] text-neutral-500 font-black tracking-tight">≈ {formatUSD(t.amountInUsd)}</p>}</div><div className="flex items-center shrink-0">{currentUser.role === 'admin' && String(t.category || '').startsWith('Change ') && <button onClick={() => openRateEdit(t)} title="Corriger le taux" className="p-2 text-teal-500/40 hover:text-teal-400 active:scale-90 transition shrink-0"><Edit className="h-4 w-4" /></button>}<button onClick={() => handleDeleteTxLoc(t.id)} className="p-2 text-rose-500/30 hover:text-rose-500 active:scale-90 transition shrink-0"><Trash2 className="h-4 w-4" /></button></div></div>
                   );
                 })}</div>;
               })()}

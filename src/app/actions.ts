@@ -1168,6 +1168,61 @@ async function runDeviseTransfer(source: 'COFFRE' | 'ARCHIVE', formData: FormDat
 export async function transferCoffreToDevise(formData: FormData) { return runDeviseTransfer('COFFRE', formData); }
 export async function transferArchiveToDevise(formData: FormData) { return runDeviseTransfer('ARCHIVE', formData); }
 
+// Corriger le TAUX d'un change Coffre/Archive → Devise APRÈS coup (le vrai taux
+// n'est connu qu'à l'arrivée des fonds). Le TND sorti de la caisse ne change PAS
+// (l'argent est déjà parti) : seuls la devise reçue et l'« Encaissé » du
+// partenaire sont recalculés. Admin only. On lit le TND d'origine dans la note
+// (format que nous seuls écrivons) — refus si ce n'est pas un change.
+export async function editDeviseTransferRate(formData: FormData) {
+  try {
+    const session = await requireAdmin();
+    const txId = String(formData.get('txId') || '').trim();
+    const newRate = parseFloat(formData.get('rate') as string);
+    if (!txId) return { success: false, error: 'Opération manquante' };
+    if (!isFinite(newRate) || newRate <= 0) return { success: false, error: 'Taux invalide' };
+
+    const t = await prisma.hubTransaction.findUnique({ where: { id: txId }, include: { contact: true } });
+    if (!t) return { success: false, error: 'Opération introuvable' };
+
+    const m = (t.note || '').match(/^(.*?) · ([\d.]+) TND @ [\d.]+ = [\d.]+ \S+ · ([\s\S]*)$/);
+    if (!m) return { success: false, error: "Cette opération n'est pas un change à taux modifiable" };
+    const tagPart = m[1]; const amountTnd = parseFloat(m[2]); const userNote = m[3];
+    if (!isFinite(amountTnd) || amountTnd <= 0) return { success: false, error: 'Montant TND illisible' };
+
+    const currency = await prisma.hubCurrency.findUnique({ where: { code: t.currencyCode } });
+    const currRate = currency ? currency.rateToUsd : (t.currencyCode === 'USD' ? 1 : 1);
+    const newDevise = Math.round((amountTnd / newRate) * 100000) / 100000;
+    const newUsd = newDevise * currRate;
+    const oldNote = t.note || '';
+    const newNote = `${tagPart} · ${amountTnd} TND @ ${newRate} = ${newDevise} ${t.currencyCode} · ${userNote}`;
+    const isArchive = /ARCHIVE→DEVISE/.test(tagPart);
+
+    await prisma.$transaction(async (tx) => {
+      const c = t.contact;
+      // « Encaissé » : retirer l'ancien montant USD, poser le nouveau.
+      const h = c.heldBalanceUsd - t.amountInUsd + newUsd;
+      await tx.hubContact.update({ where: { id: c.id }, data: { heldBalanceUsd: h, netPositionUsd: h + c.receivableBalanceUsd - c.payableBalanceUsd } });
+      await tx.hubTransaction.update({ where: { id: txId }, data: { amount: newDevise, amountInUsd: newUsd, note: newNote } });
+      // Note du mouvement de caisse jumeau (même note d'origine) — le MONTANT TND
+      // reste identique, seul le texte du taux est rafraîchi.
+      if (isArchive) await tx.hubArchiveMovement.updateMany({ where: { note: oldNote }, data: { note: newNote } });
+      else await tx.hubTndMovement.updateMany({ where: { note: oldNote }, data: { note: newNote } });
+      await logAudit(tx, {
+        entityType: 'TRANSACTION', entityId: txId, action: 'UPDATE',
+        details: `Taux du change corrigé pour ${c.name} : ${amountTnd} TND → ${newDevise} ${t.currencyCode} (taux ${newRate})`,
+        oldValue: JSON.stringify({ amount: t.amount, amountInUsd: t.amountInUsd, note: oldNote }),
+        newValue: JSON.stringify({ amount: newDevise, amountInUsd: newUsd, rate: newRate, note: newNote }),
+        modifiedBy: session.username,
+      });
+    });
+    revalidatePath('/');
+    return { success: true, newDevise, currencyCode: t.currencyCode };
+  } catch (error: any) {
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') return { success: false, error: 'Action réservée à l\'administrateur', code: error.message };
+    return { success: false, error: 'Erreur lors de la modification du taux' };
+  }
+}
+
 // ----------------------------------------------------
 // 5d. BANQUE — multiple named bank accounts (assistant-visible, like Trésorerie)
 // ----------------------------------------------------
